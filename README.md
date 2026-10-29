@@ -319,5 +319,72 @@ node 统计常驻.mjs
 ## 📚 架构与设计文档导航
 
 - **玩法架构全景总览（首推入口）**：[`docs/Architecture/Gameplay Structure/README.md`](docs/Architecture/Gameplay%20Structure/README.md)
+- **前端与结算引擎代码分层架构**：[`docs/Architecture/Code Architecture/README.md`](docs/Architecture/Code%20Architecture/README.md)
+- **TauriTavern 原生扩展适配规范**：[`docs/Architecture/TaruiTavern/README.md`](docs/Architecture/TaruiTavern/README.md)
 - **跨玩法依赖与验收边界清单**：[`docs/Architecture/Gameplay Structure/09-跨玩法依赖设计差距与验收清单.md`](docs/Architecture/Gameplay%20Structure/09-跨玩法依赖设计差距与验收清单.md)
-- **原始系统设计案合集（19 份）**：[`docs/design/systems/`](docs/design/systems/)
+- **世界书文风与注入分层编写规范**：[`docs/reference/`](docs/reference/)
+- **原始系统设计案合集**：[`docs/design/systems/`](docs/design/systems/)
+
+---
+
+## 🤝 参与贡献与 Pull Request 指南（Contributing）
+
+欢迎各位指挥官与开发者参与《全域战略指挥系统》的世界书扩充、机娘与武备设定补充、DLC 样板创作以及前端/规则引擎迭代！为保障战局存档兼容性与主干稳定性，请遵循以下协作规范：
+
+### 1. 分支模型（Branching Model）
+
+本仓库采用 **`main` + `dev` 双主干分支模型**：
+
+| 分支 | 保护策略 | 用途与定位 |
+| :--- | :--- | :--- |
+| **`main`** | 🔒 **受保护分支**（禁止 Force Push / 禁止删除 / 需经 PR 合入） | **稳定发布分支**：面向玩家的默认克隆源与 `一键更新.bat` 正式版拉取源，同步维护 [`version.json`](version.json) 版本清单。 |
+| **`dev`** | 🔓 日常开发集成分支 | **开发集成分支**：所有新功能、世界书扩充、数值调优与 Bug 修复均在此分支汇合联调。 |
+| **`feat/*` · `fix/*` · `wb/*`** | 临时特性/修复分支 | 开发者从最新 **`dev`** 切出的工作分支，合并后由仓库自动清理。 |
+
+> ⚠️ **PR 目标分支约定**：发起 Pull Request 时，请务必将基准分支（Base branch）指向 **`dev`**，**不要**直接向 `main` 发起日常开发 PR（`main` 仅用于阶段性版本发布合入与紧急热修）。
+
+### 2. 标准 Pull Request 提交流程
+
+```bash
+# 1. Fork 本仓库并克隆到本地，切换至 dev 分支
+git checkout dev
+git pull origin dev
+
+# 2. 基于最新 dev 创建特性分支（按改动类型选择前缀）
+#    - feat/xxx : 前端或结算引擎新特性
+#    - fix/xxx  : 缺陷修复与边界加固
+#    - wb/xxx   : 世界书条目、机娘档案、武备或世界适配扩充
+#    - docs/xxx : 架构文档或 README 改进
+git checkout -b feat/your-feature-name
+
+# 3. 完成修改并执行下方「提交前必跑自检」后，提交规范化的 Commit
+git add .
+git commit -m "feat(mvu): 简要说明本次改动内容与目的"
+
+# 4. 推送至您的远端分支，并在 GitHub 上向本仓库的 dev 分支发起 Pull Request
+git push -u origin feat/your-feature-name
+```
+
+### 3. 提交前必跑自检（Pre-PR Checklist）
+
+发起 PR 前，请根据您修改的模块在本地完成对应自检，并在 PR 描述中附上通过截图或日志摘要：
+
+- **若修改了 `worldbooks/` 或 `samples/dlc/`（世界书与扩展包）**：
+  1. 请先阅读 [`docs/reference/`](docs/reference/) 下的《世界书文风与受控质感编写规范》与《世界书注入分层与 depth-position 规范》；
+  2. 在仓库根目录执行格式与 `<数据>` JSON 契约校验，确保 **0 Error**：
+     ```bash
+     node 校验世界书.mjs
+     node 统计常驻.mjs
+     ```
+- **若修改了 `mvu指挥系统/`（Vue 3 前端界面、S0～S6 解析管线或 MVU 结算引擎）**：
+  1. 请遵循 [`docs/Architecture/Code Architecture/00_架构总览与目录分层规范.md`](docs/Architecture/Code%20Architecture/00_架构总览与目录分层规范.md) 的目录职责边界；
+  2. 在 `mvu指挥系统/` 目录下跑通单元测试与生产构建：
+     ```bash
+     cd mvu指挥系统
+     pnpm test
+     pnpm build
+     ```
+- **仓库卫生红线（严禁入库项）**：
+  - 严禁提交本地私人环境配置（`env.yaml`）、API 密钥/代理脚本、个人酒馆聊天记录（`酒馆聊天/`）或本地构建产物（`mvu指挥系统/dist/`）；
+  - 若涉及战局 `stat_data` 存档结构的不兼容变更，必须在 PR 中显式标注 `BREAKING SAVE CHANGE`，并提供对应的确定性迁移逻辑与单测用例。
+
