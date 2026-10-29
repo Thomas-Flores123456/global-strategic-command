@@ -2,8 +2,8 @@
   "project": "SillyTavern-世界观构建",
   "version": "2.4.0",
   "save_schema": 2,
-  "updated_at": "2026-10-28",
-  "manifest_url": "",
+  "updated_at": "2026-10-29",
+  "manifest_url": "https://raw.githubusercontent.com/Thomas-Flores123456/global-strategic-command/main/version.json",
   "releases": [
     {
       "version": "2.4.0",
