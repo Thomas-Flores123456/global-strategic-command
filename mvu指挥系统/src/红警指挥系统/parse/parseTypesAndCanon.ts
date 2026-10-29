@@ -616,6 +616,12 @@ export function resolveVocab(name: string, vocab: string[]): string | null {
     宏观演变: '世界演变',
     world_evolution: '世界演变',
     worldevolution: '世界演变',
+    调配: '事件',
+    单位调配: '事件',
+    部队调动: '事件',
+    驻地调动: '事件',
+    单位迁移: '事件',
+    unit_transfer: '事件',
   };
   if (TAG_SYNONYMS[c]) return TAG_SYNONYMS[c];
   const within1 = vocab.filter(v => editDistance(c, v) <= 1);
@@ -1234,10 +1240,32 @@ export type EventVerb =
   | '协议排程'
   | '副官指派'
   | 'MCV展开'
-  | 'MCV收起';
+  | 'MCV收起'
+  | '单位调配';
 
-/** 实体类别（资金链 / 势力 / 情报 / 任务 / 协议 / 副官 / 部署） */
-export type EventEntityKind = 'chain' | 'faction' | 'intel' | 'quest' | 'protocol' | 'adjutant' | 'deploy';
+/** 实体类别（资金链 / 势力 / 情报 / 任务 / 协议 / 副官 / 部署 / 调配） */
+export type EventEntityKind =
+  | 'chain'
+  | 'faction'
+  | 'intel'
+  | 'quest'
+  | 'protocol'
+  | 'adjutant'
+  | 'deploy'
+  | 'transfer';
+
+/** UNIT-TRANSFER-01：单位调配事件载荷 */
+export interface TransferEventDecl {
+  unit: string;
+  category?: string;
+  qty: number;
+  from_base?: string;
+  to_base: string;
+  duration_min: number;
+  remaining_min?: number;
+  method?: string;
+  reason?: string;
+}
 
 /** MCV-ENGINE-01：MCV展开 / MCV收起 事件载荷 */
 export interface DeployEventDecl {
@@ -1357,6 +1385,7 @@ export interface EventDeclaration {
   protocol?: ProtocolEventDecl;
   adjutant?: AdjutantEventDecl;
   deploy?: DeployEventDecl;
+  transfer?: TransferEventDecl;
   /** PRT-EVT-01：协议声明顶层便捷字段（与 protocol 子对象同源对齐，供 settleFloor 协议结算齿轮消费） */
   protocolAction?: ProtocolEventAction;
   protocolId?: string;

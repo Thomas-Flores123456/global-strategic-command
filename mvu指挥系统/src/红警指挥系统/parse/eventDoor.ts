@@ -37,10 +37,32 @@ export type EventVerb =
   | '协议排程'
   | '副官指派'
   | 'MCV展开'
-  | 'MCV收起';
+  | 'MCV收起'
+  | '单位调配';
 
-/** 实体类别（资金链 / 势力 / 情报 / 任务 / 协议 / 副官 / 部署） */
-export type EventEntityKind = 'chain' | 'faction' | 'intel' | 'quest' | 'protocol' | 'adjutant' | 'deploy';
+/** 实体类别（资金链 / 势力 / 情报 / 任务 / 协议 / 副官 / 部署 / 调配） */
+export type EventEntityKind =
+  | 'chain'
+  | 'faction'
+  | 'intel'
+  | 'quest'
+  | 'protocol'
+  | 'adjutant'
+  | 'deploy'
+  | 'transfer';
+
+/** UNIT-TRANSFER-01：单位调配事件载荷 */
+export interface TransferEventDecl {
+  unit: string;
+  category?: string;
+  qty: number;
+  from_base?: string;
+  to_base: string;
+  duration_min: number;
+  remaining_min?: number;
+  method?: string;
+  reason?: string;
+}
 
 /** MCV-ENGINE-01：MCV展开 / MCV收起 事件载荷 */
 export interface DeployEventDecl {
@@ -134,6 +156,7 @@ export interface EventDeclaration {
   protocol?: ProtocolEventDecl;
   adjutant?: AdjutantEventDecl;
   deploy?: DeployEventDecl;
+  transfer?: TransferEventDecl;
   /** PRT-EVT-01：协议声明顶层便捷字段（与 protocol 子对象同源对齐，供 settleFloor 协议结算齿轮消费） */
   protocolAction?: ProtocolEventAction;
   protocolId?: string;
@@ -189,9 +212,10 @@ export const EVENT_VERBS: readonly EventVerb[] = [
   '副官指派',
   'MCV展开',
   'MCV收起',
+  '单位调配',
 ];
 
-/** PRT-EVT-01 / CMD-PARSE-01 / MCV-ENGINE-01：事件动词容错别名映射（命中时归一为标准动词并记 softFix 黄灯留痕） */
+/** PRT-EVT-01 / CMD-PARSE-01 / MCV-ENGINE-01 / UNIT-TRANSFER-01：事件动词容错别名映射（命中时归一为标准动词并记 softFix 黄灯留痕） */
 export const EVT_PROTOCOL_VERB_ALIASES: Readonly<Record<string, EventVerb>> = {
   协议启封: '协议发现',
   协议攻关: '协议实验',
@@ -226,6 +250,23 @@ export const EVT_PROTOCOL_VERB_ALIASES: Readonly<Record<string, EventVerb>> = {
   转移基地: 'MCV收起',
   载具收起: 'MCV收起',
   收起基地车: 'MCV收起',
+  部队调动: '单位调配',
+  部队调配: '单位调配',
+  驻地调动: '单位调配',
+  驻地调配: '单位调配',
+  驻地迁移: '单位调配',
+  单位迁移: '单位调配',
+  兵力调拨: '单位调配',
+  兵力调配: '单位调配',
+  跨基地调配: '单位调配',
+  跨基地调动: '单位调配',
+  机娘调防: '单位调配',
+  调防: '单位调配',
+  调配: '单位调配',
+  调动: '单位调配',
+  unit_transfer: '单位调配',
+  transfer: '单位调配',
+  redeploy: '单位调配',
 };
 
 export const PROTOCOL_SCHEDULE_VERB_MAP: Readonly<Record<string, ProtocolScheduleVerb>> = {

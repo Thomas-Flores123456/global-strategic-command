@@ -43,6 +43,10 @@ import {
   type DeploymentRequest,
 } from './deploymentEngine';
 import {
+  requestUnitTransfer,
+  settleUnitTransfers,
+} from './unitTransferEngine';
+import {
   applyUnifiedCommands,
   fromLegacyDispatchOrders,
   type DispatchBusResult,
@@ -833,14 +837,55 @@ export function settleFloor(
       path: 'bases',
     });
   }
+
+  // UNIT-TRANSFER-01：先按本轮 Δt 推进跨楼在途调配（到期自动守恒划转 bases[].forces / girls[].base），
+  // 再登记本轮新增的 <事件> 单位调配指令（耗时=0 当楼瞬达；耗时>0 挂入 pending_transfers 供前端展示剩余时间）
+  const transferSettled = settleUnitTransfers(deployed.next, deltaMinutes);
+  for (const te of transferSettled.events) {
+    events.push({
+      light: te.light,
+      layer: 'instruction',
+      message: `[调配] ${te.detail}`,
+      path: 'pending_transfers',
+    });
+  }
+  let afterTransfers = transferSettled.next;
+  const transferDecls = (options.eventDeclarations ?? []).filter(
+    (d): d is EventDeclaration & { kind: 'transfer' } => d.kind === 'transfer' && d.transfer !== undefined,
+  );
+  for (const td of transferDecls) {
+    const tr = td.transfer!;
+    const booked = requestUnitTransfer(afterTransfers, {
+      unit: tr.unit,
+      category: tr.category,
+      qty: tr.qty,
+      from_base: tr.from_base,
+      to_base: tr.to_base,
+      duration_min: tr.duration_min,
+      remaining_min: tr.remaining_min,
+      method: tr.method,
+      reason: tr.reason,
+      started_at: afterTransfers.meta?.date ?? '',
+    });
+    afterTransfers = booked.next;
+    for (const te of booked.events) {
+      events.push({
+        light: te.light,
+        layer: 'instruction',
+        message: `[调配] ${te.detail}`,
+        path: 'pending_transfers',
+      });
+    }
+  }
+
   const tAfterS2e = performance.now();
   substages.push(
-    buildSubstageRecord('S2e_DEPLOY_MODE', afterTwoStage, deployed.next, {
+    buildSubstageRecord('S2e_DEPLOY_MODE', afterTwoStage, afterTransfers, {
       durationMs: Math.round((tAfterS2e - tAfterS2d) * 100) / 100,
     }),
   );
 
-  let afterSpace = deployed.next;
+  let afterSpace = afterTransfers;
   const prevSpaceContractIds = new Set(
     ((prevData as StatData | undefined)?.space?.contracts ?? [])
       .filter(c => c && c.status !== 'completed' && c.status !== 'failed')

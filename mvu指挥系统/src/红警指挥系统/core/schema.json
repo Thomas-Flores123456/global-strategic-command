@@ -1079,6 +1079,66 @@
         ]
       }
     },
+    "pending_transfers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "default": "",
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "category": {
+            "default": "vehicles",
+            "type": "string",
+            "enum": [
+              "girls",
+              "troops",
+              "vehicles",
+              "equipment"
+            ]
+          },
+          "qty": {
+            "default": 1,
+            "type": "number"
+          },
+          "from_base": {
+            "default": "",
+            "type": "string"
+          },
+          "to_base": {
+            "default": "",
+            "type": "string"
+          },
+          "total_minutes": {
+            "default": 0,
+            "type": "number"
+          },
+          "remaining_minutes": {
+            "default": 0,
+            "type": "number"
+          },
+          "method": {
+            "default": "",
+            "type": "string"
+          },
+          "reason": {
+            "default": "",
+            "type": "string"
+          },
+          "started_at": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unit"
+        ]
+      }
+    },
     "projects": {
       "type": "array",
       "items": {
@@ -1669,7 +1729,7 @@
             }
           },
           "generatedAt": {
-            "default": "2026-10-29T11:01:28.145Z",
+            "default": "2026-10-29T14:48:24.009Z",
             "type": "string"
           },
           "model": {
@@ -1729,7 +1789,7 @@
             }
           },
           "updatedAt": {
-            "default": "2026-10-29T11:01:28.146Z",
+            "default": "2026-10-29T14:48:24.010Z",
             "type": "string"
           }
         },
@@ -2928,7 +2988,7 @@
       "type": "object",
       "properties": {
         "id": {
-          "default": "patch_1793271688144_3mo2k",
+          "default": "patch_1793285304008_bt1aq",
           "type": "string"
         },
         "target": {
@@ -2965,7 +3025,7 @@
           "type": "string"
         },
         "timestamp": {
-          "default": 1793271688144,
+          "default": 1793285304008,
           "type": "number"
         },
         "status": {

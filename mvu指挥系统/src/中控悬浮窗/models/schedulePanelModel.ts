@@ -38,6 +38,11 @@ import {
 } from '../../红警指挥系统/engines/taskOrchestrator';
 import { toUnifiedTasks, type ProjectionStateInput } from '../../红警指挥系统/engines/taskProjectionAdapter';
 import type { TransactionItem } from '../../红警指挥系统/engines/transactionEngine';
+import {
+  formatTransferMinutes,
+  UNASSIGNED_POOL_LABEL,
+  type PendingUnitTransfer,
+} from '../../红警指挥系统/engines/unitTransferEngine';
 import type { PlanningReceipt, Project, ProtocolInstance, Schema } from '../../红警指挥系统/core/schema';
 import { queueDisplayModel, type QueueTone } from './queueDisplayModel';
 import {
@@ -72,7 +77,22 @@ export type MilestoneQueueItemLike = Partial<QueueItem> & {
   duration_minutes?: number;
 };
 
-/** 面板消费的快照最小结构（兼容 Schema 与双账本 queues[] + projects[] + protocols[]） */
+export interface ScheduleTransferRow {
+  id: string;
+  unit: string;
+  category: string;
+  qty: number;
+  fromBase: string;
+  toBase: string;
+  totalMinutes: number;
+  remainingMinutes: number;
+  progress: number;
+  etaText: string;
+  method: string;
+  reason: string;
+}
+
+/** 面板消费的快照最小结构（兼容 Schema 与双账本 queues[] + projects[] + protocols[] + pending_transfers[]） */
 export interface SchedulePanelInput {
   bases?: Array<{
     id?: string;
@@ -84,6 +104,7 @@ export interface SchedulePanelInput {
   projects?: Project[];
   protocols?: Array<Partial<ProtocolInstance> & ProtocolLaneInputItem>;
   protocol_points?: number;
+  pending_transfers?: ReadonlyArray<Partial<PendingUnitTransfer>>;
   clock?: { day: number; time: string };
   planning?: { latest_receipt?: PlanningReceipt | null; protected_task_refs?: string[] } | null;
 }
@@ -918,6 +939,31 @@ export function schedulePanelModel(
   const nextMilestone = computeNextMilestoneBanner(stat);
   const domainGroups = buildDomainScheduleGroups(baseList, researchSlots, protocolLane);
 
+  const pendingTransfers: ScheduleTransferRow[] = [];
+  for (let i = 0; i < (stat.pending_transfers ?? []).length; i++) {
+    const raw = stat.pending_transfers?.[i];
+    if (!raw || typeof raw.unit !== 'string' || !raw.unit.trim()) continue;
+    const remMin = Math.max(0, Math.round(Number(raw.remaining_minutes) || 0));
+    if (remMin <= 0) continue;
+    const totMin = Math.max(remMin, Math.round(Number(raw.total_minutes) || remMin));
+    const progress =
+      totMin > 0 ? Math.min(99, Math.max(0, Math.round(((totMin - remMin) / totMin) * 100))) : 0;
+    pendingTransfers.push({
+      id: String(raw.id || `xfer-${i}-${raw.unit.trim()}`),
+      unit: raw.unit.trim(),
+      category: String(raw.category || 'vehicles'),
+      qty: raw.category === 'girls' ? 1 : Math.max(1, Math.round(Number(raw.qty) || 1)),
+      fromBase: String(raw.from_base || UNASSIGNED_POOL_LABEL).trim(),
+      toBase: String(raw.to_base || UNASSIGNED_POOL_LABEL).trim(),
+      totalMinutes: totMin,
+      remainingMinutes: remMin,
+      progress,
+      etaText: formatTransferMinutes(remMin),
+      method: String(raw.method ?? '').trim(),
+      reason: String(raw.reason ?? '').trim(),
+    });
+  }
+
   const nonRetiredLanes = baseList.filter(b => !b.retired).flatMap(b => b.lanes);
   const kpiSummary: ScheduleKpiSummary = {
     activeStationCount:
@@ -933,7 +979,7 @@ export function schedulePanelModel(
   return {
     clock,
     clockText: clock ? SCHEDULE_COPY.clockLine(clock.day, clock.time) : undefined,
-    allEmpty: rawScheduled.length === 0,
+    allEmpty: rawScheduled.length === 0 && pendingTransfers.length === 0,
     allEmptyText: SCHEDULE_COPY.allEmpty,
     bases: baseList,
     researchSlots,
@@ -948,6 +994,7 @@ export function schedulePanelModel(
     domainGroups,
     kpiSummary,
     maxEndOffsetMin,
+    pendingTransfers,
   };
 }
 

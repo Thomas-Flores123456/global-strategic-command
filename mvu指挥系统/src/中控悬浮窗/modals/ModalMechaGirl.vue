@@ -70,6 +70,53 @@
 
       <!-- ══ 主体内容区 ══ -->
       <div class="flex-1 overflow-y-auto p-3.5">
+        <!-- ── 跨防区在途单位调配监控条（UNIT-TRANSFER-01） ── -->
+        <div
+          v-if="vm.pendingTransfers && vm.pendingTransfers.length > 0"
+          class="ra-sub-box mb-3 flex flex-col gap-1.5 p-2.5"
+          data-testid="armory-pending-transfers"
+        >
+          <div class="mono flex items-center justify-between text-[11px] font-bold text-[var(--gold)]">
+            <span>🚚 跨防区单位调配进行中 ({{ vm.pendingTransfers.length }})</span>
+            <span class="text-[10px] font-normal text-[var(--muted)]">随战区时钟自动推进到站</span>
+          </div>
+          <div class="flex flex-col gap-1.5">
+            <div
+              v-for="tr in vm.pendingTransfers"
+              :key="tr.id"
+              class="ra-row-card flex flex-col gap-1 px-2.5 py-2 text-[11px]"
+              :data-testid="`transfer-row-${tr.unit}`"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="font-extrabold text-[var(--text-strong)]">
+                    {{ tr.unit }}
+                  </span>
+                  <span v-if="tr.category !== 'girls'" class="mono font-bold text-[var(--faction)]">
+                    ×{{ tr.qty }}
+                  </span>
+                  <span class="ra-tag-chip mono px-1.5 py-0.2 text-[10px]">
+                    📍 {{ tr.fromBase }} → 📍 {{ tr.toBase }}
+                  </span>
+                  <span v-if="tr.method" class="meta-chip seq-chip mono px-1.5 py-0.2 text-[10px]">
+                    {{ tr.method }}
+                  </span>
+                </div>
+                <div class="mono flex items-center gap-2 text-[11px] font-bold text-[var(--gold)]">
+                  <span>进度 {{ tr.progress }}%</span>
+                  <span>· 剩余 {{ tr.etaText }}</span>
+                </div>
+              </div>
+              <div class="h-1.5 w-full overflow-hidden rounded-xs bg-[var(--bg-0)]">
+                <div
+                  class="h-full bg-[var(--gold)] transition-all duration-300"
+                  :style="{ width: `${Math.max(4, tr.progress)}%` }"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- ────────────── TAB 1：英雄机娘（girls） ────────────── -->
         <section v-if="activeTab === 'girls'" class="flex flex-col gap-3" data-testid="panel-girls">
           <!-- 真实机娘为空：战术空态 -->
@@ -134,6 +181,13 @@
                 </div>
                 <div class="flex flex-wrap items-center gap-1 text-[10px] text-[var(--muted)]">
                   <span class="ra-tag-chip mono px-1.5 py-0.2">📍 {{ g.base }}</span>
+                  <span
+                    v-if="g.activeTransfer"
+                    class="ra-pending-chip mono px-1.5 py-0.2 text-[var(--gold)]"
+                    :data-testid="`girl-transfer-badge-${g.name}`"
+                  >
+                    🚚 调往 {{ g.activeTransfer.toBase }} · 余 {{ g.activeTransfer.etaText }}
+                  </span>
                   <span v-if="g.serial" class="meta-chip serial-chip mono px-1.5 py-0.2">
                     编号: {{ g.serial }}
                   </span>

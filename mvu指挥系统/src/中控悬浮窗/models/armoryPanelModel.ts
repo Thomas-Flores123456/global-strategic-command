@@ -18,6 +18,11 @@
  */
 import { isGirlDossierEntry } from '../../红警指挥系统/worldbook/girlFiler';
 import {
+  formatTransferMinutes,
+  resolveTransferCategory,
+  UNASSIGNED_POOL_LABEL,
+} from '../../红警指挥系统/engines/unitTransferEngine';
+import {
   baseMatchesScope,
   canonKey,
   classifyProductionQueueItem,
@@ -42,6 +47,7 @@ import {
   type ArmoryQueueEntry,
   type ArmoryScope,
   type ArmorySnapshotLike,
+  type ArmoryTransferItem,
   type ArmoryVehicleGroup,
   type ArmoryViewModel,
   type NormalizedBaseRecord,
@@ -742,6 +748,67 @@ export function buildArmoryViewModel(
     }
   }
 
+  /* ─────────────── 6. 跨基地在途单位调配（pending_transfers） ─────────────── */
+  const pendingTransfers: ArmoryTransferItem[] = [];
+  for (let idx = 0; idx < (snapshot?.pending_transfers ?? []).length; idx++) {
+    const tr = snapshot?.pending_transfers?.[idx];
+    if (!tr || typeof tr.unit !== 'string' || !tr.unit.trim()) continue;
+    const remMin = Math.max(0, Math.round(Number(tr.remaining_minutes) || 0));
+    if (remMin <= 0) continue;
+    const totMin = Math.max(remMin, Math.round(Number(tr.total_minutes) || remMin));
+    const fromBase = String(tr.from_base || UNASSIGNED_POOL_LABEL).trim();
+    const toBase = String(tr.to_base || UNASSIGNED_POOL_LABEL).trim();
+
+    if (
+      !isAllScope(scope) &&
+      !rawBaseMatchesScope(fromBase, scope, normalizedBases, false) &&
+      !rawBaseMatchesScope(toBase, scope, normalizedBases, false)
+    ) {
+      continue;
+    }
+
+    const cat = resolveTransferCategory(
+      snapshot as unknown as Parameters<typeof resolveTransferCategory>[0],
+      tr.unit.trim(),
+      tr.category,
+    );
+    const progress =
+      totMin > 0 ? Math.min(99, Math.max(0, Math.round(((totMin - remMin) / totMin) * 100))) : 0;
+
+    pendingTransfers.push({
+      id: String(tr.id || `xfer-${idx}-${tr.unit.trim()}`),
+      unit: tr.unit.trim(),
+      category: cat,
+      qty: cat === 'girls' ? 1 : Math.max(1, Math.round(Number(tr.qty) || 1)),
+      fromBase,
+      toBase,
+      totalMinutes: totMin,
+      remainingMinutes: remMin,
+      progress,
+      etaText: formatTransferMinutes(remMin),
+      method: String(tr.method ?? '').trim(),
+      reason: String(tr.reason ?? '').trim(),
+      startedAt: String(tr.started_at ?? '').trim(),
+    });
+  }
+
+  const girlTransfers = pendingTransfers.filter(t => t.category === 'girls');
+  const personnelTransfers = pendingTransfers.filter(t => t.category === 'troops');
+  const vehicleTransfers = pendingTransfers.filter(t => t.category === 'vehicles');
+  const equipmentTransfers = pendingTransfers.filter(t => t.category === 'equipment');
+
+  for (const g of scopedGirls) {
+    const hit = girlTransfers.find(
+      t =>
+        canonKey(t.unit) === canonKey(g.name) ||
+        (g.callsign && canonKey(t.unit) === canonKey(g.callsign)) ||
+        (g.serial && canonKey(t.unit) === canonKey(g.serial)),
+    );
+    if (hit) {
+      g.activeTransfer = hit;
+    }
+  }
+
   return {
     scope,
     baseOptions,
@@ -749,6 +816,7 @@ export function buildArmoryViewModel(
     unassignedPersonnelCount,
     unassignedVehicleCount,
     notableCharacters,
+    pendingTransfers,
     summary: {
       girlsCount: scopedGirls.length,
       personnelCount: personnelTotalCount + officers.length,
@@ -758,11 +826,13 @@ export function buildArmoryViewModel(
       equipmentCount: equipmentTotalCount,
       unassignedPersonnelCount,
       unassignedVehicleCount,
+      pendingTransfersCount: pendingTransfers.length,
     },
     girls: {
       items: scopedGirls,
-      isEmpty: girlsIsEmpty,
+      isEmpty: girlsIsEmpty && girlTransfers.length === 0,
       totalInTheater: totalGirlsInTheater,
+      pendingTransfers: girlTransfers,
     },
     personnel: {
       rows: personnelRows,
@@ -773,9 +843,11 @@ export function buildArmoryViewModel(
       unassignedPersonnelCount,
       commandCap: String(snapshot?.forces?.command_cap ?? ''),
       trainingQueues,
+      pendingTransfers: personnelTransfers,
       isEmpty:
         personnelRows.length === 0 &&
         trainingQueues.length === 0 &&
+        personnelTransfers.length === 0 &&
         officers.length === 0 &&
         notableCharacters.length === 0,
     },
@@ -791,7 +863,8 @@ export function buildArmoryViewModel(
       intactCount,
       damagedCount,
       productionQueues: vehicleQueues,
-      isEmpty: allVehicleGroups.length === 0 && vehicleQueues.length === 0,
+      pendingTransfers: vehicleTransfers,
+      isEmpty: allVehicleGroups.length === 0 && vehicleQueues.length === 0 && vehicleTransfers.length === 0,
     },
     equipment: {
       items: equipmentItems,
@@ -799,11 +872,13 @@ export function buildArmoryViewModel(
       girlLoadouts,
       ammoStatus,
       activeQueues: equipmentQueues,
+      pendingTransfers: equipmentTransfers,
       totalCount: equipmentTotalCount,
       isEmpty:
         equipmentItems.length === 0 &&
         girlLoadouts.length === 0 &&
         equipmentQueues.length === 0 &&
+        equipmentTransfers.length === 0 &&
         ammoStatus.length === 0,
     },
   };

@@ -236,6 +236,50 @@
             @dismiss="onDismissPlanning"
           />
 
+          <!-- ── 跨防区单位调配在途专席（UNIT-TRANSFER-01） ── -->
+          <section
+            v-if="model.pendingTransfers && model.pendingTransfers.length > 0"
+            class="mb-3 rounded-[3px] border p-2.5"
+            data-test="schedule-pending-transfers"
+            style="border-color: var(--rac-dim); background: rgba(0, 0, 0, 0.22)"
+          >
+            <div class="mb-1.5 flex items-center justify-between font-mono text-[11px]">
+              <span class="font-bold text-(--rac-warn)">
+                🚚 跨基地单位调配进行中 ({{ model.pendingTransfers.length }})
+              </span>
+              <span style="color: var(--rac-muted)">随战区时钟自动推进交割</span>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <div
+                v-for="tr in model.pendingTransfers"
+                :key="tr.id"
+                class="flex flex-wrap items-center justify-between gap-2 rounded-[2px] border px-2.5 py-1.5 text-[11px]"
+                style="border-color: var(--rac-dim); background: var(--rac-panel)"
+              >
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="font-bold">{{ tr.unit }}</span>
+                  <span v-if="tr.category !== 'girls'" class="font-mono font-bold text-(--rac-line)">
+                    ×{{ tr.qty }}
+                  </span>
+                  <span class="font-mono text-[10px]" style="color: var(--rac-muted)">
+                    [{{ tr.fromBase }} → {{ tr.toBase }}]
+                  </span>
+                  <span
+                    v-if="tr.method"
+                    class="rounded-[2px] border px-1.5 py-0.2 font-mono text-[10px]"
+                    style="border-color: var(--rac-dim); color: var(--rac-line)"
+                  >
+                    {{ tr.method }}
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 font-mono text-[11px]">
+                  <span class="text-(--rac-warn)">进度 {{ tr.progress }}%</span>
+                  <span class="font-bold text-(--rac-ok)">剩余 {{ tr.etaText }}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <div v-if="model.allEmpty" class="sch-empty" :data-empty-copy="model.allEmptyText">
             <div class="sch-empty-banner">
               <span class="sch-empty-tag">[工程调度室]</span>

@@ -87,11 +87,42 @@ export interface ArmoryQueueLike {
   lane?: string;
 }
 
+export interface ArmoryPendingTransferLike {
+  id?: string;
+  unit: string;
+  category?: 'girls' | 'troops' | 'vehicles' | 'equipment' | string;
+  qty?: number;
+  from_base?: string;
+  to_base?: string;
+  total_minutes?: number;
+  remaining_minutes?: number;
+  method?: string;
+  reason?: string;
+  started_at?: string;
+}
+
+export interface ArmoryTransferItem {
+  id: string;
+  unit: string;
+  category: 'girls' | 'troops' | 'vehicles' | 'equipment';
+  qty: number;
+  fromBase: string;
+  toBase: string;
+  totalMinutes: number;
+  remainingMinutes: number;
+  progress: number;
+  etaText: string;
+  method: string;
+  reason: string;
+  startedAt: string;
+}
+
 export interface ArmorySnapshotLike {
   girls?: ArmoryGirlLike[];
   forces?: ArmoryForcesLike;
   bases?: ReadonlyArray<ArmoryBaseLike> | Record<string, ArmoryBaseLike>;
   queues?: ReadonlyArray<ArmoryQueueLike>;
+  pending_transfers?: ReadonlyArray<ArmoryPendingTransferLike>;
   pending_lore?: ReadonlyArray<unknown>;
   codex?: ReadonlyArray<{
     name: string;
@@ -166,6 +197,7 @@ export interface ArmoryGirlItem {
   specialSkills: GirlSpecialSkill[];
   specialEquipment: GirlSpecialEquipment[];
   temperamentSpectrum: string;
+  activeTransfer?: ArmoryTransferItem | null;
 }
 
 export type ArmoryGirlRecord = ArmoryGirlItem;
@@ -251,6 +283,7 @@ export interface ArmoryViewModel {
   unassignedPersonnelCount: number;
   unassignedVehicleCount: number;
   notableCharacters: ArmoryNotableCharacter[];
+  pendingTransfers: ArmoryTransferItem[];
   summary: {
     girlsCount: number;
     personnelCount: number;
@@ -260,11 +293,13 @@ export interface ArmoryViewModel {
     equipmentCount: number;
     unassignedPersonnelCount: number;
     unassignedVehicleCount: number;
+    pendingTransfersCount?: number;
   };
   girls: {
     items: ArmoryGirlItem[];
     isEmpty: boolean;
     totalInTheater: number;
+    pendingTransfers?: ArmoryTransferItem[];
   };
   personnel: {
     rows: ArmoryPersonnelRow[];
@@ -275,6 +310,7 @@ export interface ArmoryViewModel {
     unassignedPersonnelCount: number;
     commandCap: string;
     trainingQueues: ArmoryQueueEntry[];
+    pendingTransfers?: ArmoryTransferItem[];
     isEmpty: boolean;
   };
   vehicles: {
@@ -289,6 +325,7 @@ export interface ArmoryViewModel {
     intactCount: number;
     damagedCount: number;
     productionQueues: ArmoryQueueEntry[];
+    pendingTransfers?: ArmoryTransferItem[];
     isEmpty: boolean;
   };
   equipment: {
@@ -297,6 +334,7 @@ export interface ArmoryViewModel {
     girlLoadouts: ArmoryLoadoutEntry[];
     ammoStatus: Array<{ name: string; status: string }>;
     activeQueues: ArmoryQueueEntry[];
+    pendingTransfers?: ArmoryTransferItem[];
     totalCount: number;
     isEmpty: boolean;
   };

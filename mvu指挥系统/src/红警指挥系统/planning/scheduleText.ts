@@ -72,6 +72,7 @@ import {
 } from '../core/schema';
 import { makeTxnEffFor } from '../engines/settleFloor';
 import type { TransactionItem } from '../engines/transactionEngine';
+import type { PendingUnitTransfer } from '../engines/unitTransferEngine';
 
 /* ═══════════════ 选项与数据形状 ═══════════════ */
 
@@ -130,6 +131,8 @@ export interface ScheduleOptions {
   prevProjects?: ReadonlyArray<Project>;
   /** 可选：工程与改装静态定义目录（FD-45 · 供查询下一阶段核定经费与 V2 模块前置依赖） */
   projectCatalog?: ReadonlyArray<RetrofitDef | ProjectDef>;
+  /** 跨基地单位调配在途事务（UNIT-TRANSFER-01 · stat_data.pending_transfers；无在途调配时整节省略） */
+  pendingTransfers?: ReadonlyArray<PendingUnitTransfer>;
 }
 
 /* ═══════════════ 内部工具（全部无副作用） ═══════════════ */
@@ -877,13 +880,30 @@ export function buildScheduleText(queues: readonly TransactionItem[], options: S
   const receiptLines = renderPlanningReceiptSection(options);
   const projectActive = hasProjectScheduleActivity(options.projects, options.prevProjects);
   const projectSection = projectActive ? renderProjectSection(options) : null;
+  const activeTransfers = (options.pendingTransfers ?? []).filter(t => t && (t.remaining_minutes ?? 0) > 0);
+  const transferLines =
+    activeTransfers.length > 0
+      ? [
+          '[跨基地单位调配在途]',
+          ...activeTransfers.map(t => {
+            const fromLabel = t.from_base || '战区机动直属';
+            const methodPart = t.method ? `，方式：${t.method}` : '';
+            const qtyPart = t.category === 'girls' ? '' : ` ×${Math.max(1, t.qty || 1)}`;
+            return `- ${t.unit}${qtyPart}：${fromLabel} → ${t.to_base}（调配进行中${methodPart}，预计还需${fmtMinutes(t.remaining_minutes)}）`;
+          }),
+        ]
+      : [];
   const isTotallyEmpty =
-    scheduled.length === 0 && protocolLines.length === 0 && receiptLines.length === 0 && !projectActive;
+    scheduled.length === 0 &&
+    protocolLines.length === 0 &&
+    receiptLines.length === 0 &&
+    !projectActive &&
+    transferLines.length === 0;
 
   const lines: string[] = [SCHEDULE_COPY.tagOpen];
   if (options.clock) lines.push(SCHEDULE_COPY.clockLine(options.clock.day, options.clock.time));
 
-  // 全空态（§4.1.1）：一行收口，不出骨架（若存在协议演训活动、排产回执或重大工程章节，照常追加对应章节）
+  // 全空态（§4.1.1）：一行收口，不出骨架（若存在协议演训活动、排产回执、重大工程或在途调配章节，照常追加对应章节）
   if (scheduled.length === 0) {
     lines.push(SCHEDULE_COPY.allEmpty);
     if (!isTotallyEmpty) {
@@ -895,6 +915,9 @@ export function buildScheduleText(queues: readonly TransactionItem[], options: S
       }
       if (projectSection) {
         lines.push(projectSection);
+      }
+      if (transferLines.length > 0) {
+        lines.push(...transferLines);
       }
     }
     lines.push(SCHEDULE_COPY.tagClose);
@@ -991,6 +1014,11 @@ export function buildScheduleText(queues: readonly TransactionItem[], options: S
     lines.push(projectSection);
   }
 
+  /* ── 单列一节：跨基地单位调配在途（UNIT-TRANSFER-01；无在途调配时整节省略） ── */
+  if (transferLines.length > 0) {
+    lines.push(...transferLines);
+  }
+
   lines.push(SCHEDULE_COPY.tagClose);
   return lines.join('\n');
 }
@@ -1052,8 +1080,9 @@ export function planScheduleInjection(input: {
   const planningActive =
     renderPlanningReceiptSection({ planningReceipt, bases: data.bases }).length > 0;
   const projectActive = hasProjectScheduleActivity(data.projects, previous?.data.projects);
-  // 无在编事务且无协议演训活动且无排产回执且无重大工程活动 → 零注入（空态文本只服务直接调用方，不占提示词）
-  if (activeQueues.length === 0 && !protocolActive && !planningActive && !projectActive) return null;
+  const transferActive = Array.isArray(data.pending_transfers) && data.pending_transfers.some(t => (t?.remaining_minutes ?? 0) > 0);
+  // 无在编事务且无协议演训活动且无排产回执且无重大工程活动且无在途调配 → 零注入（空态文本只服务直接调用方，不占提示词）
+  if (activeQueues.length === 0 && !protocolActive && !planningActive && !projectActive && !transferActive) return null;
 
   const catalog = mergeEffectiveCatalog(input.overlays, input.dynamicWb, data.protocols);
   // E2d 接线（批（八十八）授权）：deploy 能力面 resolver 同源三池构建，注入三回调启用通道B；工厂容错缺池/缺块。
@@ -1110,6 +1139,7 @@ export function planScheduleInjection(input: {
     projects: data.projects,
     prevProjects: previous?.data.projects,
     projectCatalog: [...catalog.retrofits, ...catalog.projects],
+    pendingTransfers: data.pending_transfers,
   });
 
   return { entry, scanStart, snapshot, injection: { ...SCHEDULE_INJECT_CONFIG, content: text } };

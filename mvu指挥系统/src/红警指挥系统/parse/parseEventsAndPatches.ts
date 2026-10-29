@@ -22,6 +22,7 @@ import {
 } from '../core/schema';
 import { registerParsedChainEventEff } from '../engines/chainEngine';
 import { deployBlockIndexFromCatalog, resolveMcvVehicleAliases } from '../engines/deploymentEngine';
+import { parseTransferDurationMinutes } from '../engines/unitTransferEngine';
 import { normalizeProtocolLookupKey as sharedNormalizeProtocolLookupKey } from '../engines/protocolCatalogIndex';
 import {
   normalizeBaseSiteType,
@@ -73,6 +74,7 @@ import {
   type QuarantinedEvent,
   type QuestEventDecl,
   type StatData,
+  type TransferEventDecl,
   type YellowEventDeclaration,
 } from './parseTypesAndCanon';
 import { toSimplified } from './t2s';
@@ -267,9 +269,10 @@ export const EVENT_VERBS: readonly EventVerb[] = [
   '副官指派',
   'MCV展开',
   'MCV收起',
+  '单位调配',
 ];
 
-/** PRT-EVT-01 / CMD-PARSE-01 / MCV-ENGINE-01：事件动词容错别名映射（命中时归一为标准动词并记 softFix 黄灯留痕） */
+/** PRT-EVT-01 / CMD-PARSE-01 / MCV-ENGINE-01 / UNIT-TRANSFER-01：事件动词容错别名映射（命中时归一为标准动词并记 softFix 黄灯留痕） */
 export const EVT_PROTOCOL_VERB_ALIASES: Readonly<Record<string, EventVerb>> = {
   资金链新立: '资金链建立',
   资金链新增: '资金链建立',
@@ -316,6 +319,23 @@ export const EVT_PROTOCOL_VERB_ALIASES: Readonly<Record<string, EventVerb>> = {
   转移基地: 'MCV收起',
   载具收起: 'MCV收起',
   收起基地车: 'MCV收起',
+  部队调动: '单位调配',
+  部队调配: '单位调配',
+  驻地调动: '单位调配',
+  驻地调配: '单位调配',
+  驻地迁移: '单位调配',
+  单位迁移: '单位调配',
+  兵力调拨: '单位调配',
+  兵力调配: '单位调配',
+  跨基地调配: '单位调配',
+  跨基地调动: '单位调配',
+  机娘调防: '单位调配',
+  调防: '单位调配',
+  调配: '单位调配',
+  调动: '单位调配',
+  unit_transfer: '单位调配',
+  transfer: '单位调配',
+  redeploy: '单位调配',
 };
 
 export const PROTOCOL_SCHEDULE_VERB_MAP: Readonly<Record<string, ProtocolScheduleVerb>> = {
@@ -972,10 +992,20 @@ export function judgeEventEntry(entry: unknown, opts: { catalog?: ProtocolIndexS
     };
   }
 
-  // 动词收口（canon：容繁体/变体归一 + PRT-EVT-01 协议动词别名归一）
-  const typeRaw = evtTake(source, consumed, EVT_TYPE_KEYS);
+  // 动词收口（canon：容繁体/变体归一 + PRT-EVT-01 协议动词别名归一 + <调配> 缺省类型推断）
+  let typeRaw = evtTake(source, consumed, EVT_TYPE_KEYS);
   if (typeRaw === undefined) {
-    return { ok: false, error: '缺「类型」键（动词收口）', suggestion: `合法动词：${EVENT_VERBS.join(' / ')}` };
+    const hasTransferUnitKey = Object.keys(source).some(k =>
+      ['单位', '调配单位', 'unit'].some(a => canon(k) === canon(a)),
+    );
+    const hasTransferDestKey = Object.keys(source).some(k =>
+      ['目的地', '目标基地', '调往', 'to_base', 'to'].some(a => canon(k) === canon(a)),
+    );
+    if (hasTransferUnitKey && hasTransferDestKey) {
+      typeRaw = '单位调配';
+    } else {
+      return { ok: false, error: '缺「类型」键（动词收口）', suggestion: `合法动词：${EVENT_VERBS.join(' / ')}` };
+    }
   }
   const typeText = String(typeRaw).trim();
   const directVerb = EVENT_VERBS.find(v => canon(v) === canon(typeText));
@@ -1001,6 +1031,144 @@ export function judgeEventEntry(entry: unknown, opts: { catalog?: ProtocolIndexS
   if (typeText !== verb && !directScheduleFromType) repairs.push(`动词「${typeText}」已归一为「${verb}」`);
 
   const str = (aliases: readonly string[]): string => String(evtTake(source, consumed, aliases) ?? '').trim();
+
+  // ── 单位调配（UNIT-TRANSFER-01）──
+  if (verb === '单位调配') {
+    let rawUnit = str([
+      '单位',
+      '调配单位',
+      '名称',
+      '对象',
+      '目标',
+      '机娘',
+      '载具',
+      '兵种',
+      '装备',
+      'unit',
+      'name',
+      'target',
+      'item',
+    ]);
+    let inlineQty: number | undefined;
+    const inlineMultMatch = rawUnit.match(/\s*[×xX*]\s*(\d+)\s*$/);
+    if (inlineMultMatch) {
+      inlineQty = Math.max(1, Number.parseInt(inlineMultMatch[1], 10) || 1);
+      rawUnit = rawUnit.slice(0, inlineMultMatch.index).trim();
+    } else {
+      const inlineParenMatch = rawUnit.match(/(?:\((\d+)\s*[台架辆艘名件人]?\)|（(\d+)\s*[台架辆艘名件人]?）)\s*$/);
+      if (inlineParenMatch) {
+        inlineQty = Math.max(1, Number.parseInt(inlineParenMatch[1] || inlineParenMatch[2], 10) || 1);
+        rawUnit = rawUnit.slice(0, inlineParenMatch.index).trim();
+      }
+    }
+    if (!rawUnit) {
+      return {
+        ok: false,
+        error: '「单位调配」缺调配单位名称（单位/名称/对象）',
+        suggestion: '示例：单位: 灰熊坦克',
+      };
+    }
+
+    const category = str(['类别', '分类', '兵种分类', '单位类别', 'category', 'kind']);
+    const qtyRaw = evtTake(source, consumed, ['数量', '台数', '人数', '件数', 'qty', 'count', 'num']);
+    let qty = inlineQty ?? 1;
+    if (qtyRaw !== undefined && String(qtyRaw).trim() !== '') {
+      const parsedNum = Number.parseInt(String(qtyRaw).replace(/[^\d-]/g, ''), 10);
+      if (!Number.isFinite(parsedNum) || parsedNum <= 0) {
+        return {
+          ok: false,
+          error: `「单位调配」数量「${String(qtyRaw)}」非法（须为正整数）`,
+          suggestion: '示例：数量: 3',
+        };
+      }
+      qty = parsedNum;
+    }
+
+    const from_base = str([
+      '出发地',
+      '源基地',
+      '原驻地',
+      '原基地',
+      '调出基地',
+      '从',
+      'from',
+      'from_base',
+      'source',
+      'source_base',
+    ]);
+    const to_base = str([
+      '目的地',
+      '目标基地',
+      '新驻地',
+      '调往',
+      '去往',
+      '调入基地',
+      '基地',
+      '至',
+      'to',
+      'to_base',
+      'target_base',
+      'dest',
+      'base',
+    ]);
+    if (!to_base) {
+      return {
+        ok: false,
+        error: `「单位调配」缺目的地基地（目的地/目标基地/调往）`,
+        suggestion: '示例：目的地: 2号前哨基地',
+      };
+    }
+
+    const durationRaw = evtTake(source, consumed, [
+      '耗时',
+      '预计耗时',
+      '工期',
+      '总耗时',
+      '时间',
+      'duration',
+      'duration_min',
+      'total_minutes',
+      'time',
+      'eta',
+    ]);
+    const remainingRaw = evtTake(source, consumed, [
+      '剩余时间',
+      '剩余耗时',
+      '剩余',
+      'remaining',
+      'remaining_minutes',
+      'remaining_min',
+    ]);
+    const duration_min = durationRaw !== undefined ? parseTransferDurationMinutes(durationRaw) : 0;
+    const remaining_min =
+      remainingRaw !== undefined ? parseTransferDurationMinutes(remainingRaw) : undefined;
+    const method = str(['方式', '运输方式', '投送方式', '交通工具', '渠道', 'method', 'transport', 'via']);
+    const reason = str(EVT_REASON_KEYS);
+    repairs.push(...evtLeftoverRepairs(source, consumed));
+
+    const transferPayload: TransferEventDecl = {
+      unit: rawUnit,
+      ...(category ? { category } : {}),
+      qty,
+      ...(from_base ? { from_base } : {}),
+      to_base,
+      duration_min,
+      ...(remaining_min !== undefined ? { remaining_min } : {}),
+      ...(method ? { method } : {}),
+      ...(reason ? { reason } : {}),
+    };
+    return {
+      ok: true,
+      declaration: {
+        verb: '单位调配',
+        kind: 'transfer',
+        transfer: transferPayload,
+        base: to_base,
+        ...(reason ? { reason } : {}),
+      },
+      repairs,
+    };
+  }
 
   // ── MCV展开 / MCV收起（MCV-ENGINE-01）──
   if (verb === 'MCV展开' || verb === 'MCV收起') {
@@ -1814,6 +1982,9 @@ export function eventDeclName(declaration: EventDeclaration): string {
       ? declaration.deploy.vehicle || 'MCV'
       : declaration.deploy.building || '建造厂';
   }
+  if (declaration.transfer) {
+    return `${declaration.transfer.unit}→${declaration.transfer.to_base}`;
+  }
   return declaration.quest?.name ?? '';
 }
 
@@ -1929,7 +2100,8 @@ export function applyEventGate(gate: OrderedEventGateResult, ctx: Ctx): void {
       declaration.kind === 'chain' ||
       declaration.kind === 'protocol' ||
       declaration.kind === 'adjutant' ||
-      declaration.kind === 'deploy';
+      declaration.kind === 'deploy' ||
+      declaration.kind === 'transfer';
     green(
       ctx,
       {

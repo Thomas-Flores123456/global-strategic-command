@@ -1159,6 +1159,26 @@ export const Schema = z.object({
     )
     .optional(),
 
+  /** 跨基地单位调配在途事务（UNIT-TRANSFER-01：optional 挂载仿 pending_deployments 先例，无在途调配旧档零注入；
+   *  在途期间持久化于当前楼层 stat_data，到期自动守恒划转 bases[].forces / girls[].base 并从本数组销号） */
+  pending_transfers: z
+    .array(
+      z.object({
+        id: z.string().default(''),
+        unit: z.string(),
+        category: z.enum(['girls', 'troops', 'vehicles', 'equipment']).default('vehicles'),
+        qty: z.number().default(1),
+        from_base: z.string().default(''),
+        to_base: z.string().default(''),
+        total_minutes: z.number().default(0),
+        remaining_minutes: z.number().default(0),
+        method: z.string().default(''),
+        reason: z.string().default(''),
+        started_at: z.string().default(''),
+      }),
+    )
+    .optional(),
+
   /** 工程账本（工程玩法 MVP §3.1，D1-C/D2-A/D21）：optional 挂载仿 pending_mode_switches 先例，旧档零注入；
    *  派生不落盘——进度/ETA 由投影 queue 项（type='工程'）承载；元素级 schema_version 预留迁移位 */
   projects: z.array(Project).optional(),

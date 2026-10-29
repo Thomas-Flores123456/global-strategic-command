@@ -1660,6 +1660,13 @@ export function remapBaseReferencesInStat(
     }
   }
 
+  if (Array.isArray(data.pending_transfers)) {
+    for (const tr of data.pending_transfers) {
+      if (matchesOld(tr.from_base)) tr.from_base = targetName;
+      if (matchesOld(tr.to_base)) tr.to_base = targetName;
+    }
+  }
+
   if (Array.isArray(data.pending_mode_switches)) {
     for (const sw of data.pending_mode_switches) {
       if (matchesOld(sw.base)) sw.base = targetName;
@@ -1681,6 +1688,12 @@ export function remapBaseReferencesInStat(
     }
     for (const comp of ctx.operationCompletions ?? []) {
       if (matchesOld(comp.base)) comp.base = targetName;
+    }
+    for (const evDecl of ctx.eventDeclarations ?? []) {
+      if (evDecl.transfer) {
+        if (matchesOld(evDecl.transfer.from_base)) evDecl.transfer.from_base = targetName;
+        if (matchesOld(evDecl.transfer.to_base)) evDecl.transfer.to_base = targetName;
+      }
     }
   }
 }

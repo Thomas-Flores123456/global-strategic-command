@@ -1678,18 +1678,29 @@ export function syncGlobalForcesFloorFromBases(data: StatData): void {
     }
   }
 
+  const parseVehCountToken = (raw: string): { model: string; count: number } => {
+    const text = raw.trim();
+    const m = text.match(/^(.+?)\s*[×xX*]\s*(\d+)\s*$/);
+    if (m) {
+      return { model: m[1].trim(), count: Math.max(1, Number.parseInt(m[2], 10) || 1) };
+    }
+    return { model: text, count: 1 };
+  };
+
   const vehSums = new Map<string, { displayName: string; total: number }>();
   for (const b of basesWithForces) {
     const vehicles = b.forces?.vehicles;
     if (!Array.isArray(vehicles)) continue;
     for (const v of vehicles) {
       if (typeof v !== 'string' || !v.trim()) continue;
-      const ck = canon(v);
+      const { model, count } = parseVehCountToken(v);
+      if (!model) continue;
+      const ck = canon(model);
       const prev = vehSums.get(ck);
       if (prev) {
-        prev.total += 1;
+        prev.total += count;
       } else {
-        vehSums.set(ck, { displayName: v.trim(), total: 1 });
+        vehSums.set(ck, { displayName: model, total: count });
       }
     }
   }
@@ -1697,9 +1708,18 @@ export function syncGlobalForcesFloorFromBases(data: StatData): void {
     if (!Array.isArray(globalForces.vehicles)) globalForces.vehicles = [];
     const gVehicles = globalForces.vehicles as string[];
     for (const [ck, { displayName, total }] of vehSums.entries()) {
-      const existingCount = gVehicles.filter(x => canon(x) === ck).length;
+      let existingCount = 0;
+      let matchedModelName: string | undefined;
+      for (const x of gVehicles) {
+        if (typeof x !== 'string') continue;
+        const parsed = parseVehCountToken(x);
+        if (canon(parsed.model) === ck) {
+          existingCount += parsed.count;
+          if (!matchedModelName) matchedModelName = parsed.model;
+        }
+      }
       if (existingCount < total) {
-        const canonicalName = gVehicles.find(x => canon(x) === ck) ?? displayName;
+        const canonicalName = matchedModelName ?? displayName;
         for (let i = 0; i < total - existingCount; i++) {
           gVehicles.push(canonicalName);
         }
