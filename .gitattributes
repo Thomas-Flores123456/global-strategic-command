@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.{cmd,[cC][mM][dD]} text eol=crlf
+*.{bat,[bB][aA][tT]} text eol=crlf
+
+mvu指挥系统/dist/** merge=ours

@@ -1,0 +1,101 @@
+# 依赖目录
+node_modules/
+**/node_modules/
+.vite/
+**/.vite/
+
+# 私人数据、本地 AI 技能包与本机敏感配置（严禁入库）
+酒馆聊天/
+SVG资产-私有归档/
+.agents/
+**/.agents/
+.tavernweave/
+**/.tavernweave/
+.kilo/
+.mcp.json
+**/.mcp.json
+AGENTS.md
+**/AGENTS.md
+CLAUDE.md
+**/CLAUDE.md
+NEXT.md
+.env
+.env.*
+!.env.example
+env.yaml
+!env.example.yaml
+
+# 独立子仓库与未随主仓发布的本地子工程/私有过程目录
+site/
+SVG资产/
+worldbook-explorer/
+docs/Architecture/Future Developments/
+docs/project/
+docs/Dev/
+docs/reference/GPT拉屎大全.txt
+酒馆美化/
+/tests/
+
+# 根目录脚本与样板白名单（仅公开启动/更新支撑模块与标准 DLC 样板）
+/scripts/*
+!/scripts/load-env.mjs
+!/scripts/local-update-manager.mjs
+/samples/*
+!/samples/dlc/
+/samples/dlc/DLC测试包_*.json
+/Gemini透传代理.mjs
+/精确替换世界书条目.mjs
+/读取楼层.mjs
+
+# 初始模板与私人存档世界书
+mvu指挥系统/初始模版/
+mvu指挥系统/初始模板/
+mvu指挥系统/示例/
+worldbooks/剧情·北坡纪事_世界书.json
+worldbooks/北坡采药营地_基地布局_世界书.json
+worldbooks/赛博朋克2042-剧情.json
+
+# 临时文件、过程包、备份与日志
+.tmp/
+**/.tmp/
+_tmp/
+**/_tmp/
+_tmp_*/
+temp/
+**/temp/
+archive/
+**/archive/
+artifacts/
+**/artifacts/
+docs-evidence/
+**/docs-evidence/
+patches/
+_draft/
+.tmp_*
+temp_*
+tmp_*
+**/tmp_*
+_shot_*.png
+*.log
+*.bak
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# 构建产物与自动生成声明
+site/.vitepress/cache/
+site/.vitepress/dist/
+worldbook-explorer/dist/
+mvu指挥系统/vite-preview/dist/
+mvu指挥系统/dist/
+mvu指挥系统/auto-imports.d.ts
+mvu指挥系统/components.d.ts
+**/auto-imports.d.ts
+**/components.d.ts
+
+# 操作系统与编辑器杂项
+.DS_Store
+Thumbs.db
+Desktop.ini
+.VSCodeCounter/

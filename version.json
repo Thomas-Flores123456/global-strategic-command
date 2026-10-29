@@ -1,0 +1,17 @@
+{
+  "project": "SillyTavern-世界观构建",
+  "version": "2.4.0",
+  "save_schema": 2,
+  "updated_at": "2026-10-28",
+  "manifest_url": "",
+  "releases": [
+    {
+      "version": "2.4.0",
+      "date": "2026-10-28",
+      "breaking_save": false,
+      "save_schema": 2,
+      "summary": "PC 一键启动总控、本地服务化版本检测与战局强制备份恢复闭环",
+      "save_migration_note": "兼容 SavePack V2 战局档案，支持直接读取恢复。"
+    }
+  ]
+}

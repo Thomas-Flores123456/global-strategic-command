@@ -1,0 +1,3496 @@
+{
+  "buildings": [],
+  "byId": {
+    "B-52J换发改装工程": {
+      "cost": 1600,
+      "desc": "T2 改装选项：B-52J换发改装工程（挂先进航电综合工学·中改档）——新一代涡扇替换八发老引擎+雷达航电换代；换发后预期服役年限再延数十年。",
+      "grade": "中改",
+      "id": "B-52J换发改装工程",
+      "name": "B-52J换发改装工程",
+      "phases": [
+        {
+          "cost": 533,
+          "name": "发动机舱适配改造",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 534,
+          "name": "新一代涡扇吊装换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 533,
+          "name": "雷达航电换代与联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "B-52机队在役批次（换发后改称B-52J）",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "F-16C现代化改装工程": {
+      "cost": 1300,
+      "desc": "T2 改装选项：F-16C现代化改装工程（挂先进航电综合工学·中改档）——有源相控阵雷达+全数字座舱（Block 70级）。",
+      "grade": "中改",
+      "id": "F-16C现代化改装工程",
+      "name": "F-16C现代化改装工程",
+      "phases": [
+        {
+          "cost": 433,
+          "name": "有源相控阵雷达换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 434,
+          "name": "全数字座舱改装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 433,
+          "name": "整机联调与出厂验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "态势感知"
+      ],
+      "target": {
+        "id": "F-16C机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "伯克级现代化改装工程": {
+      "cost": 1800,
+      "desc": "T2 改装选项：伯克级现代化改装工程（挂先进舰载战斗系统工学·中改档）——战斗系统基线回填，向Flight III新舰看齐。",
+      "grade": "中改",
+      "id": "伯克级现代化改装工程",
+      "name": "伯克级现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "舰体检修与基线准备",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "战斗系统基线回填",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "全舰联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进舰载战斗系统工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "伯克级驱逐舰在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "女武神协同数据链改装工程": {
+      "cost": 600,
+      "desc": "T2 改装选项：女武神协同数据链改装工程（挂协同无人作战工学·小改档）——CCA网络原生编队员（她本就是CCA的血统前辈）。",
+      "grade": "小改",
+      "id": "女武神协同数据链改装工程",
+      "name": "女武神协同数据链改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "CCA网络编队协同改装",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "协同无人作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "女武神无人机在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "小鹰级弹射器换装工程": {
+      "cost": 5000,
+      "desc": "T2 改装选项：小鹰级弹射器换装工程（挂电磁弹射作战工学·大改档）——蒸汽弹射换装电磁弹射体系。",
+      "grade": "大改",
+      "id": "小鹰级弹射器换装工程",
+      "name": "小鹰级弹射器换装工程",
+      "phases": [
+        {
+          "cost": 1000,
+          "name": "蒸汽弹射系统拆除",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "电磁弹射轨道敷设",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "储能与供电系统改造",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "甲板作业流重划联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "电磁弹射作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "小鹰级航母在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "尼米兹级弹射器换装工程": {
+      "cost": 5500,
+      "desc": "T2 改装选项：尼米兹级弹射器换装工程（挂电磁弹射作战工学·大改档）；另有RCOH中期换料大修（大改档·长期离线\"闭关\"，出坞后状态全面刷新）。",
+      "grade": "大改",
+      "id": "尼米兹级弹射器换装工程",
+      "name": "尼米兹级弹射器换装工程",
+      "phases": [
+        {
+          "cost": 1100,
+          "name": "蒸汽弹射系统拆除",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "电磁弹射轨道敷设",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "舰载电网扩容改造",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "全舰弹射联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "出坞验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "电磁弹射作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "尼米兹级航母在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "布拉德利现代化改装工程": {
+      "cost": 1100,
+      "desc": "T2 改装选项：布拉德利现代化改装工程（挂混合动力装甲工学·中改档）——A4级动力与全车数字化；M3侦察型归族同批进厂。\nT2 改装选项：随布拉德利现代化改装工程归族升级（同批进厂，同挂混合动力装甲工学）。",
+      "grade": "中改",
+      "id": "布拉德利现代化改装工程",
+      "name": "布拉德利现代化改装工程",
+      "phases": [
+        {
+          "cost": 550,
+          "name": "A4动力包换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 550,
+          "name": "全车数字化与归族同批验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "混合动力装甲工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "重型装甲"
+      ],
+      "target": {
+        "id": "布拉德利车族在役批次（M3侦察型归族同批）",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "帕拉丁现代化改装工程": {
+      "cost": 3200,
+      "desc": "T2 改装选项：帕拉丁现代化改装工程（挂混合动力装甲工学·大改档）——底盘换装通用件+电传驱动（A7标准）。",
+      "grade": "大改",
+      "id": "帕拉丁现代化改装工程",
+      "name": "帕拉丁现代化改装工程",
+      "phases": [
+        {
+          "cost": 800,
+          "name": "底盘通用件换装",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 800,
+          "name": "电传驱动换装",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 800,
+          "name": "A7标准全系统联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 800,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "混合动力装甲工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "重型装甲"
+      ],
+      "target": {
+        "id": "帕拉丁自行榴弹炮在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "提康德罗加现代化改装工程": {
+      "cost": 1800,
+      "desc": "T2 改装选项：提康德罗加现代化改装工程（挂先进舰载战斗系统工学·中改档）——战斗系统整体回填+舰体延寿。另一个位面放弃了她；这个位面没有。",
+      "grade": "中改",
+      "id": "提康德罗加现代化改装工程",
+      "name": "提康德罗加现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "舰体延寿检修",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "战斗系统整体回填",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "全舰联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进舰载战斗系统工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "提康德罗加级巡洋舰在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "支奴干现代化改装工程": {
+      "cost": 1200,
+      "desc": "T2 改装选项：支奴干现代化改装工程（挂先进旋翼平台工学·中改档）——升力系统+传动升级（Block II标准）。",
+      "grade": "中改",
+      "id": "支奴干现代化改装工程",
+      "name": "支奴干现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "升力系统换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "传动升级与Block II验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进旋翼平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "轻装快速"
+      ],
+      "target": {
+        "id": "支奴干机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "攻击鹰现代化改装工程": {
+      "cost": 1400,
+      "desc": "T2 改装选项：攻击鹰现代化改装工程（挂先进航电综合工学·中改档）——航电换代+外挂扩容（载弹强化构型）。",
+      "grade": "中改",
+      "id": "攻击鹰现代化改装工程",
+      "name": "攻击鹰现代化改装工程",
+      "phases": [
+        {
+          "cost": 466,
+          "name": "航电套件换代",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "外挂扩容与载弹构型强化",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "攻击鹰机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "斯特赖克指挥车现代化改装工程": {
+      "cost": 500,
+      "desc": "T2 改装选项：斯特赖克指挥车现代化改装工程（挂增强现实战场系统工学·小改档）——指挥系统AR化+数据链升级。",
+      "grade": "小改",
+      "id": "斯特赖克指挥车现代化改装工程",
+      "name": "斯特赖克指挥车现代化改装工程",
+      "phases": [
+        {
+          "cost": 500,
+          "name": "指挥系统AR化与数据链升级",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "增强现实战场系统工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "斯特赖克指挥车在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "机动雷达车雷达升级工程": {
+      "cost": 1000,
+      "desc": "T2 改装选项：机动雷达车雷达升级工程（挂弹道导弹防御工学·中改档）——阵面换装+高速目标跟踪能力扩展。",
+      "grade": "中改",
+      "id": "机动雷达车雷达升级工程",
+      "name": "机动雷达车雷达升级工程",
+      "phases": [
+        {
+          "cost": 500,
+          "name": "雷达阵面换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 500,
+          "name": "高速目标跟踪联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "弹道导弹防御工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "态势感知"
+      ],
+      "target": {
+        "id": "机动雷达车在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "死神协同数据链改装工程": {
+      "cost": 600,
+      "desc": "T2 改装选项：死神协同数据链改装工程（挂协同无人作战工学·小改档）——接入CCA网络作低速持久节点。",
+      "grade": "小改",
+      "id": "死神协同数据链改装工程",
+      "name": "死神协同数据链改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "CCA协同数据链接入改装",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "协同无人作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "死神无人机在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "洛杉矶级延寿工程": {
+      "cost": 800,
+      "desc": "T2 改装选项：洛杉矶级延寿工程（挂先进攻击核潜工学·小改档）——延寿与静音改进；一线任务由弗吉尼亚级逐步接棒。",
+      "grade": "小改",
+      "id": "洛杉矶级延寿工程",
+      "name": "洛杉矶级延寿工程",
+      "phases": [
+        {
+          "cost": 800,
+          "name": "延寿检修与静音改进",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "先进攻击核潜工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "洛杉矶级首艇690舰及同型在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "海马斯弹药兼容工程": {
+      "cost": 500,
+      "desc": "T2 改装选项：海马斯弹药兼容工程（挂精密远程投射工学·小改档）——发射箱适配新一代精确弹族（每弹箱可装PrSM×2）。",
+      "grade": "小改",
+      "id": "海马斯弹药兼容工程",
+      "name": "海马斯弹药兼容工程",
+      "phases": [
+        {
+          "cost": 500,
+          "name": "发射箱弹药兼容适配",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 2,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "精密远程投射工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "区域拒止"
+      ],
+      "target": {
+        "id": "海马斯火箭炮在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "灰熊坦克现代化改装工程": {
+      "cost": 3000,
+      "desc": "T2 改装选项：灰熊坦克现代化改装工程（挂混合动力装甲工学·大改档）——混动APU+主动防御系统+车际数据网络。",
+      "grade": "大改",
+      "id": "灰熊坦克现代化改装工程",
+      "name": "灰熊坦克现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "底盘拆解",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "混动APU换装",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "主动防御集成",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "车际网络联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "混合动力装甲工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "重型装甲"
+      ],
+      "target": {
+        "id": "灰熊坦克族在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "爱国者阵地增强改装工程": {
+      "cost": 1200,
+      "desc": "拦截弹换代与雷达阵面升级（PAC-3级强化）。",
+      "grade": "中改",
+      "id": "爱国者阵地增强改装工程",
+      "name": "爱国者阵地增强改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "雷达阵面升级",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "拦截弹换代与阵地验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "弹道导弹防御工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "防御工事",
+        "区域拒止"
+      ],
+      "target": {
+        "id": "爱国者导弹阵地",
+        "kind": "building"
+      },
+      "type": "retrofit"
+    },
+    "电子战干扰站正式化改装工程": {
+      "cost": 1100,
+      "desc": "将实验性灵气屏蔽升级为正式灵气屏蔽系统。",
+      "grade": "中改",
+      "id": "电子战干扰站正式化改装工程",
+      "name": "电子战干扰站正式化改装工程",
+      "phases": [
+        {
+          "cost": 550,
+          "name": "灵气屏蔽阵列正式化改装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 550,
+          "name": "系统联调与阵地验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "灵气屏蔽工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "防御工事",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "电子战干扰站",
+        "kind": "building"
+      },
+      "type": "retrofit"
+    },
+    "阵风现代化改装工程": {
+      "cost": 1400,
+      "desc": "T2 改装选项：阵风现代化改装工程（挂先进航电综合工学·中改档）——传感器融合+网络中心战节点化（F4标准）。",
+      "grade": "中改",
+      "id": "阵风现代化改装工程",
+      "name": "阵风现代化改装工程",
+      "phases": [
+        {
+          "cost": 466,
+          "name": "传感器融合套件改装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "网络中心战节点化集成",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "F4标准联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "阵风机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "阿帕奇现代化改装工程": {
+      "cost": 1200,
+      "desc": "T2 改装选项：阿帕奇现代化改装工程（挂先进旋翼平台工学·中改档）——换发+传动强化+无人机协同管制（E型标准）。",
+      "grade": "中改",
+      "id": "阿帕奇现代化改装工程",
+      "name": "阿帕奇现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "发动机与传动强化换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "无人机协同管制集成与验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进旋翼平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "轻装快速"
+      ],
+      "target": {
+        "id": "阿帕奇机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "黄蜂级短垂适配改装工程": {
+      "cost": 4500,
+      "desc": "T2 改装选项：黄蜂级短垂适配改装工程（挂多任务隐身平台工学[盟军特色]·大改档）——甲板耐热处理+保障设施改造，具备F-35B搭载运作能力（兑现本条\"T2解锁短垂\"预埋）。",
+      "grade": "大改",
+      "id": "黄蜂级短垂适配改装工程",
+      "name": "黄蜂级短垂适配改装工程",
+      "phases": [
+        {
+          "cost": 1125,
+          "name": "甲板耐热涂层重铺",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1125,
+          "name": "航空保障设施改造",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1125,
+          "name": "短垂起降调度联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1125,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "多任务隐身平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "黄蜂级两栖攻击舰在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    "黑鹰现代化改装工程": {
+      "cost": 1100,
+      "desc": "T2 改装选项：黑鹰现代化改装工程（挂先进旋翼平台工学·中改档）——换发+数字飞控。",
+      "grade": "中改",
+      "id": "黑鹰现代化改装工程",
+      "name": "黑鹰现代化改装工程",
+      "phases": [
+        {
+          "cost": 550,
+          "name": "发动机换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 550,
+          "name": "数字飞控集成与验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进旋翼平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "轻装快速"
+      ],
+      "target": {
+        "id": "黑鹰直升机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    }
+  },
+  "diagnostics": [],
+  "items": [
+    {
+      "cost": 3000,
+      "desc": "T2 改装选项：灰熊坦克现代化改装工程（挂混合动力装甲工学·大改档）——混动APU+主动防御系统+车际数据网络。",
+      "grade": "大改",
+      "id": "灰熊坦克现代化改装工程",
+      "name": "灰熊坦克现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "底盘拆解",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "混动APU换装",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "主动防御集成",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "车际网络联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "混合动力装甲工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "重型装甲"
+      ],
+      "target": {
+        "id": "灰熊坦克族在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1100,
+      "desc": "T2 改装选项：布拉德利现代化改装工程（挂混合动力装甲工学·中改档）——A4级动力与全车数字化；M3侦察型归族同批进厂。\nT2 改装选项：随布拉德利现代化改装工程归族升级（同批进厂，同挂混合动力装甲工学）。",
+      "grade": "中改",
+      "id": "布拉德利现代化改装工程",
+      "name": "布拉德利现代化改装工程",
+      "phases": [
+        {
+          "cost": 550,
+          "name": "A4动力包换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 550,
+          "name": "全车数字化与归族同批验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "混合动力装甲工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "重型装甲"
+      ],
+      "target": {
+        "id": "布拉德利车族在役批次（M3侦察型归族同批）",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 3200,
+      "desc": "T2 改装选项：帕拉丁现代化改装工程（挂混合动力装甲工学·大改档）——底盘换装通用件+电传驱动（A7标准）。",
+      "grade": "大改",
+      "id": "帕拉丁现代化改装工程",
+      "name": "帕拉丁现代化改装工程",
+      "phases": [
+        {
+          "cost": 800,
+          "name": "底盘通用件换装",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 800,
+          "name": "电传驱动换装",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 800,
+          "name": "A7标准全系统联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 800,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "混合动力装甲工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "重型装甲"
+      ],
+      "target": {
+        "id": "帕拉丁自行榴弹炮在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 500,
+      "desc": "T2 改装选项：斯特赖克指挥车现代化改装工程（挂增强现实战场系统工学·小改档）——指挥系统AR化+数据链升级。",
+      "grade": "小改",
+      "id": "斯特赖克指挥车现代化改装工程",
+      "name": "斯特赖克指挥车现代化改装工程",
+      "phases": [
+        {
+          "cost": 500,
+          "name": "指挥系统AR化与数据链升级",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "增强现实战场系统工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "斯特赖克指挥车在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 500,
+      "desc": "T2 改装选项：海马斯弹药兼容工程（挂精密远程投射工学·小改档）——发射箱适配新一代精确弹族（每弹箱可装PrSM×2）。",
+      "grade": "小改",
+      "id": "海马斯弹药兼容工程",
+      "name": "海马斯弹药兼容工程",
+      "phases": [
+        {
+          "cost": 500,
+          "name": "发射箱弹药兼容适配",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 2,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "精密远程投射工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "区域拒止"
+      ],
+      "target": {
+        "id": "海马斯火箭炮在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1000,
+      "desc": "T2 改装选项：机动雷达车雷达升级工程（挂弹道导弹防御工学·中改档）——阵面换装+高速目标跟踪能力扩展。",
+      "grade": "中改",
+      "id": "机动雷达车雷达升级工程",
+      "name": "机动雷达车雷达升级工程",
+      "phases": [
+        {
+          "cost": 500,
+          "name": "雷达阵面换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 500,
+          "name": "高速目标跟踪联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "弹道导弹防御工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "态势感知"
+      ],
+      "target": {
+        "id": "机动雷达车在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1300,
+      "desc": "T2 改装选项：F-16C现代化改装工程（挂先进航电综合工学·中改档）——有源相控阵雷达+全数字座舱（Block 70级）。",
+      "grade": "中改",
+      "id": "F-16C现代化改装工程",
+      "name": "F-16C现代化改装工程",
+      "phases": [
+        {
+          "cost": 433,
+          "name": "有源相控阵雷达换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 434,
+          "name": "全数字座舱改装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 433,
+          "name": "整机联调与出厂验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "态势感知"
+      ],
+      "target": {
+        "id": "F-16C机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1100,
+      "desc": "T2 改装选项：黑鹰现代化改装工程（挂先进旋翼平台工学·中改档）——换发+数字飞控。",
+      "grade": "中改",
+      "id": "黑鹰现代化改装工程",
+      "name": "黑鹰现代化改装工程",
+      "phases": [
+        {
+          "cost": 550,
+          "name": "发动机换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 550,
+          "name": "数字飞控集成与验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进旋翼平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "轻装快速"
+      ],
+      "target": {
+        "id": "黑鹰直升机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1400,
+      "desc": "T2 改装选项：攻击鹰现代化改装工程（挂先进航电综合工学·中改档）——航电换代+外挂扩容（载弹强化构型）。",
+      "grade": "中改",
+      "id": "攻击鹰现代化改装工程",
+      "name": "攻击鹰现代化改装工程",
+      "phases": [
+        {
+          "cost": 466,
+          "name": "航电套件换代",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "外挂扩容与载弹构型强化",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "攻击鹰机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1400,
+      "desc": "T2 改装选项：阵风现代化改装工程（挂先进航电综合工学·中改档）——传感器融合+网络中心战节点化（F4标准）。",
+      "grade": "中改",
+      "id": "阵风现代化改装工程",
+      "name": "阵风现代化改装工程",
+      "phases": [
+        {
+          "cost": 466,
+          "name": "传感器融合套件改装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "网络中心战节点化集成",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "F4标准联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "阵风机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1200,
+      "desc": "T2 改装选项：阿帕奇现代化改装工程（挂先进旋翼平台工学·中改档）——换发+传动强化+无人机协同管制（E型标准）。",
+      "grade": "中改",
+      "id": "阿帕奇现代化改装工程",
+      "name": "阿帕奇现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "发动机与传动强化换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "无人机协同管制集成与验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进旋翼平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "轻装快速"
+      ],
+      "target": {
+        "id": "阿帕奇机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 600,
+      "desc": "T2 改装选项：死神协同数据链改装工程（挂协同无人作战工学·小改档）——接入CCA网络作低速持久节点。",
+      "grade": "小改",
+      "id": "死神协同数据链改装工程",
+      "name": "死神协同数据链改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "CCA协同数据链接入改装",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "协同无人作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "死神无人机在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 600,
+      "desc": "T2 改装选项：女武神协同数据链改装工程（挂协同无人作战工学·小改档）——CCA网络原生编队员（她本就是CCA的血统前辈）。",
+      "grade": "小改",
+      "id": "女武神协同数据链改装工程",
+      "name": "女武神协同数据链改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "CCA网络编队协同改装",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "协同无人作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "女武神无人机在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1200,
+      "desc": "T2 改装选项：支奴干现代化改装工程（挂先进旋翼平台工学·中改档）——升力系统+传动升级（Block II标准）。",
+      "grade": "中改",
+      "id": "支奴干现代化改装工程",
+      "name": "支奴干现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "升力系统换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "传动升级与Block II验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进旋翼平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "轻装快速"
+      ],
+      "target": {
+        "id": "支奴干机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1600,
+      "desc": "T2 改装选项：B-52J换发改装工程（挂先进航电综合工学·中改档）——新一代涡扇替换八发老引擎+雷达航电换代；换发后预期服役年限再延数十年。",
+      "grade": "中改",
+      "id": "B-52J换发改装工程",
+      "name": "B-52J换发改装工程",
+      "phases": [
+        {
+          "cost": 533,
+          "name": "发动机舱适配改造",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 534,
+          "name": "新一代涡扇吊装换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 533,
+          "name": "雷达航电换代与联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "B-52机队在役批次（换发后改称B-52J）",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1800,
+      "desc": "T2 改装选项：伯克级现代化改装工程（挂先进舰载战斗系统工学·中改档）——战斗系统基线回填，向Flight III新舰看齐。",
+      "grade": "中改",
+      "id": "伯克级现代化改装工程",
+      "name": "伯克级现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "舰体检修与基线准备",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "战斗系统基线回填",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "全舰联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进舰载战斗系统工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "伯克级驱逐舰在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1800,
+      "desc": "T2 改装选项：提康德罗加现代化改装工程（挂先进舰载战斗系统工学·中改档）——战斗系统整体回填+舰体延寿。另一个位面放弃了她；这个位面没有。",
+      "grade": "中改",
+      "id": "提康德罗加现代化改装工程",
+      "name": "提康德罗加现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "舰体延寿检修",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "战斗系统整体回填",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "全舰联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进舰载战斗系统工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "提康德罗加级巡洋舰在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 800,
+      "desc": "T2 改装选项：洛杉矶级延寿工程（挂先进攻击核潜工学·小改档）——延寿与静音改进；一线任务由弗吉尼亚级逐步接棒。",
+      "grade": "小改",
+      "id": "洛杉矶级延寿工程",
+      "name": "洛杉矶级延寿工程",
+      "phases": [
+        {
+          "cost": 800,
+          "name": "延寿检修与静音改进",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "先进攻击核潜工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "洛杉矶级首艇690舰及同型在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 4500,
+      "desc": "T2 改装选项：黄蜂级短垂适配改装工程（挂多任务隐身平台工学[盟军特色]·大改档）——甲板耐热处理+保障设施改造，具备F-35B搭载运作能力（兑现本条\"T2解锁短垂\"预埋）。",
+      "grade": "大改",
+      "id": "黄蜂级短垂适配改装工程",
+      "name": "黄蜂级短垂适配改装工程",
+      "phases": [
+        {
+          "cost": 1125,
+          "name": "甲板耐热涂层重铺",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1125,
+          "name": "航空保障设施改造",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1125,
+          "name": "短垂起降调度联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1125,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "多任务隐身平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "黄蜂级两栖攻击舰在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1200,
+      "desc": "拦截弹换代与雷达阵面升级（PAC-3级强化）。",
+      "grade": "中改",
+      "id": "爱国者阵地增强改装工程",
+      "name": "爱国者阵地增强改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "雷达阵面升级",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "拦截弹换代与阵地验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "弹道导弹防御工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "防御工事",
+        "区域拒止"
+      ],
+      "target": {
+        "id": "爱国者导弹阵地",
+        "kind": "building"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1100,
+      "desc": "将实验性灵气屏蔽升级为正式灵气屏蔽系统。",
+      "grade": "中改",
+      "id": "电子战干扰站正式化改装工程",
+      "name": "电子战干扰站正式化改装工程",
+      "phases": [
+        {
+          "cost": 550,
+          "name": "灵气屏蔽阵列正式化改装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 550,
+          "name": "系统联调与阵地验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "灵气屏蔽工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "防御工事",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "电子战干扰站",
+        "kind": "building"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 5000,
+      "desc": "T2 改装选项：小鹰级弹射器换装工程（挂电磁弹射作战工学·大改档）——蒸汽弹射换装电磁弹射体系。",
+      "grade": "大改",
+      "id": "小鹰级弹射器换装工程",
+      "name": "小鹰级弹射器换装工程",
+      "phases": [
+        {
+          "cost": 1000,
+          "name": "蒸汽弹射系统拆除",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "电磁弹射轨道敷设",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "储能与供电系统改造",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "甲板作业流重划联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "电磁弹射作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "小鹰级航母在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 5500,
+      "desc": "T2 改装选项：尼米兹级弹射器换装工程（挂电磁弹射作战工学·大改档）；另有RCOH中期换料大修（大改档·长期离线\"闭关\"，出坞后状态全面刷新）。",
+      "grade": "大改",
+      "id": "尼米兹级弹射器换装工程",
+      "name": "尼米兹级弹射器换装工程",
+      "phases": [
+        {
+          "cost": 1100,
+          "name": "蒸汽弹射系统拆除",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "电磁弹射轨道敷设",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "舰载电网扩容改造",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "全舰弹射联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "出坞验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "电磁弹射作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "尼米兹级航母在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    }
+  ],
+  "productions": [],
+  "projects": [],
+  "researches": [],
+  "retrofits": [
+    {
+      "cost": 3000,
+      "desc": "T2 改装选项：灰熊坦克现代化改装工程（挂混合动力装甲工学·大改档）——混动APU+主动防御系统+车际数据网络。",
+      "grade": "大改",
+      "id": "灰熊坦克现代化改装工程",
+      "name": "灰熊坦克现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "底盘拆解",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "混动APU换装",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "主动防御集成",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "车际网络联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 600,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "混合动力装甲工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "重型装甲"
+      ],
+      "target": {
+        "id": "灰熊坦克族在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1100,
+      "desc": "T2 改装选项：布拉德利现代化改装工程（挂混合动力装甲工学·中改档）——A4级动力与全车数字化；M3侦察型归族同批进厂。\nT2 改装选项：随布拉德利现代化改装工程归族升级（同批进厂，同挂混合动力装甲工学）。",
+      "grade": "中改",
+      "id": "布拉德利现代化改装工程",
+      "name": "布拉德利现代化改装工程",
+      "phases": [
+        {
+          "cost": 550,
+          "name": "A4动力包换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 550,
+          "name": "全车数字化与归族同批验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "混合动力装甲工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "重型装甲"
+      ],
+      "target": {
+        "id": "布拉德利车族在役批次（M3侦察型归族同批）",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 3200,
+      "desc": "T2 改装选项：帕拉丁现代化改装工程（挂混合动力装甲工学·大改档）——底盘换装通用件+电传驱动（A7标准）。",
+      "grade": "大改",
+      "id": "帕拉丁现代化改装工程",
+      "name": "帕拉丁现代化改装工程",
+      "phases": [
+        {
+          "cost": 800,
+          "name": "底盘通用件换装",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 800,
+          "name": "电传驱动换装",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 800,
+          "name": "A7标准全系统联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 800,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "混合动力装甲工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "重型装甲"
+      ],
+      "target": {
+        "id": "帕拉丁自行榴弹炮在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 500,
+      "desc": "T2 改装选项：斯特赖克指挥车现代化改装工程（挂增强现实战场系统工学·小改档）——指挥系统AR化+数据链升级。",
+      "grade": "小改",
+      "id": "斯特赖克指挥车现代化改装工程",
+      "name": "斯特赖克指挥车现代化改装工程",
+      "phases": [
+        {
+          "cost": 500,
+          "name": "指挥系统AR化与数据链升级",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "增强现实战场系统工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "斯特赖克指挥车在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 500,
+      "desc": "T2 改装选项：海马斯弹药兼容工程（挂精密远程投射工学·小改档）——发射箱适配新一代精确弹族（每弹箱可装PrSM×2）。",
+      "grade": "小改",
+      "id": "海马斯弹药兼容工程",
+      "name": "海马斯弹药兼容工程",
+      "phases": [
+        {
+          "cost": 500,
+          "name": "发射箱弹药兼容适配",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 2,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "精密远程投射工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "区域拒止"
+      ],
+      "target": {
+        "id": "海马斯火箭炮在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1000,
+      "desc": "T2 改装选项：机动雷达车雷达升级工程（挂弹道导弹防御工学·中改档）——阵面换装+高速目标跟踪能力扩展。",
+      "grade": "中改",
+      "id": "机动雷达车雷达升级工程",
+      "name": "机动雷达车雷达升级工程",
+      "phases": [
+        {
+          "cost": 500,
+          "name": "雷达阵面换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 500,
+          "name": "高速目标跟踪联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "弹道导弹防御工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "态势感知"
+      ],
+      "target": {
+        "id": "机动雷达车在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1300,
+      "desc": "T2 改装选项：F-16C现代化改装工程（挂先进航电综合工学·中改档）——有源相控阵雷达+全数字座舱（Block 70级）。",
+      "grade": "中改",
+      "id": "F-16C现代化改装工程",
+      "name": "F-16C现代化改装工程",
+      "phases": [
+        {
+          "cost": 433,
+          "name": "有源相控阵雷达换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 434,
+          "name": "全数字座舱改装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 433,
+          "name": "整机联调与出厂验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "态势感知"
+      ],
+      "target": {
+        "id": "F-16C机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1100,
+      "desc": "T2 改装选项：黑鹰现代化改装工程（挂先进旋翼平台工学·中改档）——换发+数字飞控。",
+      "grade": "中改",
+      "id": "黑鹰现代化改装工程",
+      "name": "黑鹰现代化改装工程",
+      "phases": [
+        {
+          "cost": 550,
+          "name": "发动机换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 550,
+          "name": "数字飞控集成与验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进旋翼平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "轻装快速"
+      ],
+      "target": {
+        "id": "黑鹰直升机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1400,
+      "desc": "T2 改装选项：攻击鹰现代化改装工程（挂先进航电综合工学·中改档）——航电换代+外挂扩容（载弹强化构型）。",
+      "grade": "中改",
+      "id": "攻击鹰现代化改装工程",
+      "name": "攻击鹰现代化改装工程",
+      "phases": [
+        {
+          "cost": 466,
+          "name": "航电套件换代",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "外挂扩容与载弹构型强化",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "攻击鹰机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1400,
+      "desc": "T2 改装选项：阵风现代化改装工程（挂先进航电综合工学·中改档）——传感器融合+网络中心战节点化（F4标准）。",
+      "grade": "中改",
+      "id": "阵风现代化改装工程",
+      "name": "阵风现代化改装工程",
+      "phases": [
+        {
+          "cost": 466,
+          "name": "传感器融合套件改装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "网络中心战节点化集成",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 467,
+          "name": "F4标准联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "阵风机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1200,
+      "desc": "T2 改装选项：阿帕奇现代化改装工程（挂先进旋翼平台工学·中改档）——换发+传动强化+无人机协同管制（E型标准）。",
+      "grade": "中改",
+      "id": "阿帕奇现代化改装工程",
+      "name": "阿帕奇现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "发动机与传动强化换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "无人机协同管制集成与验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进旋翼平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "轻装快速"
+      ],
+      "target": {
+        "id": "阿帕奇机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 600,
+      "desc": "T2 改装选项：死神协同数据链改装工程（挂协同无人作战工学·小改档）——接入CCA网络作低速持久节点。",
+      "grade": "小改",
+      "id": "死神协同数据链改装工程",
+      "name": "死神协同数据链改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "CCA协同数据链接入改装",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "协同无人作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "死神无人机在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 600,
+      "desc": "T2 改装选项：女武神协同数据链改装工程（挂协同无人作战工学·小改档）——CCA网络原生编队员（她本就是CCA的血统前辈）。",
+      "grade": "小改",
+      "id": "女武神协同数据链改装工程",
+      "name": "女武神协同数据链改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "CCA网络编队协同改装",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "协同无人作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "女武神无人机在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1200,
+      "desc": "T2 改装选项：支奴干现代化改装工程（挂先进旋翼平台工学·中改档）——升力系统+传动升级（Block II标准）。",
+      "grade": "中改",
+      "id": "支奴干现代化改装工程",
+      "name": "支奴干现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "升力系统换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "传动升级与Block II验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进旋翼平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "轻装快速"
+      ],
+      "target": {
+        "id": "支奴干机队在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1600,
+      "desc": "T2 改装选项：B-52J换发改装工程（挂先进航电综合工学·中改档）——新一代涡扇替换八发老引擎+雷达航电换代；换发后预期服役年限再延数十年。",
+      "grade": "中改",
+      "id": "B-52J换发改装工程",
+      "name": "B-52J换发改装工程",
+      "phases": [
+        {
+          "cost": 533,
+          "name": "发动机舱适配改造",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 534,
+          "name": "新一代涡扇吊装换装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 533,
+          "name": "雷达航电换代与联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进航电综合工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "B-52机队在役批次（换发后改称B-52J）",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1800,
+      "desc": "T2 改装选项：伯克级现代化改装工程（挂先进舰载战斗系统工学·中改档）——战斗系统基线回填，向Flight III新舰看齐。",
+      "grade": "中改",
+      "id": "伯克级现代化改装工程",
+      "name": "伯克级现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "舰体检修与基线准备",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "战斗系统基线回填",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "全舰联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进舰载战斗系统工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "伯克级驱逐舰在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1800,
+      "desc": "T2 改装选项：提康德罗加现代化改装工程（挂先进舰载战斗系统工学·中改档）——战斗系统整体回填+舰体延寿。另一个位面放弃了她；这个位面没有。",
+      "grade": "中改",
+      "id": "提康德罗加现代化改装工程",
+      "name": "提康德罗加现代化改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "舰体延寿检修",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "战斗系统整体回填",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "全舰联调验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 4,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "先进舰载战斗系统工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "提康德罗加级巡洋舰在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 800,
+      "desc": "T2 改装选项：洛杉矶级延寿工程（挂先进攻击核潜工学·小改档）——延寿与静音改进；一线任务由弗吉尼亚级逐步接棒。",
+      "grade": "小改",
+      "id": "洛杉矶级延寿工程",
+      "name": "洛杉矶级延寿工程",
+      "phases": [
+        {
+          "cost": 800,
+          "name": "延寿检修与静音改进",
+          "resources": {
+            "nanites": 50
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 1
+          }
+        }
+      ],
+      "research": "先进攻击核潜工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "洛杉矶级首艇690舰及同型在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 4500,
+      "desc": "T2 改装选项：黄蜂级短垂适配改装工程（挂多任务隐身平台工学[盟军特色]·大改档）——甲板耐热处理+保障设施改造，具备F-35B搭载运作能力（兑现本条\"T2解锁短垂\"预埋）。",
+      "grade": "大改",
+      "id": "黄蜂级短垂适配改装工程",
+      "name": "黄蜂级短垂适配改装工程",
+      "phases": [
+        {
+          "cost": 1125,
+          "name": "甲板耐热涂层重铺",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1125,
+          "name": "航空保障设施改造",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1125,
+          "name": "短垂起降调度联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1125,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "多任务隐身平台工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "黄蜂级两栖攻击舰在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1200,
+      "desc": "拦截弹换代与雷达阵面升级（PAC-3级强化）。",
+      "grade": "中改",
+      "id": "爱国者阵地增强改装工程",
+      "name": "爱国者阵地增强改装工程",
+      "phases": [
+        {
+          "cost": 600,
+          "name": "雷达阵面升级",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 600,
+          "name": "拦截弹换代与阵地验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "弹道导弹防御工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "防御工事",
+        "区域拒止"
+      ],
+      "target": {
+        "id": "爱国者导弹阵地",
+        "kind": "building"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 1100,
+      "desc": "将实验性灵气屏蔽升级为正式灵气屏蔽系统。",
+      "grade": "中改",
+      "id": "电子战干扰站正式化改装工程",
+      "name": "电子战干扰站正式化改装工程",
+      "phases": [
+        {
+          "cost": 550,
+          "name": "灵气屏蔽阵列正式化改装",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        },
+        {
+          "cost": 550,
+          "name": "系统联调与阵地验收",
+          "resources": {
+            "nanites": 150
+          },
+          "workload": {
+            "days": 3,
+            "min_days": 2
+          }
+        }
+      ],
+      "research": "灵气屏蔽工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "防御工事",
+        "C4ISR"
+      ],
+      "target": {
+        "id": "电子战干扰站",
+        "kind": "building"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 5000,
+      "desc": "T2 改装选项：小鹰级弹射器换装工程（挂电磁弹射作战工学·大改档）——蒸汽弹射换装电磁弹射体系。",
+      "grade": "大改",
+      "id": "小鹰级弹射器换装工程",
+      "name": "小鹰级弹射器换装工程",
+      "phases": [
+        {
+          "cost": 1000,
+          "name": "蒸汽弹射系统拆除",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "电磁弹射轨道敷设",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "储能与供电系统改造",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "甲板作业流重划联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1000,
+          "name": "出厂验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 5,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "电磁弹射作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "小鹰级航母在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    },
+    {
+      "cost": 5500,
+      "desc": "T2 改装选项：尼米兹级弹射器换装工程（挂电磁弹射作战工学·大改档）；另有RCOH中期换料大修（大改档·长期离线\"闭关\"，出坞后状态全面刷新）。",
+      "grade": "大改",
+      "id": "尼米兹级弹射器换装工程",
+      "name": "尼米兹级弹射器换装工程",
+      "phases": [
+        {
+          "cost": 1100,
+          "name": "蒸汽弹射系统拆除",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "电磁弹射轨道敷设",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "舰载电网扩容改造",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "全舰弹射联调",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        },
+        {
+          "cost": 1100,
+          "name": "出坞验收",
+          "resources": {
+            "nanites": 400
+          },
+          "workload": {
+            "days": 6,
+            "min_days": 3
+          }
+        }
+      ],
+      "research": "电磁弹射作战工学",
+      "scene": "scene.workshop.generic",
+      "schema_version": 1,
+      "scope": "base",
+      "tags": [
+        "载具建造"
+      ],
+      "target": {
+        "id": "尼米兹级航母在役批次",
+        "kind": "unit"
+      },
+      "type": "retrofit"
+    }
+  ]
+}

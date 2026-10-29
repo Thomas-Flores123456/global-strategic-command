@@ -1,0 +1,5 @@
+/**
+ * Tailwind 实际入口（开场启动器专用）。
+ * 与红警指挥系统同链：经 postcss(@tailwindcss/postcss) 展开，webpack 与 vite 双链共用。
+ */
+@import 'tailwindcss';

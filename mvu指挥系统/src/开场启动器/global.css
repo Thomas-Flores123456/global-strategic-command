@@ -1,0 +1,438 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #070b10;
+  color-scheme: dark;
+}
+
+body {
+  min-width: 280px;
+}
+
+#app {
+  /* ── 核心深空与玻璃令牌（对齐红警指挥系统 global.css） ── */
+  --void: #070b10;
+  --glass: rgba(13, 21, 29, 0.94);
+  --glass-soft: rgba(17, 28, 38, 0.68);
+  --glass-faint: rgba(26, 40, 53, 0.38);
+  --line: rgba(141, 180, 207, 0.14);
+  --line-hi: rgba(155, 196, 224, 0.28);
+  --line-hot: rgba(145, 201, 239, 0.58);
+  --text: #d9e5ed;
+  --text-2: #8fa3b1;
+  --text-3: #7a8e9a;
+  --text-4: #354957;
+  --ice: #8bc3e7;
+  --ice-soft: #5e91b1;
+  --safe: #78b69b;
+  --amber: #d2ad69;
+  --danger: #cf796f;
+  --mono: 'Cascadia Mono', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+
+  /* ── RAC 中控台语义令牌（盟军默认：冰蓝战术 HUD） ── */
+  --rac-bg: #080a0b;
+  --rac-panel: #0c1113;
+  --rac-panel-2: #0f1619;
+  --rac-dim: #2c3b40;
+  --rac-line: #5f7c84;
+  --rac-hi: #d4e3e6;
+  --rac-text: #cfdde0;
+  --rac-muted: #8aa1a7;
+  --rac-accent: #38bdf8;
+  --rac-ok: #46d19a;
+  --rac-warn: #d2ad69;
+  --rac-alert: #ff5a36;
+  --rac-focus: #38bdf8;
+  --rac-overlay: rgba(12, 17, 19, 0.96);
+
+  /* ── 向后兼容别名（确保既有选择器零回归） ── */
+  --ink: var(--rac-text);
+  --ink-dim: var(--rac-muted);
+  --go: var(--rac-ok);
+  --warn: var(--rac-warn);
+
+  font-family: Inter, 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--rac-text);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(56, 189, 248, 0.08), transparent 42%),
+    radial-gradient(circle at 88% 100%, rgba(70, 209, 154, 0.05), transparent 45%),
+    var(--rac-bg);
+  box-sizing: border-box;
+}
+
+/* ── 苏联深红主题覆盖 ── */
+#app[data-theme='soviet'] {
+  --void: #0f0507;
+  --glass: rgba(26, 10, 12, 0.94);
+  --glass-soft: rgba(36, 13, 15, 0.68);
+  --glass-faint: rgba(51, 18, 21, 0.38);
+  --line: rgba(214, 122, 122, 0.16);
+  --line-hi: rgba(228, 132, 132, 0.3);
+  --line-hot: rgba(240, 120, 120, 0.58);
+  --text: #eed9da;
+  --text-2: #b18f92;
+  --text-3: #9a7074;
+  --text-4: #553639;
+  --ice: #e25555;
+  --ice-soft: #a63c3c;
+  --rac-bg: #0f0507;
+  --rac-panel: #160b0d;
+  --rac-panel-2: #1c0f12;
+  --rac-dim: #4a2428;
+  --rac-line: #8c4040;
+  --rac-hi: #f5c4c4;
+  --rac-text: #eed9da;
+  --rac-muted: #b18f92;
+  --rac-accent: #e25555;
+  --rac-focus: #e25555;
+  --rac-overlay: rgba(22, 11, 13, 0.96);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(226, 85, 85, 0.11), transparent 42%),
+    radial-gradient(circle at 88% 100%, rgba(210, 173, 105, 0.05), transparent 45%),
+    var(--rac-bg);
+}
+
+/* ── 尤里暗紫主题覆盖 ── */
+#app[data-theme='yuri'] {
+  --void: #0c0710;
+  --glass: rgba(21, 13, 29, 0.94);
+  --glass-soft: rgba(28, 17, 38, 0.68);
+  --glass-faint: rgba(40, 26, 53, 0.38);
+  --line: rgba(180, 141, 207, 0.16);
+  --line-hi: rgba(196, 155, 224, 0.3);
+  --line-hot: rgba(201, 145, 239, 0.58);
+  --text: #e3d9ed;
+  --text-2: #a08fb1;
+  --text-3: #8a7499;
+  --text-4: #453557;
+  --ice: #b892e5;
+  --ice-soft: #8a63b5;
+  --rac-bg: #0c0710;
+  --rac-panel: #120e18;
+  --rac-panel-2: #17121e;
+  --rac-dim: #3a2850;
+  --rac-line: #6e4fa0;
+  --rac-hi: #e3caf7;
+  --rac-text: #e3d9ed;
+  --rac-muted: #a08fb1;
+  --rac-accent: #b892e5;
+  --rac-focus: #b892e5;
+  --rac-overlay: rgba(18, 14, 24, 0.96);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(184, 146, 229, 0.11), transparent 42%),
+    radial-gradient(circle at 88% 100%, rgba(70, 209, 154, 0.05), transparent 45%),
+    var(--rac-bg);
+}
+
+#app *,
+#app *::before,
+#app *::after {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-hi) transparent;
+}
+
+/* ── 向导共享战术区块与组件样式 ── */
+#app .wiz-section {
+  margin-bottom: 11px;
+}
+
+#app .wiz-section:last-child {
+  margin-bottom: 0;
+}
+
+#app .wiz-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+#app .wiz-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--rac-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
+
+#app .wiz-sec-head .wiz-label {
+  margin-bottom: 0;
+}
+
+#app .wiz-label::before {
+  content: '';
+  display: inline-block;
+  width: 3px;
+  height: 11px;
+  background: var(--rac-accent);
+  border-radius: 1px;
+}
+
+#app .opt-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+  gap: 7px;
+}
+
+#app .opt-card {
+  position: relative;
+  background: var(--rac-panel-2);
+  border: 1px solid var(--rac-dim);
+  border-radius: 6px;
+  padding: 8px 11px;
+  cursor: pointer;
+  color: var(--rac-text);
+  text-align: left;
+  transition:
+    border-color 0.16s ease,
+    background-color 0.16s ease,
+    box-shadow 0.16s ease,
+    transform 0.12s ease;
+}
+
+#app .opt-card:hover:not(.dis):not(:disabled) {
+  border-color: var(--rac-line);
+  background: var(--glass-soft);
+}
+
+#app .opt-card:focus-visible {
+  outline: 2px solid var(--rac-focus);
+  outline-offset: 1px;
+}
+
+#app .opt-card.sel {
+  border-color: var(--rac-accent);
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.11), rgba(70, 209, 154, 0.06));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
+    0 4px 14px rgba(0, 0, 0, 0.28);
+}
+
+#app[data-theme='soviet'] .opt-card.sel {
+  background: linear-gradient(135deg, rgba(226, 85, 85, 0.14), rgba(210, 173, 105, 0.06));
+}
+
+#app[data-theme='yuri'] .opt-card.sel {
+  background: linear-gradient(135deg, rgba(184, 146, 229, 0.14), rgba(56, 189, 248, 0.06));
+}
+
+#app .opt-card.dis,
+#app .opt-card:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+#app .opt-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--rac-hi);
+  margin-bottom: 4px;
+}
+
+#app .opt-flavor {
+  font-size: 11.5px;
+  color: var(--rac-muted);
+  line-height: 1.52;
+}
+
+#app .opt-note {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--rac-warn);
+  border: 1px solid rgba(210, 173, 105, 0.4);
+  border-radius: 3px;
+  padding: 0 5px;
+}
+
+#app .wiz-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-family: var(--mono);
+  letter-spacing: 0.03em;
+  border: 1px solid var(--rac-dim);
+  background: rgba(8, 12, 16, 0.65);
+  color: var(--rac-muted);
+}
+
+#app .wiz-chip.rec {
+  border-color: rgba(70, 209, 154, 0.5);
+  background: rgba(70, 209, 154, 0.12);
+  color: var(--rac-ok);
+}
+
+#app .wiz-chip.accent {
+  border-color: var(--line-hot);
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--rac-hi);
+}
+
+#app .wiz-chip.warn {
+  border-color: rgba(210, 173, 105, 0.5);
+  background: rgba(210, 173, 105, 0.12);
+  color: var(--rac-warn);
+}
+
+#app .wiz-pill-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+#app .wiz-pill {
+  padding: 4px 9px;
+  border-radius: 4px;
+  border: 1px solid var(--rac-dim);
+  background: var(--rac-panel);
+  color: var(--rac-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+#app .wiz-pill:hover {
+  border-color: var(--rac-line);
+  color: var(--rac-hi);
+}
+
+#app .wiz-pill.active {
+  border-color: var(--rac-accent);
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--rac-hi);
+  font-weight: 600;
+}
+
+#app .wiz-input,
+#app .wiz-select,
+#app .wiz-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(7, 11, 15, 0.88);
+  border: 1px solid var(--rac-dim);
+  border-radius: 5px;
+  color: var(--rac-hi);
+  font-size: 12.5px;
+  padding: 7px 10px;
+  font-family: inherit;
+  transition: border-color 0.15s ease;
+}
+
+#app .wiz-textarea {
+  min-height: 70px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+#app .wiz-input:focus,
+#app .wiz-select:focus,
+#app .wiz-textarea:focus {
+  outline: none;
+  border-color: var(--rac-focus);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.2);
+}
+
+#app .wiz-radio-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+}
+
+#app .wiz-radio-row label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+#app .wiz-check-list {
+  max-height: 156px;
+  overflow-y: auto;
+  border: 1px solid var(--rac-dim);
+  border-radius: 6px;
+  background: rgba(7, 11, 15, 0.55);
+  padding: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 5px;
+  font-size: 11.5px;
+}
+
+#app .wiz-check-list label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--rac-panel);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+
+#app .wiz-check-list label:hover {
+  border-color: var(--rac-line);
+}
+
+#app .wiz-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#app .wiz-slider-row input[type='range'] {
+  flex: 1;
+  accent-color: var(--rac-accent);
+}
+
+#app .wiz-slider-val {
+  min-width: 58px;
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--rac-hi);
+}
+
+#app .wiz-desc-preview {
+  background: rgba(8, 13, 18, 0.72);
+  border: 1px dashed var(--rac-dim);
+  border-radius: 5px;
+  padding: 9px 11px;
+  font-size: 12px;
+  color: var(--rac-muted);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app *,
+  #app *::before,
+  #app *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

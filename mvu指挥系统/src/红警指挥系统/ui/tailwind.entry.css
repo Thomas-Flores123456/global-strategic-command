@@ -1,0 +1,6 @@
+/**
+ * Tailwind 实际入口（本项目专用）。
+ * 根目录 tailwind.css 仅供编辑器语法高亮，禁止引用；
+ * 此文件经 postcss(@tailwindcss/postcss) 展开，webpack 与 vite 双链共用。
+ */
+@import 'tailwindcss';

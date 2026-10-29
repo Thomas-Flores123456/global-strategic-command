@@ -1,0 +1,3289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "default": 2,
+      "type": "number",
+      "const": 2
+    },
+    "meta": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "world_id": {
+          "default": "",
+          "type": "string"
+        },
+        "date": {
+          "default": "",
+          "type": "string"
+        },
+        "day_count": {
+          "default": 0,
+          "type": "number"
+        },
+        "location": {
+          "default": "",
+          "type": "string"
+        },
+        "weather": {
+          "type": "string"
+        }
+      }
+    },
+    "economy": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "credits": {
+          "default": 0,
+          "type": "number"
+        },
+        "credits_daily": {
+          "default": 0,
+          "type": "number"
+        },
+        "wallet": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "resources": {
+          "type": "object",
+          "properties": {
+            "nanites": {
+              "default": {
+                "标准纳米工料": null,
+                "高精构造型纳米": null,
+                "机娘修复凝胶": null
+              },
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "minerals": {
+              "default": {
+                "铁矿石": null,
+                "铜矿砂": null,
+                "煤炭": null,
+                "铝土矿": null,
+                "稀土矿": null,
+                "金银原矿": null,
+                "灵石原矿": null
+              },
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "materials": {
+              "default": {
+                "高强工程钢材": null,
+                "特种防爆水泥": null,
+                "再生塑料颗粒": null,
+                "化工装药原料": null
+              },
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "fuel": {
+              "default": {
+                "粗原油": null,
+                "精炼柴油": null,
+                "航空煤油": null,
+                "灵沁原油": null
+              },
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "munitions": {
+              "default": {
+                "步兵制式弹药": null,
+                "大口径炮弹": null,
+                "战术制导导弹": null
+              },
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "logistics": {
+              "default": {
+                "工业与生活净水": null,
+                "战备副食与口粮": null,
+                "战地急救医药": null,
+                "机械通用备件": null
+              },
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "nanites": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "chains": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "flow": {
+                "default": "收入",
+                "type": "string",
+                "enum": [
+                  "收入",
+                  "支出"
+                ]
+              },
+              "rate_daily": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0
+              },
+              "chain_kind": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "wallet_daily": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "resources_daily": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                }
+              },
+              "status": {
+                "default": "active",
+                "type": "string",
+                "enum": [
+                  "establishing",
+                  "active",
+                  "distressed",
+                  "broken",
+                  "exhausted"
+                ]
+              },
+              "eff": {
+                "default": 1,
+                "type": "number",
+                "minimum": 0,
+                "maximum": 2
+              },
+              "deps": {
+                "default": {},
+                "type": "object",
+                "properties": {
+                  "base_id": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "base": {
+                    "type": "string"
+                  },
+                  "buildings": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "vehicles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "faction": {
+                    "type": "string"
+                  },
+                  "world_resource": {
+                    "default": "",
+                    "type": "string"
+                  }
+                }
+              },
+              "capacity": {
+                "default": {},
+                "type": "object",
+                "properties": {
+                  "total_yield": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "total": {
+                    "type": "number"
+                  },
+                  "extracted": {
+                    "default": 0,
+                    "type": "number"
+                  }
+                }
+              },
+              "reason": {
+                "default": "",
+                "type": "string"
+              },
+              "updated_at_day": {
+                "default": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          }
+        },
+        "darknet": {
+          "type": "object",
+          "properties": {
+            "market_status": {
+              "default": "未接入",
+              "type": "string"
+            },
+            "auction_status": {
+              "default": "closed",
+              "type": "string",
+              "enum": [
+                "closed",
+                "bidding",
+                "open",
+                "settled"
+              ]
+            },
+            "next_auction_in_minutes": {
+              "default": 10080,
+              "type": "number",
+              "minimum": 0
+            },
+            "items": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "name": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "category": {
+                    "default": "战略物资",
+                    "type": "string"
+                  },
+                  "price": {
+                    "default": 0,
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "stock": {
+                    "default": 1,
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "seller": {
+                    "type": "string"
+                  },
+                  "desc": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "resource_map": {
+                    "$ref": "#/$defs/__schema1"
+                  }
+                }
+              }
+            },
+            "bounties": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "target": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "category": {
+                    "default": "情报数据",
+                    "type": "string"
+                  },
+                  "reward_credits": {
+                    "default": 0,
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "status": {
+                    "default": "open",
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "completed",
+                      "expired"
+                    ]
+                  },
+                  "client": {
+                    "type": "string"
+                  },
+                  "difficulty": {
+                    "type": "string"
+                  },
+                  "deadline_text": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "desc": {
+                    "default": "",
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "auctions": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "name": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "category": {
+                    "type": "string"
+                  },
+                  "seller": {
+                    "default": "跨维匿名卖方",
+                    "type": "string"
+                  },
+                  "start_price": {
+                    "default": 0,
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "current_price": {
+                    "default": 0,
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "buyout_price": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "leader": {
+                    "default": "暂无出价",
+                    "type": "string"
+                  },
+                  "round_text": {
+                    "default": "第1轮",
+                    "type": "string"
+                  },
+                  "rounds_left": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "status": {
+                    "default": "bidding",
+                    "type": "string",
+                    "enum": [
+                      "bidding",
+                      "sold",
+                      "passed",
+                      "cancelled"
+                    ]
+                  },
+                  "desc": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "resource_map": {
+                    "$ref": "#/$defs/__schema1"
+                  },
+                  "consign_deducted": {
+                    "type": "boolean"
+                  },
+                  "refunded": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            },
+            "sold_intel_ids": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "completed_bounty_ids": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "settled_auction_ids": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "ledger": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "action": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "target": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "credits_delta": {
+                    "default": 0,
+                    "type": "number"
+                  },
+                  "note": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "at_day": {
+                    "default": 0,
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "channel_daily": {
+          "type": "object",
+          "properties": {
+            "refining": {
+              "default": 0,
+              "type": "number"
+            },
+            "recycling": {
+              "default": 0,
+              "type": "number"
+            },
+            "petrochemical": {
+              "default": 0,
+              "type": "number"
+            },
+            "chains": {
+              "default": 0,
+              "type": "number"
+            },
+            "total": {
+              "default": 0,
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "exposure": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "floor": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "level": {
+          "type": "string"
+        },
+        "trend": {
+          "default": "",
+          "type": "string"
+        },
+        "last_change": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "morale": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "value": {
+          "default": 5,
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "level": {
+          "default": "无人在意",
+          "type": "string"
+        },
+        "engaged": {
+          "type": "boolean"
+        },
+        "trend": {
+          "default": "",
+          "type": "string"
+        },
+        "last_change": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "bases": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "location": {
+            "default": "",
+            "type": "string"
+          },
+          "status": {
+            "default": "隐蔽中",
+            "type": "string",
+            "enum": [
+              "隐蔽中",
+              "运转中",
+              "警戒",
+              "暴露",
+              "失守",
+              "废弃"
+            ]
+          },
+          "tz_offset": {
+            "type": "number",
+            "minimum": -12,
+            "maximum": 14
+          },
+          "weather": {
+            "type": "string"
+          },
+          "site_type": {
+            "type": "string"
+          },
+          "morale": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "power": {
+            "default": {},
+            "type": "object",
+            "properties": {
+              "gen": {
+                "default": 0,
+                "type": "number"
+              },
+              "use": {
+                "default": 0,
+                "type": "number"
+              }
+            }
+          },
+          "buildings": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "layer": {
+                  "default": "",
+                  "type": "string"
+                },
+                "state": {
+                  "default": "运转",
+                  "type": "string",
+                  "enum": [
+                    "运转",
+                    "建造中",
+                    "受损",
+                    "停机"
+                  ]
+                },
+                "progress": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "eta": {
+                  "type": "string"
+                },
+                "coord": {
+                  "type": "object",
+                  "properties": {
+                    "x": {
+                      "type": "number",
+                      "minimum": -10,
+                      "maximum": 10
+                    },
+                    "y": {
+                      "type": "number",
+                      "minimum": -10,
+                      "maximum": 10
+                    }
+                  },
+                  "required": [
+                    "x",
+                    "y"
+                  ]
+                },
+                "bearing": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "生产",
+                    "加速"
+                  ]
+                },
+                "accel_scope": {
+                  "type": "string",
+                  "enum": [
+                    "global",
+                    "base"
+                  ]
+                },
+                "addons": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          },
+          "alerts": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "forces": {
+            "type": "object",
+            "properties": {
+              "troops": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              },
+              "vehicles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "equipment": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "sectors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "layer": {
+                  "default": "",
+                  "type": "string"
+                },
+                "status": {
+                  "default": "正常",
+                  "type": "string"
+                },
+                "desc": {
+                  "default": "",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      }
+    },
+    "clock": {
+      "type": "object",
+      "properties": {
+        "day": {
+          "type": "number"
+        },
+        "time": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "day",
+        "time"
+      ]
+    },
+    "queues": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "建造",
+              "研究",
+              "生产",
+              "改装",
+              "工程"
+            ]
+          },
+          "item": {
+            "type": "string"
+          },
+          "base": {
+            "default": "",
+            "type": "string"
+          },
+          "progress": {
+            "default": 0,
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "eta": {
+            "default": "",
+            "type": "string"
+          },
+          "status": {
+            "default": "active",
+            "type": "string",
+            "enum": [
+              "queued",
+              "active",
+              "settling",
+              "done",
+              "cancelled"
+            ]
+          },
+          "started_at": {
+            "default": "",
+            "type": "string"
+          },
+          "total_minutes": {
+            "default": 0,
+            "type": "number"
+          },
+          "spent_minutes": {
+            "default": 0,
+            "type": "number"
+          },
+          "qty": {
+            "default": 1,
+            "type": "number"
+          },
+          "qty_done": {
+            "default": 0,
+            "type": "number"
+          },
+          "building_delivered_qty": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "cost_paid": {
+            "default": true,
+            "type": "boolean"
+          },
+          "min_days_lock": {
+            "default": 0,
+            "type": "number"
+          },
+          "hold": {
+            "default": false,
+            "type": "boolean"
+          },
+          "lane": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "item"
+        ]
+      }
+    },
+    "pending_mode_switches": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "base": {
+            "default": "",
+            "type": "string"
+          },
+          "building": {
+            "type": "string"
+          },
+          "target_mode": {
+            "type": "string",
+            "enum": [
+              "生产",
+              "加速"
+            ]
+          },
+          "remaining_minutes": {
+            "default": 720,
+            "type": "number"
+          }
+        },
+        "required": [
+          "building",
+          "target_mode"
+        ]
+      }
+    },
+    "pending_deployments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "vehicle": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "展开",
+              "收起"
+            ]
+          },
+          "base": {
+            "default": "",
+            "type": "string"
+          },
+          "into": {
+            "type": "string"
+          },
+          "new_base": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "location": {
+                "default": "",
+                "type": "string"
+              },
+              "tz_offset": {
+                "type": "number"
+              },
+              "weather": {
+                "type": "string"
+              },
+              "site_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          },
+          "remaining_minutes": {
+            "default": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "vehicle",
+          "action",
+          "into"
+        ]
+      }
+    },
+    "projects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema2"
+      }
+    },
+    "protocols": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string"
+              },
+              "status": {
+                "default": "locked",
+                "type": "string",
+                "enum": [
+                  "undiscovered",
+                  "locked",
+                  "available",
+                  "experimenting",
+                  "active",
+                  "voided"
+                ]
+              },
+              "attempts": {
+                "default": 0,
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "exp": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              },
+              "points_spent": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0
+              },
+              "credits_spent": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0
+              },
+              "auto_queued": {
+                "default": false,
+                "type": "boolean"
+              },
+              "queue_order": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "hold": {
+                "default": false,
+                "type": "boolean"
+              },
+              "discovered_via": {
+                "type": "string",
+                "enum": [
+                  "init",
+                  "experiment",
+                  "event"
+                ]
+              },
+              "updated_at_day": {
+                "default": 0,
+                "type": "number"
+              },
+              "last_result": {
+                "type": "object",
+                "properties": {
+                  "day": {
+                    "type": "number"
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "breakthrough",
+                      "accumulated",
+                      "discovered"
+                    ]
+                  },
+                  "attempt": {
+                    "default": 0,
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "exp_before": {
+                    "default": 0,
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "exp_after": {
+                    "default": 0,
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "next_prob": {
+                    "default": 0,
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "day",
+                  "outcome"
+                ]
+              },
+              "schema_version": {
+                "default": 1,
+                "type": "number",
+                "const": 1
+              }
+            },
+            "required": [
+              "ref"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ref": {
+                "type": "string"
+              },
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "tier": {
+                "default": 1,
+                "type": "number"
+              },
+              "status": {
+                "default": "revealed",
+                "type": "string",
+                "enum": [
+                  "unrevealed",
+                  "revealed",
+                  "undiscovered",
+                  "locked",
+                  "available",
+                  "experimenting",
+                  "active",
+                  "voided"
+                ]
+              },
+              "progress": {
+                "default": 0,
+                "type": "number"
+              },
+              "locked_points": {
+                "default": 0,
+                "type": "number"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          }
+        ]
+      }
+    },
+    "protocol_points": {
+      "default": 0,
+      "type": "number"
+    },
+    "tech": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "done": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "forces": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "girls": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/__schema12"
+              },
+              "duty": {
+                "$ref": "#/$defs/__schema13"
+              },
+              "hp": {
+                "$ref": "#/$defs/__schema14"
+              },
+              "base": {
+                "$ref": "#/$defs/__schema15"
+              },
+              "serial": {
+                "$ref": "#/$defs/__schema16"
+              },
+              "callsign": {
+                "$ref": "#/$defs/__schema17"
+              },
+              "model": {
+                "$ref": "#/$defs/__schema18"
+              },
+              "seq": {
+                "$ref": "#/$defs/__schema19"
+              },
+              "faction": {
+                "$ref": "#/$defs/__schema20"
+              },
+              "body": {
+                "$ref": "#/$defs/__schema21"
+              },
+              "personality": {
+                "$ref": "#/$defs/__schema22"
+              },
+              "appearance": {
+                "$ref": "#/$defs/__schema23"
+              },
+              "shell": {
+                "$ref": "#/$defs/__schema24"
+              },
+              "alias": {
+                "$ref": "#/$defs/__schema25"
+              },
+              "status": {
+                "$ref": "#/$defs/__schema26"
+              },
+              "exposure": {
+                "$ref": "#/$defs/__schema27"
+              },
+              "affection": {
+                "$ref": "#/$defs/__schema28"
+              },
+              "obedience": {
+                "$ref": "#/$defs/__schema29"
+              },
+              "traits": {
+                "$ref": "#/$defs/__schema30"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        "troops": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "command_cap": {
+          "default": "",
+          "type": "string"
+        },
+        "vehicles": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ammo": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "充足",
+              "尚可",
+              "告急",
+              "无"
+            ]
+          }
+        },
+        "equipment": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "default": 0,
+            "type": "number"
+          }
+        }
+      }
+    },
+    "factions": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "attitude": {
+            "default": "未接触",
+            "type": "string",
+            "enum": [
+              "敌意",
+              "警觉",
+              "中立",
+              "友善",
+              "未接触"
+            ]
+          },
+          "intel": {
+            "default": "",
+            "type": "string"
+          },
+          "risk": {
+            "default": "未知",
+            "type": "string",
+            "enum": [
+              "高",
+              "中",
+              "低",
+              "未知"
+            ]
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "intel": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema31"
+      }
+    },
+    "intel_archived": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema31"
+      }
+    },
+    "codex": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "default": "其他",
+            "type": "string",
+            "enum": [
+              "科技",
+              "建筑",
+              "载具",
+              "人员",
+              "人物",
+              "装备",
+              "地点",
+              "阵营",
+              "势力",
+              "其他"
+            ]
+          },
+          "desc": {
+            "default": "",
+            "type": "string"
+          },
+          "params": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "pending_lore": {
+      "default": [],
+      "type": "array",
+      "items": {}
+    },
+    "pending_girls": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/$defs/__schema12"
+          },
+          "duty": {
+            "$ref": "#/$defs/__schema13"
+          },
+          "hp": {
+            "$ref": "#/$defs/__schema14"
+          },
+          "base": {
+            "$ref": "#/$defs/__schema15"
+          },
+          "serial": {
+            "$ref": "#/$defs/__schema16"
+          },
+          "callsign": {
+            "$ref": "#/$defs/__schema17"
+          },
+          "model": {
+            "$ref": "#/$defs/__schema18"
+          },
+          "seq": {
+            "$ref": "#/$defs/__schema19"
+          },
+          "faction": {
+            "$ref": "#/$defs/__schema20"
+          },
+          "body": {
+            "$ref": "#/$defs/__schema21"
+          },
+          "personality": {
+            "$ref": "#/$defs/__schema22"
+          },
+          "appearance": {
+            "$ref": "#/$defs/__schema23"
+          },
+          "shell": {
+            "$ref": "#/$defs/__schema24"
+          },
+          "alias": {
+            "$ref": "#/$defs/__schema25"
+          },
+          "status": {
+            "$ref": "#/$defs/__schema26"
+          },
+          "exposure": {
+            "$ref": "#/$defs/__schema27"
+          },
+          "affection": {
+            "$ref": "#/$defs/__schema28"
+          },
+          "obedience": {
+            "$ref": "#/$defs/__schema29"
+          },
+          "traits": {
+            "$ref": "#/$defs/__schema30"
+          },
+          "stage": {
+            "default": "待命名",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "pending_data_patches": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema32"
+      }
+    },
+    "applied_data_patches": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/__schema32"
+      }
+    },
+    "pending_expansions": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "科技",
+              "建筑",
+              "载具",
+              "人员",
+              "人物",
+              "装备",
+              "地点",
+              "势力"
+            ]
+          },
+          "desc": {
+            "default": "",
+            "type": "string"
+          },
+          "params": {
+            "default": {},
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "detail": {
+            "default": "",
+            "type": "string"
+          },
+          "keys": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "data": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ]
+      }
+    },
+    "pending_summaries": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "number"
+          },
+          "to": {
+            "type": "number"
+          },
+          "text": {
+            "type": "string"
+          },
+          "keys": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "generatedAt": {
+            "default": "2026-10-29T11:01:28.145Z",
+            "type": "string"
+          },
+          "model": {
+            "default": "",
+            "type": "string"
+          },
+          "status": {
+            "default": "pending",
+            "type": "string",
+            "enum": [
+              "pending",
+              "applied",
+              "discarded"
+            ]
+          },
+          "tier": {
+            "type": "string",
+            "enum": [
+              "micro",
+              "meso",
+              "macro"
+            ]
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "text"
+        ]
+      }
+    },
+    "micro_summaries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "floor": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "date": {
+            "default": "",
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "keys": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updatedAt": {
+            "default": "2026-10-29T11:01:28.146Z",
+            "type": "string"
+          }
+        },
+        "required": [
+          "floor",
+          "text"
+        ]
+      }
+    },
+    "quests": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "active": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema33"
+          }
+        },
+        "history": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema33"
+          }
+        },
+        "done_count": {
+          "default": 0,
+          "type": "number"
+        }
+      }
+    },
+    "planning": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "latest_receipt": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "request_ref": {
+                  "default": "",
+                  "type": "string"
+                },
+                "fingerprint": {
+                  "default": "",
+                  "type": "string"
+                },
+                "snapshot_ref": {
+                  "default": "",
+                  "type": "string"
+                },
+                "mode": {
+                  "default": "advisory",
+                  "type": "string",
+                  "enum": [
+                    "advisory",
+                    "delegate_once"
+                  ]
+                },
+                "status": {
+                  "default": "advisory_ready",
+                  "type": "string",
+                  "enum": [
+                    "advisory_ready",
+                    "awaiting_approval",
+                    "committed",
+                    "rejected",
+                    "stale_snapshot"
+                  ]
+                },
+                "base_ref": {
+                  "default": "",
+                  "type": "string"
+                },
+                "total_cost_credits": {
+                  "default": 0,
+                  "type": "number"
+                },
+                "budget_cap_credits": {
+                  "type": "number"
+                },
+                "summary": {
+                  "default": "",
+                  "type": "string"
+                },
+                "reason": {
+                  "default": "",
+                  "type": "string"
+                },
+                "actions": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "op": {
+                        "default": "enqueue",
+                        "type": "string",
+                        "enum": [
+                          "enqueue",
+                          "promote",
+                          "demote",
+                          "hold",
+                          "resume"
+                        ]
+                      },
+                      "target": {
+                        "default": "",
+                        "type": "string"
+                      },
+                      "base": {
+                        "default": "",
+                        "type": "string"
+                      },
+                      "quantity": {
+                        "default": 1,
+                        "type": "number"
+                      },
+                      "cost_credits": {
+                        "default": 0,
+                        "type": "number"
+                      },
+                      "est_minutes": {
+                        "default": 0,
+                        "type": "number"
+                      },
+                      "status": {
+                        "default": "preview",
+                        "type": "string",
+                        "enum": [
+                          "accepted",
+                          "rejected",
+                          "preview"
+                        ]
+                      },
+                      "blocker_code": {
+                        "type": "string"
+                      },
+                      "blocker_reason": {
+                        "type": "string"
+                      },
+                      "next_step": {
+                        "type": "string"
+                      },
+                      "eta_note": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "diff_summary": {
+                  "default": {},
+                  "type": "object",
+                  "properties": {
+                    "added": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "promoted": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "demoted": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "held": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "resumed": {
+                      "default": [],
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "created_at_floor": {
+                  "type": "number"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pending_plan": {
+          "default": null,
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "committed_fingerprints": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "protected_task_refs": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "command": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "commander_name": {
+          "default": "",
+          "type": "string"
+        },
+        "commander_title": {
+          "default": "战区最高统帅",
+          "type": "string"
+        },
+        "unlocked_factions": {
+          "default": [
+            "allied"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mcv_granted_factions": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "adjutants": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "default": "",
+                "type": "string"
+              },
+              "role": {
+                "default": "faction",
+                "type": "string",
+                "enum": [
+                  "faction",
+                  "staff"
+                ]
+              },
+              "faction": {
+                "default": "",
+                "type": "string"
+              },
+              "identity": {
+                "default": "mcv_girl",
+                "type": "string",
+                "enum": [
+                  "human",
+                  "mcv_girl",
+                  "commander_self"
+                ]
+              },
+              "name": {
+                "default": "",
+                "type": "string"
+              },
+              "title": {
+                "default": "",
+                "type": "string"
+              },
+              "buff_preset": {
+                "default": "",
+                "type": "string"
+              },
+              "upkeep_daily": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0
+              },
+              "status": {
+                "default": "active",
+                "type": "string",
+                "enum": [
+                  "active",
+                  "degraded",
+                  "suspended",
+                  "recovering"
+                ]
+              },
+              "note": {
+                "default": "",
+                "type": "string"
+              },
+              "base": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "break_in_penalties": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "default": "",
+                "type": "string"
+              },
+              "faction": {
+                "default": "",
+                "type": "string"
+              },
+              "name": {
+                "default": "",
+                "type": "string"
+              },
+              "effect_kind": {
+                "default": "daily_upkeep",
+                "type": "string",
+                "enum": [
+                  "power_loss",
+                  "daily_upkeep",
+                  "exposure_floor",
+                  "prod_slowdown"
+                ]
+              },
+              "magnitude": {
+                "default": 0,
+                "type": "number",
+                "minimum": 0
+              },
+              "total_minutes": {
+                "default": 21600,
+                "type": "number",
+                "minimum": 0
+              },
+              "remaining_minutes": {
+                "default": 21600,
+                "type": "number",
+                "minimum": 0
+              },
+              "reason": {
+                "default": "",
+                "type": "string"
+              },
+              "base": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "intel_points": {
+          "type": "number"
+        },
+        "upkeep_remainder": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "space": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "orbital_assets": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "default": "commercial",
+                "type": "string",
+                "enum": [
+                  "recon",
+                  "comm",
+                  "navigation",
+                  "weapon",
+                  "station",
+                  "commercial"
+                ]
+              },
+              "orbit": {
+                "default": "LEO",
+                "type": "string"
+              },
+              "status": {
+                "default": "active",
+                "type": "string",
+                "enum": [
+                  "active",
+                  "degraded",
+                  "deorbited"
+                ]
+              },
+              "launched_at_day": {
+                "default": 1,
+                "type": "number"
+              },
+              "bonus_desc": {
+                "default": "",
+                "type": "string"
+              },
+              "slot_id": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "theater",
+                  "base"
+                ]
+              },
+              "target_base": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          }
+        },
+        "contracts": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "kind": {
+                "default": "commercial",
+                "type": "string",
+                "enum": [
+                  "commercial",
+                  "recon",
+                  "comm",
+                  "constellation",
+                  "station"
+                ]
+              },
+              "rocket": {
+                "default": "通用中型运载火箭",
+                "type": "string"
+              },
+              "payload": {
+                "default": "商业通信卫星",
+                "type": "string"
+              },
+              "base": {
+                "default": "",
+                "type": "string"
+              },
+              "reward_credits": {
+                "default": 0,
+                "type": "number"
+              },
+              "recover_booster": {
+                "default": false,
+                "type": "boolean"
+              },
+              "status": {
+                "default": "pending",
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "launching",
+                  "in_orbit",
+                  "in_progress",
+                  "completed",
+                  "failed"
+                ]
+              },
+              "duration_days": {
+                "type": "number"
+              },
+              "elapsed_days": {
+                "type": "number"
+              },
+              "weather_hold_reason": {
+                "type": "string"
+              },
+              "launch_center_id": {
+                "type": "string"
+              },
+              "target_slot": {
+                "type": "string"
+              },
+              "asset_id": {
+                "type": "string"
+              },
+              "mass_t": {
+                "type": "number"
+              },
+              "payload_source": {
+                "type": "string",
+                "enum": [
+                  "domestic",
+                  "commercial"
+                ]
+              },
+              "client": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "theater",
+                  "base"
+                ]
+              },
+              "target_base": {
+                "type": "string"
+              },
+              "orbit": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title"
+            ]
+          }
+        },
+        "reusable_boosters": {
+          "default": 0,
+          "type": "number"
+        },
+        "launch_centers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "base": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "site_type": {
+                "default": "inland_canyon",
+                "type": "string",
+                "enum": [
+                  "inland_canyon",
+                  "equatorial_coastal",
+                  "sea_platform",
+                  "high_latitude",
+                  "orbital_dock",
+                  "lunar_surface"
+                ]
+              },
+              "tier": {
+                "default": 1,
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "const": 1
+                  },
+                  {
+                    "type": "number",
+                    "const": 2
+                  },
+                  {
+                    "type": "number",
+                    "const": 3
+                  }
+                ]
+              },
+              "status": {
+                "default": "运转",
+                "type": "string",
+                "enum": [
+                  "运转",
+                  "建造中",
+                  "受损",
+                  "停机"
+                ]
+              },
+              "mounted_slots": {
+                "default": {},
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "id",
+              "base",
+              "name"
+            ]
+          }
+        },
+        "completed_slots": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "equipment_stock": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "commercial_orders": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "client": {
+                "default": "外部商业委托",
+                "type": "string"
+              },
+              "orbit": {
+                "default": "LEO",
+                "type": "string"
+              },
+              "mass_t": {
+                "default": 5,
+                "type": "number"
+              },
+              "reward_credits": {
+                "default": 2500,
+                "type": "number"
+              },
+              "status": {
+                "default": "pending",
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "assigned",
+                  "completed",
+                  "expired"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ]
+          }
+        }
+      }
+    },
+    "options": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "tag": {
+            "default": "",
+            "type": "string"
+          },
+          "cost": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "__schema0": {
+      "type": "string",
+      "enum": [
+        "采矿精炼",
+        "废料回收",
+        "油气化工",
+        "本土商路",
+        "工业转化",
+        "后勤维护"
+      ]
+    },
+    "__schema1": {
+      "type": "object",
+      "properties": {
+        "pillar": {
+          "default": "",
+          "type": "string"
+        },
+        "key": {
+          "default": "",
+          "type": "string"
+        },
+        "qty": {
+          "default": 0,
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "__schema2": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "ref": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "scope": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "bases": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "lead_base": {
+              "$ref": "#/$defs/__schema7"
+            },
+            "grade": {
+              "$ref": "#/$defs/__schema8"
+            },
+            "status": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "outcome": {
+              "$ref": "#/$defs/__schema10"
+            },
+            "phases": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "idx": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "name": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "status": {
+                    "default": "未启动",
+                    "type": "string",
+                    "enum": [
+                      "未启动",
+                      "进行中",
+                      "暂停",
+                      "完工",
+                      "取消"
+                    ]
+                  },
+                  "queue_index": {
+                    "default": null,
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "idx"
+                ]
+              }
+            },
+            "schema_version": {
+              "default": 1,
+              "type": "number",
+              "const": 1
+            }
+          },
+          "required": [
+            "id",
+            "ref",
+            "grade"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/__schema3"
+            },
+            "ref": {
+              "$ref": "#/$defs/__schema4"
+            },
+            "scope": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "bases": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "lead_base": {
+              "$ref": "#/$defs/__schema7"
+            },
+            "grade": {
+              "$ref": "#/$defs/__schema8"
+            },
+            "status": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "outcome": {
+              "$ref": "#/$defs/__schema10"
+            },
+            "modules": {
+              "minItems": 1,
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema11"
+              }
+            },
+            "schema_version": {
+              "type": "number",
+              "const": 2
+            }
+          },
+          "required": [
+            "id",
+            "ref",
+            "grade",
+            "modules",
+            "schema_version"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "__schema3": {
+      "type": "string",
+      "pattern": "^proj:.*"
+    },
+    "__schema4": {
+      "type": "string"
+    },
+    "__schema5": {
+      "default": "base",
+      "type": "string",
+      "enum": [
+        "base",
+        "theater"
+      ]
+    },
+    "__schema6": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "__schema7": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema8": {
+      "type": "string",
+      "enum": [
+        "小改",
+        "中改",
+        "大改",
+        "巨构"
+      ]
+    },
+    "__schema9": {
+      "default": "规划中",
+      "type": "string",
+      "enum": [
+        "规划中",
+        "在建",
+        "暂停",
+        "完工",
+        "取消"
+      ]
+    },
+    "__schema10": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "type": {
+          "default": "mark",
+          "type": "string",
+          "enum": [
+            "mark",
+            "variant"
+          ]
+        }
+      }
+    },
+    "__schema11": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "status": {
+          "default": "未启动",
+          "type": "string",
+          "enum": [
+            "未启动",
+            "进行中",
+            "暂停",
+            "完工",
+            "取消"
+          ]
+        },
+        "base": {
+          "default": "",
+          "type": "string"
+        },
+        "queue_index": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "__schema12": {
+      "type": "string"
+    },
+    "__schema13": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema14": {
+      "default": "完好",
+      "type": "string",
+      "enum": [
+        "完好",
+        "轻损",
+        "重损",
+        "离线",
+        "轻伤",
+        "重伤",
+        "修复中"
+      ]
+    },
+    "__schema15": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema16": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema17": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema18": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema19": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema20": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema21": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema22": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema23": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema24": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema25": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema26": {
+      "default": "",
+      "type": "string"
+    },
+    "__schema27": {
+      "type": "string"
+    },
+    "__schema28": {
+      "default": 50,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "__schema29": {
+      "default": 50,
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "__schema30": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "__schema31": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "tactical",
+            "local",
+            "world"
+          ]
+        },
+        "src": {
+          "type": "string"
+        },
+        "src_kind": {
+          "type": "string",
+          "enum": [
+            "雷达侦察",
+            "渗透内线",
+            "暗网流言",
+            "电讯截获",
+            "前线目视",
+            "宏观广播"
+          ]
+        },
+        "content": {
+          "type": "string"
+        },
+        "date": {
+          "default": "",
+          "type": "string"
+        },
+        "cred": {
+          "default": "中",
+          "type": "string",
+          "enum": [
+            "高",
+            "中",
+            "低"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "待核实",
+            "已证实",
+            "已证伪",
+            "演进中"
+          ]
+        },
+        "evolves_from": {
+          "type": "string"
+        },
+        "chain": {
+          "type": "string"
+        },
+        "chain_step": {
+          "type": "string"
+        },
+        "next_lead": {
+          "type": "string"
+        },
+        "evo_domain": {
+          "type": "string",
+          "enum": [
+            "远方地缘",
+            "位面异象",
+            "暗流科技",
+            "社会黑市"
+          ]
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "萌芽",
+            "发酵",
+            "显化",
+            "高潮",
+            "平息"
+          ]
+        },
+        "ttl_floors": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "hook": {
+          "type": "string"
+        },
+        "read": {
+          "default": false,
+          "type": "boolean"
+        },
+        "pinned": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "src",
+        "content"
+      ]
+    },
+    "__schema32": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "default": "patch_1793271688144_3mo2k",
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "operation": {
+          "default": "patch",
+          "type": "string",
+          "enum": [
+            "patch",
+            "replace"
+          ]
+        },
+        "patch": {
+          "default": {},
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "changes": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {}
+        },
+        "reason": {
+          "default": "",
+          "type": "string"
+        },
+        "timestamp": {
+          "default": 1793271688144,
+          "type": "number"
+        },
+        "status": {
+          "default": "pending",
+          "type": "string",
+          "enum": [
+            "pending",
+            "applied",
+            "deferred",
+            "rejected"
+          ]
+        }
+      },
+      "required": [
+        "target"
+      ]
+    },
+    "__schema33": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "主线",
+            "支线",
+            "紧急",
+            "日常",
+            "指令"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "进行中",
+            "已完成",
+            "已失败",
+            "已取消"
+          ]
+        },
+        "issuer": {
+          "type": "string"
+        },
+        "series": {
+          "type": "string"
+        },
+        "chain_step": {
+          "type": "string"
+        },
+        "next_quest": {
+          "type": "string"
+        },
+        "progress": {
+          "default": "",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "type": "string"
+        },
+        "detail": {
+          "default": "",
+          "type": "string"
+        },
+        "rewards": {
+          "type": "object",
+          "properties": {
+            "credits": {
+              "default": 0,
+              "type": "number"
+            },
+            "intel_points": {
+              "default": 0,
+              "type": "number"
+            },
+            "resources": {
+              "default": {},
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            },
+            "items": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "text": {
+              "default": "",
+              "type": "string"
+            },
+            "unlock_factions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unlock_units": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "default": "载具",
+                    "type": "string",
+                    "enum": [
+                      "人员",
+                      "载具",
+                      "装备"
+                    ]
+                  },
+                  "producer": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "cost": {
+                    "default": 600,
+                    "type": "number"
+                  },
+                  "desc": {
+                    "default": "",
+                    "type": "string"
+                  },
+                  "faction": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            },
+            "troops": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "number"
+              }
+            },
+            "vehicles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "chains": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "rate_daily": {
+                    "default": 0,
+                    "type": "number"
+                  },
+                  "capacity": {
+                    "type": "number"
+                  },
+                  "chain_kind": {
+                    "$ref": "#/$defs/__schema0"
+                  },
+                  "wallet_daily": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "number"
+                    }
+                  },
+                  "resources_daily": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "vehicles": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "faction": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            },
+            "protocols": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "factions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "attitude": {
+                    "type": "string",
+                    "enum": [
+                      "敌意",
+                      "警觉",
+                      "中立",
+                      "友善",
+                      "未接触"
+                    ]
+                  },
+                  "intel": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            },
+            "wallet": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "number"
+              }
+            },
+            "girl_rewards": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "affection_delta": {
+                    "type": "number"
+                  },
+                  "obedience_delta": {
+                    "type": "number"
+                  },
+                  "traits": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            },
+            "tech_boost": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "progress_delta": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "name",
+                "progress_delta"
+              ]
+            }
+          }
+        },
+        "reward_claimed": {
+          "type": "boolean"
+        },
+        "updated_floor": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  }
+}

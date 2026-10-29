@@ -1,0 +1,57 @@
+<!doctype html>
+<!-- ENG-UI-03 预览脚手架（证据采集专用，非产品代码）：挂载 ModalEngineering（eng-info 底部立项令按钮）
+     + DetailDrawer（工程四令按钮组 + 取消二次确认弹层）+ 模拟宿主 #send_textarea（DOM 填值证据）。
+     快照为本地 mock（四状态工程实例演示状态门矩阵），不触碰酒馆/MVU。 -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ENG-UI-03 · 指令闭环四令预览</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #080a0b;
+      }
+      /* 模拟宿主酒馆输入栏（写路径唯一通道：fillHostSendInput → #send_textarea）；
+         z-index 保持低位——仅作填值证据条，不得遮挡模态（10010）/抽屉（10020）交互 */
+      #host-bar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-top: 1px solid #2c3b40;
+        background: #0b1018;
+      }
+      #host-bar label {
+        font: 10px/1.5 monospace;
+        color: #8aa1a7;
+        letter-spacing: 0.1em;
+      }
+      #send_textarea {
+        flex: 1;
+        min-height: 34px;
+        padding: 6px 8px;
+        border: 1px solid #38bdf8;
+        border-radius: 3px;
+        background: #080a0b;
+        color: #d4e3e6;
+        font: 12px/1.5 monospace;
+        resize: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="host-bar">
+      <label for="send_textarea">模拟宿主输入栏 #send_textarea</label>
+      <textarea id="send_textarea" placeholder="指令文本将填入此处（AI 结转）"></textarea>
+    </div>
+    <script type="module" src="./eng-ui-03-entry.ts"></script>
+  </body>
+</html>

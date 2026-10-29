@@ -1,0 +1,852 @@
+@import './globalPanels.css';
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #070b10;
+  color-scheme: dark;
+}
+
+body {
+  min-width: 280px;
+}
+
+#app {
+  --void: #070b10;
+  --glass: rgba(13, 21, 29, 0.92);
+  --glass-soft: rgba(17, 28, 38, 0.62);
+  --glass-faint: rgba(26, 40, 53, 0.34);
+  --line: rgba(141, 180, 207, 0.12);
+  --line-hi: rgba(155, 196, 224, 0.24);
+  --line-hot: rgba(145, 201, 239, 0.54);
+  --text: #d9e5ed;
+  --text-2: #8fa3b1;
+  --text-3: #7a8e9a;
+  --text-4: #354957;
+  --ice: #8bc3e7;
+  --ice-soft: #5e91b1;
+  --safe: #78b69b;
+  --amber: #d2ad69;
+  --danger: #cf796f;
+  --mono: 'Cascadia Mono', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas, monospace;
+
+  /* Oblivion 令牌扩展 */
+  --focus: #38bdf8;
+  --alert-bright: #ff5a36;
+  --gap-xs: 4px;
+  --gap-sm: 8px;
+  --gap-md: 12px;
+  --gap-lg: 16px;
+  --blur-full: blur(14px);
+
+  /* ── RAC 中控台语义令牌（D-OBUI-02 方案 A：三阵营五层立体令牌矩阵）──
+     命名空间 --rac-*，三主题各自具备微染金属底色、描边色温、雷达光学色与表面工艺纹理。
+     盟军默认：深海冷钢底 + 战术冰青装甲板 + 棱镜天蓝高光 */
+  --rac-bg:      #070a0d;          /* 深海冷钢底 */
+  --rac-panel:   #0b1116;          /* 战术冰青装甲板 */
+  --rac-panel-2: #101920;          /* 次级冷青板 */
+  --rac-dim:     #233642;          /* 冰青细边 */
+  --rac-line:    #4d768c;          /* 战术冷青线 */
+  --rac-hi:      #d8ecf4;          /* 冷白高光 */
+  --rac-text:    #cde0e8;          /* 冷白正文 */
+  --rac-muted:   #82a0b0;          /* 冰青静默字 */
+  --rac-accent:  #38bdf8;          /* 棱镜天蓝 */
+  --rac-ok:      #78b69b;          /* 成功/发电正常 */
+  --rac-warn:    #d2ad69;          /* 警告黄 */
+  --rac-alert:   #ff5a36;          /* 告警橙红 */
+  --rac-focus:   #38bdf8;          /* focus-visible 环 */
+  --rac-overlay: rgba(9, 15, 20, 0.96); /* 顶栏/浮层遮罩 */
+  --rac-dot:     #172630;          /* 冷青点阵 */
+  --rac-hatch-alert: repeating-linear-gradient(135deg, color-mix(in srgb, var(--rac-alert) 22%, transparent) 0 4px, transparent 4px 8px);
+  --rac-hatch-dim: repeating-linear-gradient(135deg, color-mix(in srgb, var(--rac-dim) 40%, transparent) 0 4px, transparent 4px 8px);
+  --rac-font-num: 'Cascadia Mono', 'JetBrains Mono', ui-monospace, Consolas, monospace;
+  --rac-glow: color-mix(in srgb, var(--rac-accent) 18%, transparent);
+  --rac-rail: linear-gradient(90deg, var(--rac-accent) 0%, color-mix(in srgb, var(--rac-line) 65%, transparent) 55%, transparent 100%);
+  --rac-surface-tint: linear-gradient(180deg, color-mix(in srgb, var(--rac-accent) 9%, var(--rac-panel)) 0%, var(--rac-panel) 100%);
+  --rac-header-stripe: repeating-linear-gradient(125deg, color-mix(in srgb, var(--rac-accent) 7%, transparent) 0 2px, transparent 2px 8px);
+
+  /* 兼容桥：五个旧面板（Tech/Forces/Factions/Intel/Quests）令牌 → 冰蓝HUD体系。
+     修复：这些变量此前未定义，语义色（警告黄/成功绿/危险红）静默失效。
+     P2 统一面板令牌后可移除。 */
+  --t-hi: var(--text);
+  --t-mid: var(--text-2);
+  --t-low: var(--text-3);
+  --t-faint: var(--text-4);
+  --warn: var(--amber);
+  --ok: var(--safe);
+  --bad: var(--danger);
+
+  /* 主题派生基色：所有蓝调装饰色由此派生（color-mix），换主题只需覆盖基色 */
+  --tint: #89b5d4; /* 中间调：网格/描边/meter底 */
+  --tint-bright: #cae5f7; /* 亮调：header顶线/高光 */
+  --deep-1: #070c11; /* 深底三档 */
+  --deep-2: #0f1820;
+  --deep-3: #16242e;
+
+  width: 100%;
+  /* 撑满楼层可用宽度（原 560px 手机卡片宽度在宽屏 PC 上两侧留白难看）；
+     内容区靠左右 padding 保持舒适内边距，不贴边。 */
+  max-width: 100%;
+  margin: 0 auto;
+  padding-left: 14px;
+  padding-right: 14px;
+  box-sizing: border-box;
+  overflow: hidden;
+  font-family: Inter, 'Segoe UI', system-ui, 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+  background: var(--void);
+  border: 1px solid var(--line-hi);
+}
+
+/* ── 阵营主题：变量覆盖组 ──
+   data-theme 由 App.vue 挂在 #app 元素上（同元素覆盖，兼容桥等引用型变量同步重算）。
+   语义色 safe/amber/danger 三主题通用，不覆盖。默认（无 data-theme）= 盟军蓝。 */
+#app[data-theme='soviet'] {
+  /* 正红色相（hue≈0°）深红组：避开橙棕调 */
+  --void: #0f0507;
+  --glass: rgba(26, 10, 12, 0.92);
+  --glass-soft: rgba(36, 13, 15, 0.62);
+  --glass-faint: rgba(51, 18, 21, 0.34);
+  --line: rgba(214, 122, 122, 0.14);
+  --line-hi: rgba(228, 132, 132, 0.26);
+  --line-hot: rgba(240, 120, 120, 0.56);
+  --text: #eed9da;
+  --text-2: #b18f92;
+  --text-3: #9a7074;
+  --text-4: #553639;
+  --ice: #e25555;
+  --ice-soft: #a63c3c;
+  --tint: #cf5b5b;
+  --tint-bright: #f5c4c4;
+  --deep-1: #120607;
+  --deep-2: #1e0c0e;
+  --deep-3: #2b1114;
+  /* RAC 苏联主题 — 重工黑铁底 + 铸铁深绯板 + 苏维埃赤红 + 防滑斜条纹 */
+  --rac-bg:      #0c0708;
+  --rac-panel:   #140b0d;
+  --rac-panel-2: #1e1013;
+  --rac-dim:     #422024;
+  --rac-line:    #8c4349;
+  --rac-hi:      #f4dede;
+  --rac-text:    #e8cfd1;
+  --rac-muted:   #b08589;
+  --rac-accent:  #ef4444;
+  --rac-focus:   #ef4444;
+  --rac-overlay: rgba(20, 10, 12, 0.96);
+  --rac-dot:     #2c1417;
+  --rac-glow: color-mix(in srgb, var(--rac-accent) 18%, transparent);
+  --rac-rail: linear-gradient(90deg, var(--rac-accent) 0%, color-mix(in srgb, var(--rac-line) 65%, transparent) 55%, transparent 100%);
+  --rac-surface-tint: linear-gradient(180deg, color-mix(in srgb, var(--rac-accent) 9%, var(--rac-panel)) 0%, var(--rac-panel) 100%);
+  --rac-header-stripe: repeating-linear-gradient(135deg, color-mix(in srgb, var(--rac-accent) 11%, transparent) 0 4px, transparent 4px 10px);
+}
+
+#app[data-theme='yuri'] {
+  --void: #0c0710;
+  --glass: rgba(21, 13, 29, 0.92);
+  --glass-soft: rgba(28, 17, 38, 0.62);
+  --glass-faint: rgba(40, 26, 53, 0.34);
+  --line: rgba(180, 141, 207, 0.12);
+  --line-hi: rgba(196, 155, 224, 0.24);
+  --line-hot: rgba(201, 145, 239, 0.54);
+  --text: #e3d9ed;
+  --text-2: #a08fb1;
+  --text-3: #8a7499;
+  --text-4: #453557;
+  --ice: #b892e5;
+  --ice-soft: #8a63b5;
+  --tint: #a989d4;
+  --tint-bright: #e3caf7;
+  --deep-1: #0c0711;
+  --deep-2: #170e20;
+  --deep-3: #24162e;
+  /* RAC 尤里主题 — 深渊黑曜底 + 灵能暗紫板 + 心灵脉冲紫 + 脉冲暗晕 */
+  --rac-bg:      #09070d;
+  --rac-panel:   #110b18;
+  --rac-panel-2: #191024;
+  --rac-dim:     #35224a;
+  --rac-line:    #734c9c;
+  --rac-hi:      #eadcf6;
+  --rac-text:    #decfe8;
+  --rac-muted:   #9c84b3;
+  --rac-accent:  #c084fc;
+  --rac-focus:   #c084fc;
+  --rac-overlay: rgba(16, 10, 24, 0.96);
+  --rac-dot:     #241536;
+  --rac-glow: color-mix(in srgb, var(--rac-accent) 18%, transparent);
+  --rac-rail: linear-gradient(90deg, var(--rac-accent) 0%, color-mix(in srgb, var(--rac-line) 65%, transparent) 55%, transparent 100%);
+  --rac-surface-tint: linear-gradient(180deg, color-mix(in srgb, var(--rac-accent) 9%, var(--rac-panel)) 0%, var(--rac-panel) 100%);
+  --rac-header-stripe: radial-gradient(circle at 18% 50%, color-mix(in srgb, var(--rac-accent) 16%, transparent) 0%, transparent 70%);
+}
+
+/* ── 统一滚动条：细轨、方角、跟随主题 ── */
+#app * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-hi) transparent;
+}
+
+#app ::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+#app ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#app ::-webkit-scrollbar-thumb {
+  background: var(--line-hi);
+}
+
+#app ::-webkit-scrollbar-thumb:hover {
+  background: var(--line-hot);
+}
+
+/* 页面级滚动条（预览页 body 滚动；酒馆 iframe 高度自适应时不滚） */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(150, 170, 190, 0.25) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(150, 170, 190, 0.22);
+}
+
+/* ── 阵营主题切换器 ── */
+#app .theme-switch {
+  display: inline-flex;
+  gap: 2px;
+}
+
+#app .theme-dot {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+#app .theme-dot::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  background: var(--dot);
+  opacity: 0.38;
+  transition:
+    opacity 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+#app .theme-dot--on::before {
+  opacity: 1;
+  box-shadow: 0 0 6px var(--dot);
+}
+
+#app *,
+#app *::before,
+#app *::after {
+  box-sizing: border-box;
+}
+
+/* 收进 base 层：允许模板里的 Tailwind 工具类（utilities 层在后）覆盖这些重置 */
+@layer base {
+  #app button {
+    appearance: none;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    text-align: inherit;
+  }
+
+  #app input {
+    font: inherit;
+  }
+}
+
+#app button:focus-visible,
+#app input:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ──────────────────────
+   Terminal shell
+   ────────────────────── */
+#app .terminal-shell {
+  position: relative;
+  isolation: isolate;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at 82% 3%, color-mix(in srgb, var(--tint) 9%, transparent), transparent 24%),
+    linear-gradient(180deg, color-mix(in srgb, var(--deep-2) 98%, transparent), color-mix(in srgb, var(--deep-1) 99%, transparent));
+}
+
+#app .terminal-shell::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--tint) 3%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--tint) 3%, transparent) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: linear-gradient(to bottom, #000 0, rgba(0, 0, 0, 0.35) 42%, transparent 72%);
+}
+
+#app .terminal-shell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  border-top: 1px solid color-mix(in srgb, var(--tint-bright) 22%, transparent);
+  background: linear-gradient(105deg, rgba(255, 255, 255, 0.018), transparent 26%);
+  mix-blend-mode: screen;
+}
+
+/* 整卡折叠摩窥栏：默认态只占一行，点击展开完整终端 */
+#app .collapse-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  text-align: left;
+  background: color-mix(in srgb, var(--deep-1) 72%, transparent);
+  backdrop-filter: blur(18px) saturate(115%);
+  -webkit-backdrop-filter: blur(18px) saturate(115%);
+  transition: background 0.15s ease;
+}
+
+#app .collapse-bar:hover {
+  background: color-mix(in srgb, var(--deep-2) 82%, transparent);
+}
+
+/* 基地切换器：带边框方块按钮，多基地时的主入口，要显眼 */
+#app .base-switch {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+#app .base-switch__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  border: 1px solid var(--line-hi);
+  background: color-mix(in srgb, var(--deep-2) 72%, transparent);
+  color: var(--text-2);
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+#app .base-switch__btn:hover {
+  border-color: var(--ice);
+  color: var(--ice);
+  background: color-mix(in srgb, var(--deep-3) 85%, transparent);
+}
+
+#app .base-switch__count {
+  min-width: 32px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text);
+}
+
+#app .base-switch__count i {
+  margin: 0 1px;
+  font-style: normal;
+  color: var(--text-4);
+}
+
+/* 指挥二级菜单：候选列表属于浮出式内容，项多时内部滚动，不撑开整体布局 */
+#app .command-menu {
+  max-height: 248px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+#app .hud-header {
+  position: relative;
+  background: color-mix(in srgb, var(--deep-1) 72%, transparent);
+  backdrop-filter: blur(18px) saturate(115%);
+  -webkit-backdrop-filter: blur(18px) saturate(115%);
+}
+
+#app .hud-header::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line-hi) 18%, var(--line-hi) 82%, transparent);
+}
+
+/* ──────────────────────
+   Typography
+   ────────────────────── */
+#app .mono,
+#app .num {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+#app .kicker {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+#app .micro {
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.05em;
+}
+
+#app .section-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+#app .section-label::before {
+  content: '';
+  width: 12px;
+  height: 1px;
+  flex: none;
+  background: var(--ice-soft);
+}
+
+/* ──────────────────────
+   Glass / rules
+   ────────────────────── */
+#app .glass-pane {
+  position: relative;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--deep-3) 74%, transparent), color-mix(in srgb, var(--deep-1) 56%, transparent));
+  border: 1px solid var(--line);
+}
+
+#app .glass-pane::before,
+#app .glass-pane::after {
+  content: '';
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  pointer-events: none;
+}
+
+#app .glass-pane::before {
+  top: -1px;
+  left: -1px;
+  border-top: 1px solid var(--line-hot);
+  border-left: 1px solid var(--line-hot);
+}
+
+#app .glass-pane::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: 1px solid var(--line-hi);
+  border-bottom: 1px solid var(--line-hi);
+}
+
+/* backdrop-filter 降级分支 */
+@supports (backdrop-filter: blur(1px)) {
+  #app .glass-pane {
+    backdrop-filter: var(--blur-full) saturate(112%);
+    -webkit-backdrop-filter: var(--blur-full) saturate(112%);
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  #app .glass-pane {
+    background: color-mix(in srgb, var(--deep-2) 92%, transparent);
+  }
+}
+
+#app .hairline {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--line) 8%, var(--line) 92%, transparent);
+}
+
+#app .rule-y {
+  border-top: 1px solid var(--line);
+}
+
+/* ──────────────────────
+   Navigation
+   ────────────────────── */
+#app .nav-tab {
+  position: relative;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+#app .nav-tab::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 2.6em;
+  height: 1px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background 0.18s ease, box-shadow 0.18s ease;
+}
+
+#app .nav-tab:hover {
+  color: var(--text);
+}
+
+#app .nav-tab--active {
+  color: var(--ice);
+}
+
+#app .nav-tab--active::after {
+  background: var(--ice);
+  box-shadow: 0 -2px 8px color-mix(in srgb, var(--ice) 38%, transparent);
+}
+
+/* ──────────────────────
+   Tactical viewport
+   ────────────────────── */
+#app .tactical-stage {
+  position: relative;
+  min-height: 176px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 67% 46%, color-mix(in srgb, var(--ice-soft) 13%, transparent), transparent 30%),
+    linear-gradient(145deg, color-mix(in srgb, var(--deep-3) 64%, transparent), color-mix(in srgb, var(--deep-1) 63%, transparent));
+  border: 1px solid var(--line);
+}
+
+#app .tactical-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--tint) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--tint) 4%, transparent) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+#app .tactical-stage::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 34%;
+  pointer-events: none;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint-bright) 3%, transparent), transparent);
+}
+
+#app .topo-line {
+  fill: none;
+  stroke: color-mix(in srgb, var(--tint) 11%, transparent);
+  stroke-width: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+
+#app .map-line {
+  fill: none;
+  stroke: color-mix(in srgb, var(--tint) 18%, transparent);
+  stroke-width: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+
+#app .map-node {
+  fill: var(--ice);
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--ice) 52%, transparent));
+}
+
+#app .scope-ring {
+  fill: none;
+  stroke: color-mix(in srgb, var(--tint) 16%, transparent);
+  vector-effect: non-scaling-stroke;
+}
+
+#app .scope-progress {
+  fill: none;
+  stroke: var(--ice);
+  stroke-linecap: butt;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--ice) 28%, transparent));
+  vector-effect: non-scaling-stroke;
+}
+
+#app .scope-tick {
+  stroke: color-mix(in srgb, var(--tint) 32%, transparent);
+  stroke-width: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+
+#app .scope-cross {
+  stroke: color-mix(in srgb, var(--tint) 13%, transparent);
+  stroke-width: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+
+#app .telemetry-cell {
+  position: relative;
+  min-width: 0;
+}
+
+#app .telemetry-cell + .telemetry-cell::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 1px;
+  background: var(--line);
+}
+
+/* ── Oblivion 实用化视觉基元 (.ob-*) ── */
+#app .ob-panel {
+  background: var(--rac-panel);
+  border: 1px solid var(--rac-dim);
+  border-radius: 2px;
+  position: relative;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--rac-accent) 16%, transparent);
+}
+
+#app .ob-panel::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 36px;
+  height: 2px;
+  background: var(--rac-accent);
+  pointer-events: none;
+}
+
+#app .ob-panel--accent::before {
+  content: '';
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  width: auto;
+  height: 2px;
+  background: var(--rac-rail);
+  pointer-events: none;
+}
+
+#app .ob-tag {
+  display: inline-flex;
+  align-items: stretch;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+#app .ob-tag > b {
+  background: var(--rac-dim);
+  color: var(--rac-hi);
+  font-weight: 600;
+  padding: 4px 7px;
+}
+
+#app .ob-tag > i {
+  font-style: normal;
+  color: var(--rac-muted);
+  padding: 4px 7px;
+  border: 1px solid var(--rac-dim);
+  border-left: 0;
+}
+
+#app .ob-tag.is-alert > b {
+  background: var(--rac-alert);
+  color: var(--rac-bg);
+}
+
+#app .ob-tag.is-alert > i {
+  color: var(--rac-alert);
+  border-color: color-mix(in srgb, var(--rac-alert) 50%, transparent);
+}
+
+#app .ob-rule {
+  height: 0;
+  border-top: 1px solid var(--rac-dim);
+  position: relative;
+  margin: 10px 0;
+}
+
+#app .ob-rule::before,
+#app .ob-rule::after {
+  content: '';
+  position: absolute;
+  width: 1px;
+  height: 5px;
+  top: -3px;
+  background: var(--rac-line);
+}
+
+#app .ob-rule::before {
+  left: 0;
+}
+
+#app .ob-rule::after {
+  right: 0;
+}
+
+#app .ob-readout {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.2;
+}
+
+#app .ob-readout__label,
+#app .ob-readout > small {
+  font-size: 12px;
+  color: var(--rac-muted);
+  letter-spacing: 0.08em;
+}
+
+#app .ob-readout__value,
+#app .ob-readout > b,
+#app .ob-readout > strong {
+  font-family: var(--rac-font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--rac-hi);
+}
+
+#app .ob-readout__unit,
+#app .ob-readout > em {
+  font-style: normal;
+  font-family: var(--rac-font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--rac-muted);
+}
+
+#app .ob-seg {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--rac-dim);
+  border-radius: 2px;
+  background: var(--rac-panel);
+  overflow: hidden;
+}
+
+#app .ob-seg > button,
+#app .ob-seg > .ob-seg__item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--rac-muted);
+  background: transparent;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition:
+    color 0.14s ease,
+    background-color 0.14s ease,
+    border-color 0.14s ease;
+}
+
+#app .ob-seg > button + button,
+#app .ob-seg > .ob-seg__item + .ob-seg__item {
+  border-left: 1px solid var(--rac-dim);
+}
+
+#app .ob-seg > button:hover:not(:disabled),
+#app .ob-seg > .ob-seg__item:hover:not(:disabled) {
+  color: var(--rac-text);
+  background: var(--rac-panel-2);
+}
+
+#app .ob-seg > button.is-active,
+#app .ob-seg > button[aria-pressed='true'],
+#app .ob-seg > button[aria-selected='true'],
+#app .ob-seg > .ob-seg__item.is-active,
+#app .ob-seg > .ob-seg__item[aria-pressed='true'],
+#app .ob-seg > .ob-seg__item[aria-selected='true'] {
+  background: color-mix(in srgb, var(--rac-accent) 14%, transparent);
+  border-bottom: 2px solid var(--rac-accent);
+  color: var(--rac-hi);
+}
+
+#app .ob-hatch {
+  background-image: var(--rac-hatch-alert);
+}
+
+#app .ob-hatch--dim {
+  background-image: var(--rac-hatch-dim);
+}
+
+#app .ob-dotgrid {
+  background-image: radial-gradient(var(--rac-dot) 1px, transparent 1.2px);
+  background-size: 16px 16px;
+}
+
+#app .ob-num {
+  font-family: var(--rac-font-num);
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes ob-enter-keyframes {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+#app .ob-enter {
+  animation: ob-enter-keyframes 140ms ease-out both;
+  animation-delay: calc(min(var(--ob-i, 0), 6) * 40ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app .ob-enter,
+  #app .ob-enter * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+

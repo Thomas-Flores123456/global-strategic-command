@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- ENG-UI-02 预览脚手架（证据采集专用，非产品代码）：挂载 ModalEngineering（eng-scene-slot 已接入
+     EngSceneView 场景引擎）+ DetailDrawer（热点点击信息弹层）+ 独立 EngSceneView（forceReducedMotion 降级证据）。
+     快照为本地 mock（在建灰熊工程驱动热点点亮），不触碰酒馆/MVU。 -->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ENG-UI-02 · SVG 场景引擎 + 通用车间场景预览</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #080a0b;
+      }
+      #rm-host {
+        width: 640px;
+        margin: 16px;
+        border: 1px solid #2c3b40;
+        border-radius: 3px;
+      }
+      #rm-caption {
+        width: 640px;
+        margin: 0 16px;
+        font: 10px/1.5 monospace;
+        color: #8aa1a7;
+        letter-spacing: 0.1em;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <p id="rm-caption">REDUCED-MOTION 降级对照（forceReducedMotion prop · 脉冲动画归零）</p>
+    <div id="rm-host"></div>
+    <script type="module" src="./eng-ui-02-entry.ts"></script>
+  </body>
+</html>

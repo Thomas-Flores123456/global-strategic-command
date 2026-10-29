@@ -1,0 +1,84 @@
+[
+  {
+    "cost": 600000,
+    "desc": "近地轨道组装船坞。",
+    "grade": "巨构",
+    "id": "all.project.orbital_shipyard",
+    "modules": [
+      {
+        "cost": 200000,
+        "id": "m.core",
+        "name": "m.core",
+        "prereqs": [],
+        "resources": {
+          "nanites": 20
+        },
+        "workload": {
+          "days": 10,
+          "min_days": 5,
+          "tflops": 4,
+          "tops": 2
+        }
+      },
+      {
+        "cost": 200000,
+        "id": "m.dock",
+        "name": "船坞桁架",
+        "prereqs": [
+          "m.core"
+        ],
+        "workload": {
+          "days": 12,
+          "min_days": 6
+        }
+      },
+      {
+        "cost": 200000,
+        "id": "m.gantry",
+        "name": "龙门吊臂",
+        "prereqs": [
+          "m.core",
+          "m.dock"
+        ],
+        "workload": {
+          "days": 15,
+          "min_days": 7
+        }
+      }
+    ],
+    "name": "轨道船坞",
+    "requirements": {
+      "building": "盟军建造厂",
+      "credits": 600000,
+      "nanites": 80,
+      "research": "轨道工程学"
+    },
+    "schema_version": 2,
+    "scope": "theater",
+    "tags": [
+      "工程",
+      "太空"
+    ],
+    "type": "project"
+  },
+  {
+    "cost": 0,
+    "desc": "",
+    "id": "测试工程",
+    "modules": [
+      {
+        "id": "m1",
+        "name": "m1",
+        "prereqs": [],
+        "workload": {
+          "days": 2,
+          "min_days": 1
+        }
+      }
+    ],
+    "name": "测试工程",
+    "schema_version": 2,
+    "tags": [],
+    "type": "project"
+  }
+]

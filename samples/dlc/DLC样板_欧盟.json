@@ -1,0 +1,193 @@
+{
+  "dlc": {
+    "id": "eu-expedition",
+    "name": "欧盟远征体系",
+    "kind": "faction",
+    "version": "2.0.0",
+    "requires": { "core": ">=1.0" }
+  },
+  "data": {
+    "faction": { "name": "欧盟", "mcv": "欧盟建造厂核心", "lab": "欧盟战斗实验室", "labResearch": null },
+    "researches": [
+      {
+        "name": "欧洲联合防务学", "cost": 300, "eta": "约3日", "line": "欧盟特色", "tier": 1,
+        "unlocks": "欧盟联合兵营建造资格", "prereq": "欧盟MCV在场", "prereqs": [],
+        "need_buildings": ["欧盟建造厂核心"],
+        "desc": "多国联合指挥与标准化后勤的整合理论，欧盟远征体系的起点与三条装甲分支的共同前置。"
+      },
+      {
+        "name": "欧陆主战装甲学", "cost": 800, "eta": "约5日", "line": "欧盟特色", "tier": 1,
+        "unlocks": "豹2A7+/勒克莱尔 生产资格", "prereq": "装甲载具工学[通用]+欧洲联合防务学+欧盟MCV在场", "prereqs": ["装甲载具工学", "欧洲联合防务学"],
+        "need_buildings": ["欧盟建造厂核心"],
+        "desc": "德法两系主战平台的制式整合——统一120mm弹药规格与火控接口，双车型并线生产。"
+      },
+      {
+        "name": "欧陆机动炮兵学", "cost": 600, "eta": "约4日", "line": "欧盟特色", "tier": 1,
+        "unlocks": "CAESAR/PzH 2000 生产资格", "prereq": "装甲载具工学[通用]+欧洲联合防务学+欧盟MCV在场", "prereqs": ["装甲载具工学", "欧洲联合防务学"],
+        "need_buildings": ["欧盟建造厂核心"],
+        "desc": "155mm/52倍径弹道体系与打了就跑战法的制式化，轻重两型火炮互补成线。"
+      },
+      {
+        "name": "欧陆轮式平台学", "cost": 500, "eta": "约4日", "line": "欧盟特色", "tier": 1,
+        "unlocks": "Boxer/Centauro II 生产资格", "prereq": "装甲载具工学[通用]+欧洲联合防务学+欧盟MCV在场", "prereqs": ["装甲载具工学", "欧洲联合防务学"],
+        "need_buildings": ["欧盟建造厂核心"],
+        "desc": "八轮通用底盘的模块化任务体系——运兵、指挥、救护与轮式反装甲共平台。"
+      }
+    ],
+    "buildings": [
+      {
+        "name": "欧盟联合兵营", "cost": 600, "power": 20, "research": "欧洲联合防务学",
+        "prereqs": ["欧洲联合防务学"], "need_buildings": [],
+        "desc": "欧盟制式步兵训练与整备设施，多国标准化课目共训，耗电20。"
+      }
+    ],
+    "productions": [
+      {
+        "name": "欧盟猎兵小队", "cost": 450, "need_building": "欧盟联合兵营", "need_buildings": ["欧盟联合兵营"],
+        "desc": "多国混编精锐步兵，HK416制式+单兵反装甲；擅长山地与城市环境。"
+      }
+    ],
+    "codex": [
+      {
+        "name": "欧盟", "kind": "阵营",
+        "desc": "欧洲联合体远征体系——多国联合防务、标准化整合指挥，与盟军为事实同盟。",
+        "params": { "MCV": "欧盟建造厂核心", "实验室": "欧盟战斗实验室" }
+      }
+    ]
+  },
+  "patch": {
+    "takeover": [
+      {
+        "from": "武备·盟军",
+        "entries": ["78·欧盟陆地载具", "79·欧盟空中载具", "80·欧盟舰艇"],
+        "to": "武备·欧盟"
+      }
+    ]
+  },
+  "worldbooks": [
+    {
+      "name": "特色科技·欧盟",
+      "book": {
+        "entries": {
+          "0": {
+            "uid": 0, "key": [], "keysecondary": [], "comment": "01·欧盟特色科技总则",
+            "content": "[特色科技·欧盟 | 总则]\n本书收录仅欧盟可研的阵营特色科技理论。通用理论（一次研究、全阵营生效）见各《通用·》书；欧盟型号档案见《武备·欧盟》。\n\n铁律：特色科技的研究必须有欧盟MCV（欧盟建造厂核心）在场——特色理论依赖本阵营核心数据库的加密层，异阵营核心与纯通用设施无法替代。欧盟战斗实验室为T2理论的研究场所（战斗实验室的阵营制式，对应通用书同名设施规则）。\n\nT1特色线索引（欧洲联合防务学为三条装甲分支的共同前置）：\n· 联合防务线——多国整合指挥与制式步兵（详见本书02）。\n· 主战装甲线——德法双系主战坦克（详见本书03）。\n· 机动炮兵线——155mm轻重两型火炮（详见本书04）。\n· 轮式平台线——八轮模块化底盘（详见本书05）。\n\n阵营化红利：欧盟特色理论按线开放生产资格，无需逐型号单独研究——这是本阵营主场体系与他阵营引进渠道的核心差异。",
+            "constant": true, "vectorized": false, "selective": true, "selectiveLogic": 0, "addMemo": true,
+            "order": 100, "position": 0, "disable": false, "excludeRecursion": false, "preventRecursion": false,
+            "delayUntilRecursion": false, "probability": 100, "useProbability": true, "depth": 4,
+            "group": "", "groupOverride": false, "groupWeight": 100, "scanDepth": null, "caseSensitive": null,
+            "matchWholeWords": null, "useGroupScoring": null, "automationId": "", "role": null,
+            "sticky": 0, "cooldown": 0, "delay": 0, "displayIndex": 0
+          },
+          "1": {
+            "uid": 1, "key": ["欧洲联合防务学", "联合防务线", "欧盟联合兵营", "欧盟猎兵"], "keysecondary": [], "comment": "02·联合防务线",
+            "content": "[特色科技·欧盟 | 联合防务线]\n· 欧洲联合防务学（300·约3日·T1·前置欧盟MCV在场）：多国联合指挥与标准化后勤的整合理论，欧盟特色树的根节点——三条装甲分支均以本理论为前置。\n\n研究成功→解锁欧盟联合兵营（600·耗电20）建造资格。\n\n欧盟联合兵营产出：\n· 欧盟猎兵小队（450）：多国混编精锐步兵，HK416制式步枪+单兵反装甲；山地与城市环境适性高。多语种协同训练，可与任意同盟部队混编而不增后勤负担。产首台机娘。",
+            "constant": false, "vectorized": false, "selective": true, "selectiveLogic": 0, "addMemo": true,
+            "order": 100, "position": 0, "disable": false, "excludeRecursion": false, "preventRecursion": false,
+            "delayUntilRecursion": false, "probability": 100, "useProbability": true, "depth": 4,
+            "group": "", "groupOverride": false, "groupWeight": 100, "scanDepth": null, "caseSensitive": null,
+            "matchWholeWords": null, "useGroupScoring": null, "automationId": "", "role": null,
+            "sticky": 0, "cooldown": 0, "delay": 0, "displayIndex": 1
+          },
+          "2": {
+            "uid": 2, "key": ["欧陆主战装甲学", "主战装甲线"], "keysecondary": [], "comment": "03·主战装甲线",
+            "content": "[特色科技·欧盟 | 主战装甲线]\n· 欧陆主战装甲学（800·约5日·T1·前置装甲载具工学[通用]+欧洲联合防务学+欧盟MCV在场）：德法两系主战平台的制式整合理论——统一120mm弹药规格、火控数据接口与战场维修件谱系。\n\n研究成功→解锁豹2A7+与勒克莱尔的生产资格（档案与造价详见《武备·欧盟》01），制造在战车工厂[通用设施]进行。双车型定位互补：豹2重防护与静默监视，勒克莱尔重射速与轻量化。",
+            "constant": false, "vectorized": false, "selective": true, "selectiveLogic": 0, "addMemo": true,
+            "order": 100, "position": 0, "disable": false, "excludeRecursion": false, "preventRecursion": false,
+            "delayUntilRecursion": false, "probability": 100, "useProbability": true, "depth": 4,
+            "group": "", "groupOverride": false, "groupWeight": 100, "scanDepth": null, "caseSensitive": null,
+            "matchWholeWords": null, "useGroupScoring": null, "automationId": "", "role": null,
+            "sticky": 0, "cooldown": 0, "delay": 0, "displayIndex": 2
+          },
+          "3": {
+            "uid": 3, "key": ["欧陆机动炮兵学", "机动炮兵线"], "keysecondary": [], "comment": "04·机动炮兵线",
+            "content": "[特色科技·欧盟 | 机动炮兵线]\n· 欧陆机动炮兵学（600·约4日·T1·前置装甲载具工学[通用]+欧洲联合防务学+欧盟MCV在场）：155mm/52倍径弹道体系与打了就跑战法的制式化理论。\n\n研究成功→解锁CAESAR卡车炮与PzH 2000自行榴弹炮的生产资格（档案详见《武备·欧盟》01），制造在战车工厂[通用设施]进行。轻重互补：CAESAR极致机动无装甲，PzH 2000全装甲自动装填。",
+            "constant": false, "vectorized": false, "selective": true, "selectiveLogic": 0, "addMemo": true,
+            "order": 100, "position": 0, "disable": false, "excludeRecursion": false, "preventRecursion": false,
+            "delayUntilRecursion": false, "probability": 100, "useProbability": true, "depth": 4,
+            "group": "", "groupOverride": false, "groupWeight": 100, "scanDepth": null, "caseSensitive": null,
+            "matchWholeWords": null, "useGroupScoring": null, "automationId": "", "role": null,
+            "sticky": 0, "cooldown": 0, "delay": 0, "displayIndex": 3
+          },
+          "4": {
+            "uid": 4, "key": ["欧陆轮式平台学", "轮式平台线"], "keysecondary": [], "comment": "05·轮式平台线",
+            "content": "[特色科技·欧盟 | 轮式平台线]\n· 欧陆轮式平台学（500·约4日·T1·前置装甲载具工学[通用]+欧洲联合防务学+欧盟MCV在场）：八轮通用底盘的模块化任务体系理论——运兵、指挥、救护、侦察与轮式反装甲共平台。\n\n研究成功→解锁Boxer装甲运兵车与Centauro II轮式突击车的生产资格（档案详见《武备·欧盟》01），制造在战车工厂[通用设施]进行。",
+            "constant": false, "vectorized": false, "selective": true, "selectiveLogic": 0, "addMemo": true,
+            "order": 100, "position": 0, "disable": false, "excludeRecursion": false, "preventRecursion": false,
+            "delayUntilRecursion": false, "probability": 100, "useProbability": true, "depth": 4,
+            "group": "", "groupOverride": false, "groupWeight": 100, "scanDepth": null, "caseSensitive": null,
+            "matchWholeWords": null, "useGroupScoring": null, "automationId": "", "role": null,
+            "sticky": 0, "cooldown": 0, "delay": 0, "displayIndex": 4
+          }
+        }
+      }
+    },
+    {
+      "name": "武备·欧盟",
+      "book": {
+        "entries": {
+          "0": {
+            "uid": 0, "key": [], "keysecondary": [], "comment": "00·总则",
+            "content": "[武备·欧盟 | 总则]\n欧盟阵营武备档案。归属三档：自研（本书主体）、引进（他阵营型号按关系渠道）、特色（锁本阵营MCV，欧盟暂无此档）。\n\n与盟军为事实同盟（allied）：双方非特色武备可经同盟渠道相互研究引进——盟军侧引进本书型号按其武备书总许可与单独研究流程执行；欧盟侧引进盟军型号同理。\n\n主权说明：本书陆载/空载/舰艇三档原以同盟国分区形式寄档于《武备·盟军》，欧盟阵营成建制展开后主权移交本书，原址保留引进指引。T1型号生产资格由《特色科技·欧盟》各线理论开放；标注T2的型号生产前置为欧盟战斗实验室。",
+            "constant": true, "vectorized": false, "selective": true, "selectiveLogic": 0, "addMemo": true,
+            "order": 100, "position": 0, "disable": false, "excludeRecursion": false, "preventRecursion": false,
+            "delayUntilRecursion": false, "probability": 100, "useProbability": true, "depth": 4,
+            "group": "", "groupOverride": false, "groupWeight": 100, "scanDepth": null, "caseSensitive": null,
+            "matchWholeWords": null, "useGroupScoring": null, "automationId": "", "role": null,
+            "sticky": 0, "cooldown": 0, "delay": 0, "displayIndex": 0
+          },
+          "1": {
+            "uid": 1, "key": ["豹2", "Leopard", "勒克莱尔", "Leclerc", "CAESAR", "凯撒火炮", "PzH 2000", "Boxer", "拳师犬", "Centauro", "半人马"], "keysecondary": [], "comment": "01·陆地载具·T1",
+            "content": "[武备·欧盟 | 自研·陆地载具·T1]\n（生产资格按线开放：主战装甲线/机动炮兵线/轮式平台线；均产首台机娘。）\n· Leopard 2A7+豹2主战坦克（德·1,300·主战装甲线）：Rh-120 L/55滑膛炮，模块化复合装甲按威胁加挂（城市战格栅+反应装甲/野战保机动）。APU辅助动力——关主引擎维持全部电子系统，静默监视热信号骤降。\n· Leclerc勒克莱尔主战坦克（法·1,350·主战装甲线）：120mm自动装填、三人车组，射速每分钟十二发为北约之冠。FINDERS统一战场管理界面。全重约五十六吨同级最轻。代价：装填机构精密，战场维修难度高。\n· CAESAR 155mm卡车炮（法·750·机动炮兵线）：六轮卡车载155mm/52倍径——驻锄到撤收全程不足一分钟，极致打了就跑。仅十八吨可空运可过桥。无装甲——适合远程支援而非伴随推进。\n· PzH 2000自行榴弹炮（德·1,100·机动炮兵线）：全装甲履带155mm，自动装填不足十秒五发急速射，MRSI多弹同时弹着。与CAESAR互补：有装甲有自动装填，但五十六吨战略机动远逊。\n· Boxer装甲运兵车（德/荷·550·轮式平台线）：八轮模块化平台——任务模块整体更换（运兵/指挥/救护/侦察/火力支援），后勤站两小时内完成功能转换。\n· Centauro II轮式装甲突击车（意·700·轮式平台线）：八轮载120mm滑膛炮——轮式坦克歼击车，公路超一百公里每小时。快速投送坦克级火力；代价正面仅防中口径。",
+            "constant": false, "vectorized": false, "selective": true, "selectiveLogic": 0, "addMemo": true,
+            "order": 100, "position": 0, "disable": false, "excludeRecursion": false, "preventRecursion": false,
+            "delayUntilRecursion": false, "probability": 100, "useProbability": true, "depth": 4,
+            "group": "", "groupOverride": false, "groupWeight": 100, "scanDepth": null, "caseSensitive": null,
+            "matchWholeWords": null, "useGroupScoring": null, "automationId": "", "role": null,
+            "sticky": 0, "cooldown": 0, "delay": 0, "displayIndex": 1
+          },
+          "2": {
+            "uid": 2, "key": ["挑战者", "Challenger"], "keysecondary": [], "comment": "02·陆地载具·T2档",
+            "content": "[武备·欧盟 | 自研·陆地载具·T2]\n· Challenger 3挑战者主战坦克（英·1,400·生产前置：欧盟战斗实验室（T2））：L/55A1滑膛炮+主动防护+猎歼火控。乔巴姆装甲传统赋予同级最厚正面防护——代价全重近六十五吨、机动最低。定位：重装甲正面突破，挨打不死场景不可替代。产首台机娘。",
+            "constant": false, "vectorized": false, "selective": true, "selectiveLogic": 0, "addMemo": true,
+            "order": 100, "position": 0, "disable": false, "excludeRecursion": false, "preventRecursion": false,
+            "delayUntilRecursion": false, "probability": 100, "useProbability": true, "depth": 4,
+            "group": "", "groupOverride": false, "groupWeight": 100, "scanDepth": null, "caseSensitive": null,
+            "matchWholeWords": null, "useGroupScoring": null, "automationId": "", "role": null,
+            "sticky": 0, "cooldown": 0, "delay": 0, "displayIndex": 2
+          },
+          "3": {
+            "uid": 3, "key": ["台风战斗机", "Typhoon", "虎式", "Tiger武直", "虎式直升机", "NH90"], "keysecondary": [], "comment": "03·空中载具",
+            "content": "[武备·欧盟 | 自研·空中载具]\n（生产前置：欧盟战斗实验室（T2）；均产首台机娘。）\n· Eurofighter Typhoon台风战斗机（泛欧·1,600）：双发三角翼鸭式布局，超音速机动性欧洲之冠，偏重制空。CAPTOR-E有源相控阵雷达、PIRATE红外搜索跟踪、十三个外挂点。与阵风并称欧洲双雄——阵风偏多任务，台风偏制空。\n· Tiger虎式武装直升机（法德·1,200）：纵列双座，全复合材料机体——雷达与红外信号均低于阿帕奇。HOT/Trigat反坦克导弹+68mm火箭巢+30mm机炮。自重仅六吨，山地丛林灵活性极高。\n· NH90通用直升机（泛欧·700）：双发中型，定位与黑鹰相当。陆军型TTH搭载二十名步兵；海军型NFH可反潜/反舰。复合材料比例同级最高。",
+            "constant": false, "vectorized": false, "selective": true, "selectiveLogic": 0, "addMemo": true,
+            "order": 100, "position": 0, "disable": false, "excludeRecursion": false, "preventRecursion": false,
+            "delayUntilRecursion": false, "probability": 100, "useProbability": true, "depth": 4,
+            "group": "", "groupOverride": false, "groupWeight": 100, "scanDepth": null, "caseSensitive": null,
+            "matchWholeWords": null, "useGroupScoring": null, "automationId": "", "role": null,
+            "sticky": 0, "cooldown": 0, "delay": 0, "displayIndex": 3
+          },
+          "4": {
+            "uid": 4, "key": ["Type 45", "勇敢级", "FREMM", "机敏级", "Astute", "伊丽莎白女王", "Queen Elizabeth", "212型", "Type 212"], "keysecondary": [], "comment": "04·舰艇",
+            "content": "[武备·欧盟 | 自研·舰艇]\n（建造前置：欧盟战斗实验室（T2）+海军造船厂[通用设施]；均产首台舰娘。）\n· Type 45勇敢级防空驱逐舰（英·620,000·约八千吨）：SAMPSON双面旋转有源相控阵——低空探测全球驱逐舰之冠。Sea Viper同时制导十二枚接战。综合全电推进噪声极低。专精防空——舰队防空节点定位。\n· FREMM多用途护卫舰（法/意·480,000·约六千五百吨）：反潜型与对地打击型两构型。柴电燃联合推进速度谱极宽。数量型主力：需要舰队规模而非单舰极限时批量部署。\n· Astute机敏级攻击核潜艇（英·950,000·水下约七千四百吨）：PWR2压水堆+泵喷静音优异。六具533mm管发射Spearfish重鱼雷与战斧。光纤非穿透式桅杆替代潜望镜。\n· Queen Elizabeth伊丽莎白女王级航母（英·3,500,000·约六万五千吨）：双舰岛、滑跃甲板——依赖短距起飞/垂直降落舰载机，约四十架。中型航母方案：远洋投送的经济型选项。\n· Type 212A/CD常规潜艇（德·350,000·水下约二千吨）：燃料电池AIP——无核动力下最长静音潜航约三周。非磁性钢壳磁信号极低。近海水下力量性价比之王。",
+            "constant": false, "vectorized": false, "selective": true, "selectiveLogic": 0, "addMemo": true,
+            "order": 100, "position": 0, "disable": false, "excludeRecursion": false, "preventRecursion": false,
+            "delayUntilRecursion": false, "probability": 100, "useProbability": true, "depth": 4,
+            "group": "", "groupOverride": false, "groupWeight": 100, "scanDepth": null, "caseSensitive": null,
+            "matchWholeWords": null, "useGroupScoring": null, "automationId": "", "role": null,
+            "sticky": 0, "cooldown": 0, "delay": 0, "displayIndex": 4
+          },
+          "5": {
+            "uid": 5, "key": ["欧盟猎兵", "猎兵小队"], "keysecondary": [], "comment": "05·人员",
+            "content": "[武备·欧盟 | 自研·人员]\n· 欧盟猎兵小队（450·欧盟联合兵营产·联合防务线）：多国混编精锐步兵，HK416制式步枪+单兵反装甲武器；山地与城市环境适性高。多语种协同训练体系，可与任意同盟部队混编而不增加后勤负担。产首台机娘。",
+            "constant": false, "vectorized": false, "selective": true, "selectiveLogic": 0, "addMemo": true,
+            "order": 100, "position": 0, "disable": false, "excludeRecursion": false, "preventRecursion": false,
+            "delayUntilRecursion": false, "probability": 100, "useProbability": true, "depth": 4,
+            "group": "", "groupOverride": false, "groupWeight": 100, "scanDepth": null, "caseSensitive": null,
+            "matchWholeWords": null, "useGroupScoring": null, "automationId": "", "role": null,
+            "sticky": 0, "cooldown": 0, "delay": 0, "displayIndex": 5
+          }
+        }
+      }
+    }
+  ]
+}
