@@ -561,10 +561,10 @@ describe('summaryFiler · 5. 放行门与 adoptSummary 组合流（设计案 §5
 });
 
 describe('summaryFiler · 6. 三组设置项默认值与模式断言（设计案 §2/§3/§5）', () => {
-  it('全部设置项默认值断言：策略 constant、触发 manual、楼层 hide、放行门默认 true（开启可用）', () => {
+  it('全部设置项默认值断言：策略 constant、触发默认 auto、楼层 hide、放行门默认 true（开启可用）', () => {
     const storage = createMockStorage();
     expect(getSummaryStrategy(storage)).toBe('constant');
-    expect(getSummaryTrigger(storage)).toBe('manual');
+    expect(getSummaryTrigger(storage)).toBe('auto');
     expect(getSummaryFloorHandling(storage)).toBe('hide');
     expect(isHidingGateApproved(storage)).toBe(true);
     expect(DEFAULT_SUMMARY_N).toBe(20);
@@ -579,6 +579,8 @@ describe('summaryFiler · 6. 三组设置项默认值与模式断言（设计案
     setSummaryStrategy('selective', storage);
     expect(getSummaryStrategy(storage)).toBe('selective');
 
+    setSummaryTrigger('manual', storage);
+    expect(getSummaryTrigger(storage)).toBe('manual');
     setSummaryTrigger('auto', storage);
     expect(getSummaryTrigger(storage)).toBe('auto');
 
@@ -733,10 +735,14 @@ describe('summaryFiler · 9. 大·中·小三层摘要体系与额外 LLM 端点
     expect(promptText).toContain('#2 [秋·九月二十]: 建成首座矿石精炼厂并派出采矿车。 （关联：矿石精炼厂、采矿车）');
   });
 
-  it('中摘要（Meso）合成优先喂入区间内已有的小摘要，且仅对缺失小摘要的楼层补读原文', async () => {
+  it('中摘要（Meso）合成同时纳入区间内「逐楼微纪要（小摘要流水）」与「全部目标楼层纯净剧情记录」（不跳过已有小摘要楼层）', async () => {
     const mockGenRaw = vi.fn().mockResolvedValue('北坡基地完成展开并建成矿场。\n【实体：北坡基地, 矿石精炼厂】');
     const mockGetMsgs = vi.fn().mockReturnValue([
-      { message_id: 1, role: 'assistant', message: '第一楼长篇原文（已有小摘要，不应重复喂入）' },
+      {
+        message_id: 1,
+        role: 'assistant',
+        message: '<思考>内部推演不进摘要</思考><正文>第一楼北坡展开的关键剧情细节</正文><战况>日期: 1</战况>',
+      },
       { message_id: 2, role: 'assistant', message: '第二楼未提取小摘要的补充原文' },
     ]);
 
@@ -757,11 +763,17 @@ describe('summaryFiler · 9. 大·中·小三层摘要体系与额外 LLM 端点
     expect(draft.from).toBe(1);
     expect(draft.to).toBe(2);
     const userPrompt = (mockGenRaw.mock.calls[0][0].ordered_prompts as Array<{ content: string }>)[1].content;
+    const sysPrompt = (mockGenRaw.mock.calls[0][0].ordered_prompts as Array<{ content: string }>)[0].content;
+    expect(sysPrompt).toContain('【事件脉络与关键抉择】');
+    expect(sysPrompt).toContain('【人物弧光与互动锚点】');
+    expect(sysPrompt).toContain('【战区格局与实力演进】');
+    expect(sysPrompt).toContain('【暗线伏笔与待决钩子】');
     expect(userPrompt).toContain('【逐楼微纪要（小摘要流水）】');
     expect(userPrompt).toContain('#1 [秋·九月十九]: 基地车在北坡展开。');
-    expect(userPrompt).toContain('【补充原始楼层记录】');
+    expect(userPrompt).toContain('【目标楼层原始剧情记录（#001-#002）】');
+    expect(userPrompt).toContain('第一楼北坡展开的关键剧情细节');
     expect(userPrompt).toContain('第二楼未提取小摘要的补充原文');
-    expect(userPrompt).not.toContain('第一楼长篇原文（已有小摘要，不应重复喂入）');
+    expect(userPrompt).not.toContain('内部推演不进摘要');
   });
 
   it('大摘要（Macro）：nextMacroSummaryCandidate 识别未归并中摘要，采纳大摘要时自动将覆盖区间内的中摘要降级为 selective 绿灯', async () => {
@@ -1396,6 +1408,80 @@ describe('summaryFiler · 10. 78000 摘要专属频段与越界摘要自动裁�
     expect(extractSummaryRanges(bookEntries)).toHaveLength(1);
     expect(extractSummaryRanges(bookEntries)[0].from).toBe(1);
     expect(extractSummaryRanges(bookEntries)[0].to).toBe(21);
+  });
+
+  it('大摘要（Macro）多层喂料与主模型自动委托核销闭环：同时纳入中摘要+小摘要+目标楼层，且世界书已归档即自动核销委托', async () => {
+    const mockGenRaw = vi.fn().mockResolvedValue('第一卷总纲：北坡崛起与荒坂初战。\n【实体：北坡, 白凌】');
+    const mockGetMsgs = vi.fn().mockReturnValue([
+      { message_id: 1, role: 'assistant', message: '<正文>第一楼北坡基地车展开</正文>' },
+      { message_id: 21, role: 'user', message: '下令矿区修筑碉堡' },
+    ]);
+
+    await requestMacroSummary(
+      [
+        { from: 1, to: 20, text: '阶段一：北坡建基', keys: ['北坡'] },
+        { from: 21, to: 40, text: '阶段二：矿区防卫', keys: ['矿区'] },
+      ],
+      {
+        generateRawFn: mockGenRaw,
+        getChatMessagesFn: mockGetMsgs,
+        microSummaries: [
+          { floor: 1, date: 'D1', text: '基地车展开。', keys: ['北坡'], updatedAt: '2026-10-18T00:00:00Z' },
+        ],
+      },
+    );
+
+    const macroSysPrompt = (mockGenRaw.mock.calls[0][0].ordered_prompts as Array<{ content: string }>)[0].content;
+    const macroPrompt = (mockGenRaw.mock.calls[0][0].ordered_prompts as Array<{ content: string }>)[1].content;
+    expect(macroSysPrompt).toContain('【战役主线与时代转折】');
+    expect(macroSysPrompt).toContain('【核心群像与羁绊演进】');
+    expect(macroSysPrompt).toContain('【势力版图与军工体系】');
+    expect(macroSysPrompt).toContain('【远期暗流与终局伏笔】');
+    expect(macroPrompt).toContain('【一、待归并阶段摘要（中摘要主干）】');
+    expect(macroPrompt).toContain('【二、区间逐楼微纪要（小摘要编年流水）】');
+    expect(macroPrompt).toContain('【三、目标楼层原始剧情记录（#001-#040）】');
+    expect(macroPrompt).toContain('第一楼北坡基地车展开');
+
+    // 定长切块：当 currentFloor=45、tailReserve=15 时，maxSpan=20 严格切出 [1, 20]
+    expect(nextSummaryRange([], 45, 15, { maxSpan: 20 })).toEqual([1, 20]);
+
+    // 主模型顺带生成自动委托 + 自动入档后凭世界书条目核销
+    const storage = createMockStorage();
+    setSummaryChannel('delegate_main', storage);
+    const stat = {
+      pending_summaries: [],
+      micro_summaries: [
+        { floor: 1, date: 'D1', text: '基地车展开。', keys: ['北坡'], updatedAt: '2026-10-18T00:00:00Z' },
+      ],
+    } as any;
+
+    const queued = syncSummaryDelegationPrompt(stat, {
+      currentFloor: 45,
+      worldbookEntries: [],
+      getChatMessagesFn: mockGetMsgs,
+      storage,
+    });
+    expect(queued).not.toBeNull();
+    expect(queued?.from).toBe(1);
+    expect(queued?.to).toBe(20);
+    expect(queued?.sourceDigest).toContain('【逐楼微纪要（小摘要流水）】');
+    expect(queued?.sourceDigest).toContain('【目标楼层原始剧情记录（#001-#020）】');
+    const feedText = buildSummaryDelegationFeedText(queued!, storage);
+    expect(feedText).toContain('【事件脉络与关键抉择】');
+    expect(feedText).toContain('【人物弧光与互动锚点】');
+    expect(feedText).toContain('【战区格局与实力演进】');
+    expect(feedText).toContain('【暗线伏笔与待决钩子】');
+
+    // 模拟自动确认入档后 pending_summaries 已被清空，但世界书已写入 摘要·001-020：应自动核销原 1-20 任务并推进到 21-30（未满20楼不新挂）
+    const archivedEntries: ThEntry[] = [];
+    upsertSummaryEntry(archivedEntries, makeMockDraft({ from: 1, to: 20, text: '阶段一已自动入档' }));
+    const afterAutoArchive = syncSummaryDelegationPrompt(stat, {
+      currentFloor: 45,
+      worldbookEntries: archivedEntries,
+      getChatMessagesFn: mockGetMsgs,
+      storage,
+    });
+    expect(afterAutoArchive).toBeNull();
   });
 });
 

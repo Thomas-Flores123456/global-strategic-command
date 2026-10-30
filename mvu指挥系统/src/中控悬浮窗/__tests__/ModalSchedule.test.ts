@@ -218,35 +218,40 @@ describe('B1 接线回归 · ModalSchedule snapshot 直传（SSR 挂载）', () 
 
     // 区域 1 & 2：顶栏模式控制与 KPI 仪表带
     expect(html).toContain('data-test="schedule-mode-instant-toggle"');
-    expect(html).toContain('⚡ 即时编排: 开启');
+    expect(html).toContain('即时编排: 开启');
     expect(html).toContain('data-test="schedule-tray-toggle"');
-    expect(html).toContain('📨 指令托盘 (0)');
+    expect(html).toContain('指令托盘 (0)');
     expect(html).toContain('data-test="schedule-kpi-ribbon"');
     expect(html).toContain('运转工位:');
     expect(html).toContain('并联加速产线:');
 
     // 区域 3：三视图切换、时间标尺与后续阶段开关
     expect(html).toContain('data-test="schedule-view-switch"');
-    expect(html).toContain('🏭 基地工位甘特');
-    expect(html).toContain('🧭 五大领域汇总');
-    expect(html).toContain('📋 紧凑工单表');
+    expect(html).toContain('基地工位甘特');
+    expect(html).toContain('五大领域汇总');
+    expect(html).toContain('紧凑工单表');
     expect(html).toContain('data-test="schedule-horizon-switch"');
     expect(html).toContain('data-test="schedule-draft-toggle"');
 
     // 区域 4：产线内嵌双模舱、多轨甘特排程与五大领域/工单表容器
     expect(html).toContain('data-test="schedule-lane-dualmode"');
-    expect(html).toContain('⚙️生产×1 · 🚀加速×1');
-    expect(html).toContain('🚀 加速 1.50x');
+    expect(html).toContain('生产×1 · 加速×1');
+    expect(html).toContain('加速 1.50x');
     expect(html).toContain('data-test="schedule-dualmode-btn"');
     expect(html).toContain('data-test="schedule-gantt-track-lane"');
+    expect(html).toContain('data-test="schedule-gantt-axis-header"');
+    expect(html).toContain('data-test="schedule-gantt-subtrack"');
+    expect(html).toContain('data-test="schedule-gantt-gridline"');
+    expect(html).toContain('data-test="schedule-gantt-hatch"');
+    expect(html).toContain('data-test="schedule-gantt-block"');
+    expect(html).toContain('data-test="schedule-gantt-legend"');
     expect(html).toContain('工位 #1');
-    expect(html).toContain('预计完工:');
     expect(html).toContain('data-test="schedule-domain-view"');
     expect(html).toContain('data-test="schedule-table-view"');
 
     // 区域 5：底部选中工单调度台与六动词按钮
     expect(html).toContain('data-test="schedule-task-inspector"');
-    expect(html).toContain('🛠️ 工单调度台');
+    expect(html).toContain('工单调度台');
     expect(html).toContain('data-test="inspector-verb-置顶"');
     expect(html).toContain('data-test="inspector-verb-撤销"');
     expect(html).toContain('data-test="inspector-verb-指派"');

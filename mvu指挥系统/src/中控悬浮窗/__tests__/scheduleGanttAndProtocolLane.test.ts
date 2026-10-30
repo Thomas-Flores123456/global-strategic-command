@@ -476,9 +476,15 @@ describe('UTO-LANE-01 & UX-SCHED-01 · ProtocolLaneProvider、schedulePanelModel
     const html = await renderModalScheduleSSR(snapshot);
     expect(html).toContain('工位 #1');
     expect(html).toContain('工位 #2');
-    expect(html).toContain('⚙️生产×2 · 🚀加速×1');
-    expect(html).toContain('🚀 加速 1.50x');
+    expect(html).toContain('生产×2 · 加速×1');
+    expect(html).toContain('加速 1.50x');
     expect(html).toContain('T0 (第6日 09:30)');
+    expect(html).toContain('data-test="schedule-gantt-axis-header"');
+    expect(html).toContain('data-test="schedule-gantt-subtrack"');
+    expect(html).toContain('data-test="schedule-gantt-gridline"');
+    expect(html).toContain('data-test="schedule-gantt-hatch"');
+    expect(html).toContain('data-test="schedule-gantt-block"');
+    expect(html).toContain('data-test="schedule-gantt-legend"');
 
     // 交互绑定验证：三视图切换、时间标尺切换、撤销二次确认防误触、双模切换与指令托盘
     const bindings = await loadModalScheduleSetup(snapshot);
@@ -488,12 +494,14 @@ describe('UTO-LANE-01 & UX-SCHED-01 · ProtocolLaneProvider、schedulePanelModel
     bindings.viewMode.value = 'table';
     expect(bindings.allTableRows.value).toHaveLength(3);
 
-    expect(bindings.horizonMode.value).toBe('24h');
+    expect(bindings.horizonMode.value).toBe('auto');
     expect(bindings.ganttAxis.value.horizonMinutes).toBe(1440);
     bindings.horizonMode.value = '72h';
     expect(bindings.ganttAxis.value.horizonMinutes).toBe(4320);
     bindings.horizonMode.value = '7d';
     expect(bindings.ganttAxis.value.horizonMinutes).toBe(10080);
+    bindings.horizonMode.value = '30d';
+    expect(bindings.ganttAxis.value.horizonMinutes).toBe(43200);
 
     // 撤销需二次点击确认（D2-1 防误触契约）
     const firstTxn = bindings.activeInspectorTxn.value;

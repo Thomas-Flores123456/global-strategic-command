@@ -83,8 +83,16 @@ export function parseSummaryInnerContent(inner: string): {
     const line = rawLine.trim();
     if (!line) continue;
 
+    // 阶次 / 层级 / tier（由 floorProtocolIndex.enrichSummaryBlockPayload 注入的卡片辅助行，不写入归档正文）
+    if (
+      /^(?:-\s*)?(?:阶次|层级|tier)\s*[：:]\s*.+$/i.test(line) ||
+      /^\[(?:中摘要|大摘要|MESO|MACRO)\]\s*$/i.test(line)
+    ) {
+      continue;
+    }
+
     // 区间: 1-20 / 楼层: 001-020 / 范围: #1-#20
-    const rangeMatch = /^(?:-\s*)?(?:区间|楼层|范围|range)\s*[：:]\s*#?0*(\d+)\s*[-~～至到]\s*#?0*(\d+)\s*$/i.exec(line);
+    const rangeMatch = /^(?:-\s*)?(?:区间|楼层|范围|楼层范围|range)\s*[：:]\s*#?0*(\d+)\s*[-~～至到]\s*#?0*(\d+)\s*$/i.exec(line);
     if (rangeMatch) {
       const f = Number(rangeMatch[1]);
       const t = Number(rangeMatch[2]);

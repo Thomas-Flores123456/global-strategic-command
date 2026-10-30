@@ -55,16 +55,25 @@ import {
   type RunOutcome,
 } from '../../红警指挥系统/composables/useParse';
 import { readTimelineLedger } from '../../红警指挥系统/core/timelineLedger';
-import type { SummaryDraft } from '../../红警指挥系统/core/schema';
+import type { MicroSummaryItem, SummaryDraft } from '../../红警指挥系统/core/schema';
 import { chatBookGateway } from '../../红警指挥系统/worldbook/chatBookBinding';
 import { recordFlightLog } from '../../红警指挥系统/debug/dataFlowTracer';
+import type { ThEntry } from '../../红警指挥系统/worldbook/girlFiler';
 import {
+  DEFAULT_SUMMARY_N,
   adoptSummary,
   getSummaryAutoConfirm,
   getSummaryBudgetConfig,
+  getSummaryChannel,
   getSummaryFloorHandling,
   getSummaryStrategy,
+  getSummaryTrigger,
+  nextMacroSummaryCandidate,
+  nextSummaryRange,
+  requestMacroSummary,
+  requestSummary,
 } from '../../红警指挥系统/worldbook/summaryFiler';
+import { syncSummaryDelegationPrompt } from './summaryRunner';
 import { updateFloorVars } from './floorVarWrite';
 
 type ChatMsgLite = {
@@ -545,6 +554,119 @@ let wired = false;
 const inFlight = new Set<string>();
 let stopHandles: EventOnReturn[] = [];
 let autoConfirmingSummary = false;
+let autoGeneratingSummary = false;
+
+async function readCurrentChatWorldbookEntriesFromHost(): Promise<ThEntry[]> {
+  try {
+    const getChatWbName = tav<(target?: string) => string | null | Promise<string | null>>('getChatWorldbookName');
+    const getWb = tav<(name: string) => Promise<ThEntry[]> | ThEntry[]>('getWorldbook');
+    if (!getChatWbName || !getWb) return [];
+    const wbName = await Promise.resolve(getChatWbName('current'));
+    if (!wbName || typeof wbName !== 'string' || !wbName.trim()) return [];
+    const loaded = await Promise.resolve(getWb(wbName.trim()));
+    return Array.isArray(loaded) ? loaded : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 常驻后台自动摘要生成器：
+ * - 当触发模式为 `auto` 且通道为 `generate_raw`（后台独立模型）时，无需打开设置面板：
+ *   1. 检查未摘要楼层是否满 20 楼（DEFAULT_SUMMARY_N），满足则静默调用 `requestSummary`（同时喂入小摘要与目标楼层纯净内容）；
+ *   2. 检查已归档中摘要是否满 4 段可归并为大摘要，满足则静默调用 `requestMacroSummary`（同时喂入中摘要、小摘要与目标楼层内容）；
+ *   3. 将生成的草稿写入当前楼层 `stat_data.pending_summaries`，供后续 `autoConfirmPendingSummariesIfEnabled` 自动入档与隐藏楼层。
+ * - 当通道为 `delegate_main`（主模型顺带生成）时，在自动入档后同步刷新前馈委托队列。
+ */
+export async function autoGenerateSummariesInBackgroundIfEnabled(
+  messageId: number,
+  floating: FloorObserversFloating,
+): Promise<number> {
+  if (autoGeneratingSummary || !in_tavern || getSummaryTrigger() !== 'auto') return 0;
+  const channel = getSummaryChannel();
+  const entries = await readCurrentChatWorldbookEntriesFromHost();
+  const snap = (floating.snapshot ?? readLatestStatDataFromHost()) as
+    | { pending_summaries?: SummaryDraft[]; micro_summaries?: MicroSummaryItem[] }
+    | null
+    | undefined;
+
+  if (channel === 'delegate_main') {
+    syncSummaryDelegationPrompt(snap as never, {
+      currentFloor: messageId,
+      worldbookEntries: entries,
+    });
+    return 0;
+  }
+
+  autoGeneratingSummary = true;
+  let generatedCount = 0;
+  try {
+    const budgetCfg = getSummaryBudgetConfig();
+    const pending: SummaryDraft[] = Array.isArray(snap?.pending_summaries)
+      ? JSON.parse(JSON.stringify(snap.pending_summaries))
+      : [];
+    const microSummaries = Array.isArray(snap?.micro_summaries) ? snap.micro_summaries : [];
+
+    // 1. 检查是否满 20 楼可自动生成【中摘要】
+    const nextRange = nextSummaryRange(entries, messageId, budgetCfg.tailReserveFloors, {
+      maxSpan: DEFAULT_SUMMARY_N,
+    });
+    if (nextRange) {
+      const [from, to] = nextRange;
+      const span = to - from + 1;
+      const existsMeso = pending.some(
+        p => (p.tier ?? 'meso') === 'meso' && p.from === from && p.to === to,
+      );
+      if (span >= DEFAULT_SUMMARY_N && !existsMeso) {
+        try {
+          const mesoDraft = await requestSummary([from, to], {
+            microSummaries,
+          });
+          pending.push(mesoDraft);
+          generatedCount++;
+        } catch (err) {
+          console.warn('[floorObservers] 后台自动生成阶段中摘要异常:', err);
+        }
+      }
+    }
+
+    // 2. 检查是否满 4 段中摘要可自动归并生成【大摘要】
+    const macroCand = nextMacroSummaryCandidate(entries);
+    if (macroCand) {
+      const existsMacro = pending.some(
+        p => p.tier === 'macro' && p.from === macroCand.from && p.to === macroCand.to,
+      );
+      if (!existsMacro) {
+        try {
+          const macroDraft = await requestMacroSummary(macroCand.mesoSegments, {
+            microSummaries,
+          });
+          pending.push(macroDraft);
+          generatedCount++;
+        } catch (err) {
+          console.warn('[floorObservers] 后台自动归并战役总纲大摘要异常:', err);
+        }
+      }
+    }
+
+    if (generatedCount > 0) {
+      await updateFloorVars(messageId, vars => {
+        const sd = (vars.stat_data ?? {}) as Record<string, unknown>;
+        return {
+          ...vars,
+          stat_data: {
+            ...sd,
+            pending_summaries: JSON.parse(JSON.stringify(pending)),
+          },
+        };
+      });
+      await floating.refresh();
+    }
+  } finally {
+    autoGeneratingSummary = false;
+  }
+  return generatedCount;
+}
 
 /**
  * 当开启「摘要自动确认入档」（默认 true）且当前楼层 stat_data.pending_summaries 存在待确认草稿时，
@@ -669,6 +791,15 @@ export async function parseAndRefresh(
     await autoConfirmPendingSummariesIfEnabled(messageId, floating).catch(e => {
       console.warn('[floorObservers] 自动确认摘要入档异常', e);
     });
+    const genCount = await autoGenerateSummariesInBackgroundIfEnabled(messageId, floating).catch(e => {
+      console.warn('[floorObservers] 后台自动生成摘要异常', e);
+      return 0;
+    });
+    if (genCount > 0) {
+      await autoConfirmPendingSummariesIfEnabled(messageId, floating).catch(e => {
+        console.warn('[floorObservers] 自动确认后台生成摘要入档异常', e);
+      });
+    }
   }
   recordPerfSample('floor.parseAndRefresh', nowPerfMs() - t0, {
     detail: `floor #${messageId} (${opts?.source ?? 'auto'})`,

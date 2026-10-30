@@ -244,8 +244,9 @@
             style="border-color: var(--rac-dim); background: rgba(0, 0, 0, 0.22)"
           >
             <div class="mb-1.5 flex items-center justify-between font-mono text-[11px]">
-              <span class="font-bold text-(--rac-warn)">
-                🚚 跨基地单位调配进行中 ({{ model.pendingTransfers.length }})
+              <span class="inline-flex items-center gap-1 font-bold text-(--rac-warn)">
+                <Icon name="rocket" :size="11" />
+                <span>跨基地单位调配进行中 ({{ model.pendingTransfers.length }})</span>
               </span>
               <span style="color: var(--rac-muted)">随战区时钟自动推进交割</span>
             </div>
@@ -261,12 +262,12 @@
                   <span v-if="tr.category !== 'girls'" class="font-mono font-bold text-(--rac-line)">
                     ×{{ tr.qty }}
                   </span>
-                  <span class="font-mono text-[10px]" style="color: var(--rac-muted)">
+                  <span class="font-mono text-[11px]" style="color: var(--rac-muted)">
                     [{{ tr.fromBase }} → {{ tr.toBase }}]
                   </span>
                   <span
                     v-if="tr.method"
-                    class="rounded-[2px] border px-1.5 py-0.2 font-mono text-[10px]"
+                    class="rounded-[2px] border px-1.5 py-0.2 font-mono text-[11px]"
                     style="border-color: var(--rac-dim); color: var(--rac-line)"
                   >
                     {{ tr.method }}

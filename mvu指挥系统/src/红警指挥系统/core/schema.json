@@ -1729,7 +1729,7 @@
             }
           },
           "generatedAt": {
-            "default": "2026-10-29T14:48:24.009Z",
+            "default": "2026-10-30T07:12:56.669Z",
             "type": "string"
           },
           "model": {
@@ -1789,7 +1789,7 @@
             }
           },
           "updatedAt": {
-            "default": "2026-10-29T14:48:24.010Z",
+            "default": "2026-10-30T07:12:56.671Z",
             "type": "string"
           }
         },
@@ -2988,7 +2988,7 @@
       "type": "object",
       "properties": {
         "id": {
-          "default": "patch_1793285304008_bt1aq",
+          "default": "patch_1793344376669_gs58w",
           "type": "string"
         },
         "target": {
@@ -3025,7 +3025,7 @@
           "type": "string"
         },
         "timestamp": {
-          "default": 1793285304008,
+          "default": 1793344376669,
           "type": "number"
         },
         "status": {

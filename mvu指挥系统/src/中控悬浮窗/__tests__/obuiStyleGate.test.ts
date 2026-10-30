@@ -56,6 +56,9 @@ const FIRST_PLAYABLE_FILES = [
   '红警指挥系统/ui/panels/panelTechHelpers.ts',
   // FD-47 · 角色卡版本感知与存档变动强制备份拦截弹窗
   '中控悬浮窗/modals/ModalCardUpdate.vue',
+  // 工务日程战术网格块面甘特图与调度辅助模块
+  '中控悬浮窗/modals/ModalSchedule.vue',
+  '中控悬浮窗/modals/modalScheduleHelpers.ts',
 ] as const;
 
 const HEX_COLOR_RE = /#[0-9a-fA-F]{3,8}\b/g;

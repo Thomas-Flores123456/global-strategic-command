@@ -1222,7 +1222,7 @@
                 :class="{ 'sum-pill--active': triggerMode === 'manual' }"
                 @click="setTrigger('manual')"
               >
-                手动生成 + 满楼提醒（默认）
+                手动生成 + 满楼提醒
               </button>
               <button
                 type="button"
@@ -1230,7 +1230,7 @@
                 :class="{ 'sum-pill--active': triggerMode === 'auto' }"
                 @click="setTrigger('auto')"
               >
-                每满 {{ DEFAULT_SUMMARY_N }} 楼自动生成草稿
+                每满 {{ DEFAULT_SUMMARY_N }} 楼自动生成草稿（默认）
               </button>
             </div>
           </div>
@@ -1344,6 +1344,8 @@ import {
   DEFAULT_SUMMARY_N,
   SUMMARY_BUDGET_PRESETS,
   adoptSummary,
+  buildMacroSummarySourceDigest,
+  buildMesoSummarySourceDigest,
   computeSummaryContextBreakdown,
   discardSummary,
   estimateTextTokens,
@@ -1800,7 +1802,7 @@ async function doRegenerate(draft: SummaryDraft, index: number) {
       );
       newDraft = await requestMacroSummary(
         mesoInRange.length > 0 ? mesoInRange : [{ from: draft.from, to: draft.to, text: draft.text, keys: draft.keys }],
-        { model: draft.model },
+        { model: draft.model, microSummaries: store.data.micro_summaries },
       );
     } else {
       newDraft = await requestSummary([draft.from, draft.to], {
@@ -1887,7 +1889,10 @@ async function generateNextSummary() {
   try {
     if (channelMode.value === 'delegate_main') {
       const [from, to] = range;
-      const digest = formatMicroSummariesForPrompt(store.data.micro_summaries, from, to);
+      const digest =
+        buildMesoSummarySourceDigest(from, to, {
+          microSummaries: store.data.micro_summaries,
+        }) || formatMicroSummariesForPrompt(store.data.micro_summaries, from, to);
       const task: SummaryDelegationTask = {
         tier: 'meso',
         from,
@@ -1929,12 +1934,9 @@ async function generateMacroSummary() {
   errorMsg.value = '';
   try {
     if (channelMode.value === 'delegate_main') {
-      const digest = cand.mesoSegments
-        .map(
-          (seg, i) =>
-            `阶段 ${i + 1}（#${formatFloor(seg.from)}-#${formatFloor(seg.to)}）：${(seg.entry.content ?? '').trim()}`,
-        )
-        .join('\n\n');
+      const digest = buildMacroSummarySourceDigest(cand.mesoSegments, {
+        microSummaries: store.data.micro_summaries,
+      });
       const task: SummaryDelegationTask = {
         tier: 'macro',
         from: cand.from,
@@ -1952,6 +1954,7 @@ async function generateMacroSummary() {
 
     const draft = await requestMacroSummary(cand.mesoSegments, {
       storeSink: store.data.pending_summaries,
+      microSummaries: store.data.micro_summaries,
     });
     if (autoConfirmMode.value && env.inTavern) {
       await doAdopt(draft, store.data.pending_summaries.length - 1);

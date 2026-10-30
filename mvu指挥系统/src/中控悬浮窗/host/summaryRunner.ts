@@ -15,6 +15,9 @@ import { tav } from '../../红警指挥系统/parse/systemCheck';
 import {
   DEFAULT_SUMMARY_BUDGET_CONFIG,
   DEFAULT_SUMMARY_N,
+  buildMacroSummarySourceDigest,
+  buildMesoSummarySourceDigest,
+  extractSummaryRanges,
   formatFloor,
   formatMicroSummariesForPrompt,
   getSummaryBudgetConfig,
@@ -22,6 +25,7 @@ import {
   getSummaryTrigger,
   nextMacroSummaryCandidate,
   nextSummaryRange,
+  type GetChatMessagesForSummaryFn,
 } from '../../红警指挥系统/worldbook/summaryFiler';
 import type { ThEntry } from '../../红警指挥系统/worldbook/girlFiler';
 
@@ -109,13 +113,17 @@ export function buildSummaryDelegationFeedText(task: SummaryDelegationTask, stor
       targetTok === DEFAULT_SUMMARY_BUDGET_CONFIG.macroSingleTargetTokens ? '400~600' : `${minChars}~${maxChars}`;
     return [
       `【参谋部战史编纂委托 · 大摘要（#${rangeStr}）】`,
-      `请在完成本楼常规《正文》《摘要》《timePast》《战况》等全部输出后，于回复最末尾额外附带一个平级顶层标签 \`<大摘要 区间="${rangeStr}">\`，将以下阶段中摘要归并提炼为 ${spanText} 字（约 ${targetTok} token 预算）的战役卷宗总纲：`,
+      `请在完成本楼常规《正文》《摘要》《timePast》《战况》等全部输出后，于回复最末尾额外附带一个平级顶层标签 \`<大摘要 区间="${rangeStr}">\`，将以下阶段中摘要、逐楼微纪要与目标楼层记录归并提炼为 ${spanText} 字（约 ${targetTok} token 预算）的「四维立体战役卷宗总纲」（兼顾宏观历史转折与核心角色长期群像弧光，严防扁平化）：`,
       task.sourceDigest ? `\n${task.sourceDigest}\n` : '',
       `输出格式严格如下（严禁嵌套在 <战况> 或 <正文> 内）：`,
       `<大摘要 区间="${rangeStr}">`,
       `区间: ${rangeStr}`,
-      `标题: <简短战役卷宗标题>`,
-      `纪要: <连贯客观的宏观战史正文，保留战略格局、基地群演进、核心机娘与主线伏笔>`,
+      `标题: <简短且具史诗感的战役卷宗标题>`,
+      `纪要:`,
+      `【战役主线与时代转折】<跨阶段的核心战略冲突演进、重大抉择与决定战局走向的标志性场面>`,
+      `【核心群像与羁绊演进】<主要机娘与关键人物在长周期内的性格蜕变、核心关系定位、共同经历的生死节点与长期承诺/心结>`,
+      `【势力版图与军工体系】<基地群落版图、科技与军工能级跃迁、战区各方本土势力的友敌格局演变>`,
+      `【远期暗流与终局伏笔】<贯穿全卷尚未揭晓的深层谜团、长线约定向背与战略级潜在威胁>`,
       `关键词: [核心实体1, 核心实体2, 核心实体3]`,
       `</大摘要>`,
     ]
@@ -130,12 +138,21 @@ export function buildSummaryDelegationFeedText(task: SummaryDelegationTask, stor
     targetTok === DEFAULT_SUMMARY_BUDGET_CONFIG.mesoSingleTargetTokens ? '250~450' : `${minChars}~${maxChars}`;
   return [
     `【参谋部阶段归档委托 · 中摘要（#${rangeStr}）】`,
-    `请在完成本楼常规《正文》《摘要》《timePast》《战况》等全部输出后，于回复最末尾额外附带一个平级顶层标签 \`<中摘要 区间="${rangeStr}">\`，对第 ${task.from} 楼至第 ${task.to} 楼的剧情进行 ${spanText} 字（约 ${targetTok} token 预算）的阶段事实摘要：`,
-    task.sourceDigest ? `\n【该区间已记录的逐楼微纪要（小摘要流水）】\n${task.sourceDigest}\n` : '',
+    `请在完成本楼常规《正文》《摘要》《timePast》《战况》等全部输出后，于回复最末尾额外附带一个平级顶层标签 \`<中摘要 区间="${rangeStr}">\`，结合以下逐楼微纪要与目标楼层原始剧情记录，对第 ${task.from} 楼至第 ${task.to} 楼的剧情进行 ${spanText} 字（约 ${targetTok} token 预算）的「四维立体阶段摘要」（严禁写成干瘪流水账，必须保留事件因果博弈与人物鲜活弧光）：`,
+    task.sourceDigest
+      ? task.sourceDigest.includes('【逐楼微纪要') || task.sourceDigest.includes('【目标楼层')
+        ? `\n${task.sourceDigest}\n`
+        : `\n【该区间已记录的逐楼微纪要（小摘要流水）】\n${task.sourceDigest}\n`
+      : '',
     `输出格式严格如下（严禁嵌套在 <战况> 或 <正文> 内）：`,
     `<中摘要 区间="${rangeStr}">`,
     `区间: ${rangeStr}`,
-    `纪要: <客观凝练的阶段剧情摘要正文，保留关键行动、事件转折、时间线与战力/基地变动>`,
+    `标题: <简短且具画面感的阶段标题>`,
+    `纪要:`,
+    `【事件脉络与关键抉择】<按“困境导火索→指挥官破局抉择→关键转折与战果/代价”串联主线，保留1~2处名场面细节>`,
+    `【人物弧光与互动锚点】<点名记录本阶段核心机娘与重要人物的态度/心境转变、鲜活言行切面及与指挥官的关键互动或约定，严防人物扁平化>`,
+    `【战区格局与实力演进】<基地扩建、科技/军工/部队成型、资源命脉与外部势力态势消长>`,
+    `【暗线伏笔与待决钩子】<本阶段埋下但尚未收束的悬念、未兑现承诺或潜在危机>`,
     `关键词: [关键实体1, 关键实体2, 关键实体3]`,
     `</中摘要>`,
   ]
@@ -166,6 +183,7 @@ export function syncSummaryDelegationPrompt(
   opts?: {
     currentFloor?: number;
     worldbookEntries?: ThEntry[];
+    getChatMessagesFn?: GetChatMessagesForSummaryFn;
     storage?: Storage;
   },
 ): SummaryDelegationTask | null {
@@ -174,14 +192,18 @@ export function syncSummaryDelegationPrompt(
   const storage = opts?.storage;
 
   const pendingList = stat?.pending_summaries ?? [];
+  const archivedRanges = opts?.worldbookEntries ? extractSummaryRanges(opts.worldbookEntries) : [];
   let task = getQueuedSummaryDelegationTask(storage);
 
-  // 1. 若排队任务已被主模型完成并进入 pending_summaries，自动核销任务
+  // 1. 若排队任务已被主模型完成（已进入 pending_summaries 或已自动确认归档入世界书），自动核销任务
   if (task) {
-    const alreadyDone = pendingList.some(
+    const inPending = pendingList.some(
       d => (d.tier ?? 'meso') === task!.tier && d.from === task!.from && d.to === task!.to && d.status === 'pending',
     );
-    if (alreadyDone) {
+    const inWorldbook = archivedRanges.some(
+      r => (r.tier ?? 'meso') === task!.tier && r.from <= task!.from && r.to >= task!.to,
+    );
+    if (inPending || inWorldbook) {
       clearSummaryDelegationTask(storage);
       task = null;
     }
@@ -193,7 +215,9 @@ export function syncSummaryDelegationPrompt(
   if (!task && channel === 'delegate_main' && trigger === 'auto' && stat && opts?.worldbookEntries) {
     const currentFloor = opts.currentFloor ?? 0;
     const budgetCfg = getSummaryBudgetConfig(storage);
-    const nextRange = nextSummaryRange(opts.worldbookEntries, currentFloor, budgetCfg.tailReserveFloors);
+    const nextRange = nextSummaryRange(opts.worldbookEntries, currentFloor, budgetCfg.tailReserveFloors, {
+      maxSpan: DEFAULT_SUMMARY_N,
+    });
     if (nextRange) {
       const [from, to] = nextRange;
       const span = to - from + 1;
@@ -201,7 +225,11 @@ export function syncSummaryDelegationPrompt(
         d => (d.tier ?? 'meso') === 'meso' && d.from === from && d.to === to && d.status === 'pending',
       );
       if (span >= DEFAULT_SUMMARY_N && !existsInPending) {
-        const digest = formatMicroSummariesForPrompt(stat.micro_summaries, from, to);
+        const digest =
+          buildMesoSummarySourceDigest(from, to, {
+            microSummaries: stat.micro_summaries,
+            getChatMessagesFn: opts.getChatMessagesFn,
+          }) || formatMicroSummariesForPrompt(stat.micro_summaries, from, to);
         task = {
           tier: 'meso',
           from,
@@ -219,12 +247,10 @@ export function syncSummaryDelegationPrompt(
           d => d.tier === 'macro' && d.from === macroCand.from && d.to === macroCand.to && d.status === 'pending',
         );
         if (!existsMacro) {
-          const digest = macroCand.mesoSegments
-            .map(
-              (seg, i) =>
-                `阶段 ${i + 1}（#${formatFloor(seg.from)}-#${formatFloor(seg.to)}）：${(seg.entry.content ?? '').trim()}`,
-            )
-            .join('\n\n');
+          const digest = buildMacroSummarySourceDigest(macroCand.mesoSegments, {
+            microSummaries: stat.micro_summaries,
+            getChatMessagesFn: opts.getChatMessagesFn,
+          });
           task = {
             tier: 'macro',
             from: macroCand.from,

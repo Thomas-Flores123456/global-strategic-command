@@ -280,7 +280,7 @@ export function setSummaryStrategy(val: SummaryStrategy, storage?: Storage): voi
 export function getSummaryTrigger(storage?: Storage): SummaryTrigger {
   const s = resolveStorage(storage);
   const val = s?.getItem(SUMMARY_TRIGGER_KEY);
-  return val === 'auto' ? 'auto' : 'manual'; // 默认 manual 手动
+  return val === 'manual' ? 'manual' : 'auto'; // 默认 auto 每满 20 楼自动触发
 }
 
 export function setSummaryTrigger(val: SummaryTrigger, storage?: Storage): void {
@@ -659,6 +659,141 @@ export function formatMicroSummariesForPrompt(
     .join('\n');
 }
 
+/**
+ * 从单楼原始消息文本中剥离思考链与系统协议块，提取纯净的剧情正文或玩家行动文本。
+ */
+export function extractCleanFloorTextForSummary(rawMessage: string, maxChars = 600): string {
+  if (!rawMessage || typeof rawMessage !== 'string') return '';
+  let text = rawMessage
+    .replace(/<(?:thinking|思考|think)>[\s\S]*?<\/(?:thinking|思考|think)>/gi, '')
+    .trim();
+
+  // 若包含显式 <正文>...</正文>，优先提取全部 <正文> 段落
+  const bodyMatches = [...text.matchAll(/<正文(?:\s[^>]*)?>([\s\S]*?)<\/正文>/gi)];
+  if (bodyMatches.length > 0) {
+    text = bodyMatches
+      .map(m => m[1].trim())
+      .filter(Boolean)
+      .join('\n');
+  } else {
+    // 否则剥离战况、摘要、时间与选项等协议容器
+    text = text
+      .replace(/<(?:战况|摘要|summary|中摘要|大摘要|timePast|选项|rac_cot_supplement)(?:\s[^>]*)?>[\s\S]*?<\/(?:战况|摘要|summary|中摘要|大摘要|timePast|选项|rac_cot_supplement)>/gi, '')
+      .trim();
+  }
+
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+  if (!text) return '';
+  if (maxChars > 0 && text.length > maxChars) {
+    const headLen = Math.floor(maxChars * 0.7);
+    const tailLen = Math.max(60, maxChars - headLen);
+    return `${text.slice(0, headLen).trim()}……${text.slice(-tailLen).trim()}`;
+  }
+  return text;
+}
+
+export type GetChatMessagesForSummaryFn = (
+  range: string | number,
+  opts?: { hide_state?: string },
+) => Array<{ message_id: number; message?: string; role?: string }>;
+
+/**
+ * 读取指定区间 [from, to] 的全部目标楼层纯净内容（不因存在小摘要而跳过任何楼层）。
+ */
+export function formatTargetFloorsForPrompt(
+  from: number,
+  to: number,
+  getChatMessagesFn?: GetChatMessagesForSummaryFn,
+  maxCharsPerFloor = 600,
+): string {
+  const getMsgs =
+    getChatMessagesFn ??
+    tav<GetChatMessagesForSummaryFn>('getChatMessages');
+  if (!getMsgs || from > to) return '';
+
+  let msgs: Array<{ message_id: number; message?: string; role?: string }> = [];
+  try {
+    msgs = getMsgs(`${from}-${to}`) ?? [];
+    if ((!Array.isArray(msgs) || msgs.length === 0) && getMsgs.length >= 2) {
+      msgs = getMsgs(`${from}-${to}`, { hide_state: 'all' }) ?? [];
+    }
+  } catch {
+    msgs = [];
+  }
+  if (!Array.isArray(msgs) || msgs.length === 0) return '';
+
+  const lines: string[] = [];
+  for (const m of msgs) {
+    if (typeof m.message_id !== 'number' || m.message_id < from || m.message_id > to) continue;
+    const cleaned = extractCleanFloorTextForSummary(m.message ?? '', maxCharsPerFloor);
+    if (!cleaned) continue;
+    const roleTag = m.role || 'assistant';
+    lines.push(`#${m.message_id} [${roleTag}]: ${cleaned}`);
+  }
+  return lines.join('\n\n');
+}
+
+/**
+ * 组装【中摘要（阶段摘要）】的完整双层输入源：
+ * 同时纳入「逐楼微纪要（小摘要流水）」+「目标楼层原始剧情记录（全楼层覆盖，不跳过已有小摘要的楼层）」。
+ */
+export function buildMesoSummarySourceDigest(
+  from: number,
+  to: number,
+  opts?: {
+    microSummaries?: MicroSummaryItem[];
+    getChatMessagesFn?: GetChatMessagesForSummaryFn;
+    maxCharsPerFloor?: number;
+  },
+): string {
+  const microText = formatMicroSummariesForPrompt(opts?.microSummaries, from, to);
+  const floorText = formatTargetFloorsForPrompt(from, to, opts?.getChatMessagesFn, opts?.maxCharsPerFloor ?? 600);
+  const sections: string[] = [];
+  if (microText) {
+    sections.push(`【逐楼微纪要（小摘要流水）】\n${microText}`);
+  }
+  if (floorText) {
+    sections.push(`【目标楼层原始剧情记录（#${formatFloor(from)}-#${formatFloor(to)}）】\n${floorText}`);
+  }
+  return sections.join('\n\n');
+}
+
+/**
+ * 组装【大摘要（战役总纲）】的完整多层输入源：
+ * 同时纳入「阶段中摘要主干」+「区间逐楼微纪要（小摘要流水）」+「目标楼层原始剧情节选」。
+ */
+export function buildMacroSummarySourceDigest(
+  mesoSegments: ReadonlyArray<{ from: number; to: number; entry?: ThEntry; text?: string; keys?: string[] }>,
+  opts?: {
+    microSummaries?: MicroSummaryItem[];
+    getChatMessagesFn?: GetChatMessagesForSummaryFn;
+    maxCharsPerFloor?: number;
+  },
+): string {
+  if (!Array.isArray(mesoSegments) || mesoSegments.length === 0) return '';
+  const sorted = [...mesoSegments].sort((a, b) => a.from - b.from);
+  const from = sorted[0].from;
+  const to = sorted[sorted.length - 1].to;
+
+  const bodyLines = sorted.map((seg, i) => {
+    const content = (seg.text ?? seg.entry?.content ?? '').trim();
+    const segKeys = seg.keys ?? (Array.isArray(seg.entry?.strategy?.keys) ? seg.entry?.strategy?.keys : []);
+    const keySuffix = segKeys && segKeys.length > 0 ? `\n关联实体：${segKeys.join('、')}` : '';
+    return `### 阶段 ${i + 1}（#${formatFloor(seg.from)}-#${formatFloor(seg.to)}）\n${content}${keySuffix}`;
+  });
+
+  const sections: string[] = [`【一、待归并阶段摘要（中摘要主干）】\n${bodyLines.join('\n\n')}`];
+  const microText = formatMicroSummariesForPrompt(opts?.microSummaries, from, to);
+  if (microText) {
+    sections.push(`【二、区间逐楼微纪要（小摘要编年流水）】\n${microText}`);
+  }
+  const floorText = formatTargetFloorsForPrompt(from, to, opts?.getChatMessagesFn, opts?.maxCharsPerFloor ?? 320);
+  if (floorText) {
+    sections.push(`【三、目标楼层原始剧情记录（#${formatFloor(from)}-#${formatFloor(to)}）】\n${floorText}`);
+  }
+  return sections.join('\n\n');
+}
+
 /* ═══════════════ 区间构造纯函数（设计案 §2 / §3 唯一真源与铁律） ═══════════════ */
 
 /** 楼层号三位补零（如 1 → 001，20 → 020） */
@@ -831,13 +966,16 @@ export function nextSummaryRange(
   entries: ThEntry[],
   currentFloor: number,
   tailReserve: number = DEFAULT_TAIL_RESERVE,
+  opts?: { maxSpan?: number },
 ): SummaryRange | null {
   const ranges = extractSummaryRanges(entries);
   const maxTo = ranges.length ? Math.max(...ranges.map(r => r.to)) : 0;
   const from = maxTo > 0 ? maxTo + 1 : 1;
-  const to = currentFloor - tailReserve;
+  const rawTo = currentFloor - tailReserve;
 
-  if (to < from) return null;
+  if (rawTo < from) return null;
+  const to =
+    opts?.maxSpan && opts.maxSpan > 0 ? Math.min(rawTo, from + opts.maxSpan - 1) : rawTo;
   return [from, to];
 }
 
@@ -1529,18 +1667,28 @@ export async function adoptSummary(draft: SummaryDraft, opts?: AdoptSummaryOptio
 
 /* ═══════════════ 后台独立生成封装（设计案 §4 generateRaw + 三层摘要 & 额外端点） ═══════════════ */
 
-export const SUMMARY_SYSTEM_PROMPT = `你是一个严谨的剧情记录官。请对给定的剧情对话记录进行客观、凝练的事实性摘要压缩。
+export const SUMMARY_SYSTEM_PROMPT = `你是一个兼顾战略叙事与群像刻画的剧情记录官。请结合给定的逐楼微纪要与目标楼层原始记录，生成结构清晰、拒绝人物与事件扁平化的阶段剧情卷宗（中摘要）。
 【核心要求】
-1. 事实准确：严格忠实于发生的故事，保留关键人物行为、核心事件转折、时间线演进与阵营/战力变动；
-2. 极致凝练：去除寒暄、冗长心理活动与琐碎描写，控制在 300~500 token 以内；
-3. 实体提取：若摘要中涉及关键实体（角色/势力/重要科技/建筑/装备），请在摘要末尾另起一行标注格式：
+1. 事实与因果并重：严禁写成干瘪的行政流水账，必须保留事件背后的「困境导火索 → 指挥官的博弈抉择 → 现场关键转折与代价/战果」；
+2. 严防人物扁平化：必须点名保留本阶段活跃机娘与核心人物的性格切面、情绪/态度转变、标志性言行及与指挥官之间的关键互动/承诺细节；
+3. 四维结构化输出：请严格按以下四个分栏组织正文，控制在 300~500 token 以内：
+【事件脉络与关键抉择】按因果链串联本阶段核心事件、破局手段与 1~2 处名场面细节；
+【人物弧光与互动锚点】记录在场机娘与重要人物的态度转变、鲜活反应、深层动机及与指挥官的情感/契约锚点；
+【战区格局与实力演进】归纳基地建设、科技/军工/部队成型、资源产线与外部势力态势消长；
+【暗线伏笔与待决钩子】提取本阶段埋下但尚未收束的悬念、未兑现约定或潜在危机；
+4. 实体提取：若摘要中涉及关键实体（角色/势力/重要科技/建筑/装备），请在摘要末尾另起一行标注格式：
 【实体：实体1, 实体2】`;
 
-export const MACRO_SUMMARY_SYSTEM_PROMPT = `你是一个严谨的最高统帅部战史编纂官。请将给定的多段阶段剧情摘要（中摘要）归并提炼为一份连贯的「战役卷宗总纲（大摘要）」。
+export const MACRO_SUMMARY_SYSTEM_PROMPT = `你是一个兼顾史诗格局与群像厚度的最高统帅部战史编纂官。请将给定的多段阶段剧情摘要（中摘要）、逐楼微纪要与目标楼层记录，归并提炼为一份立体连贯的「战役卷宗总纲（大摘要）」。
 【核心要求】
-1. 宏观正史：提炼跨阶段的战略格局演变、基地群与工业版图扩张、核心机娘/副官长期关系定型、重大战役胜负与关键主线伏笔；
-2. 结构凝练：按时间演进脉络整合，剔除已被后续覆盖的临时过渡琐事，总篇幅控制在 400~600 token 以内；
-3. 实体提取：在卷宗末尾另起一行汇总本卷涉及的核心实体（角色/势力/基地/重要科技/协议）：
+1. 宏观正史与因果张力：提炼跨阶段的战略格局演变、决定战区走向的重大战役胜负手与标志性历史场面，剔除已被后续覆盖的临时过渡琐事；
+2. 长期群像弧光保真：完整保留核心机娘与重要人物在长周期内的性格蜕变、核心关系定型、刻骨铭心的共同经历与长期承诺/心结，防止跨阶段角色扁平化；
+3. 四维结构化输出：请严格按以下四个分栏组织卷宗正文，总篇幅控制在 400~600 token 以内：
+【战役主线与时代转折】跨阶段的核心冲突演进、重大战略抉择与标志性战役节点；
+【核心群像与羁绊演进】主要机娘与关键人物的长期性格弧光、关系定型与重要情感/契约锚点；
+【势力版图与军工体系】基地群落版图、科技与军工能级跃迁、各方本土势力的友敌格局演变；
+【远期暗流与终局伏笔】贯穿全卷尚未揭晓的深层谜团、长线约定向背与战略级潜在威胁；
+4. 实体提取：在卷宗末尾另起一行汇总本卷涉及的核心实体（角色/势力/基地/重要科技/协议）：
 【实体：实体1, 实体2】`;
 
 export function buildMesoSummarySystemPrompt(targetTokens?: number): string {
@@ -1609,33 +1757,13 @@ export async function requestSummary(range: SummaryRange, opts?: RequestSummaryO
     throw new Error('酒馆 API generateRaw 不可用（独立预览环境无法生成摘要）');
   }
 
-  const microText = formatMicroSummariesForPrompt(opts?.microSummaries, from, to);
-  const coveredFloors = new Set(
-    (opts?.microSummaries ?? [])
-      .filter(m => m.floor >= from && m.floor <= to && m.text.trim().length > 0)
-      .map(m => m.floor),
-  );
-
-  let chatHistoryText = '';
-  if (getMsgs) {
-    const msgs = getMsgs(`${from}-${to}`);
-    const filteredMsgs = coveredFloors.size > 0 ? msgs.filter(m => !coveredFloors.has(m.message_id)) : msgs;
-    chatHistoryText = filteredMsgs.map(m => `#${m.message_id} [${m.role}]: ${m.message}`).join('\n\n');
-  }
-
-  const sections: string[] = [];
-  if (microText) {
-    sections.push(`【逐楼微纪要（小摘要流水）】\n${microText}`);
-  }
-  if (chatHistoryText) {
-    sections.push(
-      coveredFloors.size > 0 ? `【补充原始楼层记录】\n${chatHistoryText}` : chatHistoryText,
-    );
-  }
-  const combinedSource = sections.join('\n\n');
+  const combinedSource = buildMesoSummarySourceDigest(from, to, {
+    microSummaries: opts?.microSummaries,
+    getChatMessagesFn: getMsgs,
+  });
 
   const promptContent = combinedSource
-    ? `请为以下楼层（第 ${from} 楼至第 ${to} 楼）的聊天记录生成事实性剧情摘要：\n\n${combinedSource}`
+    ? `请结合以下【逐楼微纪要】与【目标楼层原始剧情记录】，为第 ${from} 楼至第 ${to} 楼生成四维立体阶段剧情摘要（包含【事件脉络与关键抉择】【人物弧光与互动锚点】【战区格局与实力演进】【暗线伏笔与待决钩子】四个分栏，严防人物与事件扁平化）：\n\n${combinedSource}`
     : `请为第 ${from} 楼至第 ${to} 楼的剧情生成事实性摘要。`;
 
   const budgetCfg = getSummaryBudgetConfig(opts?.storage);
@@ -1707,14 +1835,12 @@ export async function requestMacroSummary(
   const from = sorted[0].from;
   const to = sorted[sorted.length - 1].to;
 
-  const bodyLines = sorted.map((seg, i) => {
-    const content = (seg.text ?? seg.entry?.content ?? '').trim();
-    const segKeys = seg.keys ?? (Array.isArray(seg.entry?.strategy?.keys) ? seg.entry?.strategy?.keys : []);
-    const keySuffix = segKeys && segKeys.length > 0 ? `\n关联实体：${segKeys.join('、')}` : '';
-    return `### 阶段 ${i + 1}（#${formatFloor(seg.from)}-#${formatFloor(seg.to)}）\n${content}${keySuffix}`;
+  const combinedMacroSource = buildMacroSummarySourceDigest(sorted, {
+    microSummaries: opts?.microSummaries,
+    getChatMessagesFn: opts?.getChatMessagesFn,
   });
 
-  const promptContent = `请将以下第 ${from} 楼至第 ${to} 楼的 ${sorted.length} 段阶段摘要归并提炼为一份战役卷宗总纲（大摘要）：\n\n${bodyLines.join('\n\n')}`;
+  const promptContent = `请结合以下第 ${from} 楼至第 ${to} 楼的 ${sorted.length} 段阶段摘要、逐楼微纪要与目标楼层记录，归并提炼为一份四维立体战役卷宗总纲（大摘要，包含【战役主线与时代转折】【核心群像与羁绊演进】【势力版图与军工体系】【远期暗流与终局伏笔】四个分栏）：\n\n${combinedMacroSource}`;
 
   const budgetCfg = getSummaryBudgetConfig(opts?.storage);
   const config: Record<string, unknown> = {
