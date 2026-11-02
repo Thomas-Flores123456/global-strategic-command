@@ -107,6 +107,12 @@ import {
   type ProtocolManualExperimentReceipt,
 } from './settleFloorPhases';
 import {
+  evaluateCivicFacilities,
+  getMoraleChainMultiplier,
+  isMoraleEngaged,
+  settleExposureAndMorale,
+} from './exposureMoraleEngine';
+import {
   tickTaskOrchestration,
   type LaneResolveEnv,
   type LaneStationView,
@@ -422,10 +428,15 @@ export function settleFloor(
     nanitesFor: () => readTotalNanites(nextData),
   };
   if (catalog) {
+    const rawNextRec = nextData as unknown as Record<string, unknown>;
     const laneEnv: LaneResolveEnv = {
       bases: readBases(nextData),
       queues: backfill.queues,
       catalog,
+      forces: rawNextRec.forces as LaneResolveEnv['forces'],
+      mecha_girls: rawNextRec.mecha_girls as LaneResolveEnv['mecha_girls'],
+      unit_Attachment: rawNextRec.unit_Attachment as LaneResolveEnv['unit_Attachment'],
+      vehicles_by_base: rawNextRec.vehicles_by_base as LaneResolveEnv['vehicles_by_base'],
     };
     const txnEffFor = makeTxnEffFor(catalog, nextData);
     // §4.2 加速系数接入积分链：实际推进分钟×系数 ⇒ 实际生产时间＝基础÷系数；
@@ -515,10 +526,15 @@ export function settleFloor(
       workingNextData = deductNanitesStock(workingNextData, preNanites);
     }
     if (catalog) {
+      const rawWorkRec = workingNextData as unknown as Record<string, unknown>;
       const updatedLaneEnv: LaneResolveEnv = {
         bases: readBases(workingNextData),
         queues: workingQueues,
         catalog,
+        forces: rawWorkRec.forces as LaneResolveEnv['forces'],
+        mecha_girls: rawWorkRec.mecha_girls as LaneResolveEnv['mecha_girls'],
+        unit_Attachment: rawWorkRec.unit_Attachment as LaneResolveEnv['unit_Attachment'],
+        vehicles_by_base: rawWorkRec.vehicles_by_base as LaneResolveEnv['vehicles_by_base'],
       };
       settleOptions.nanitesFor = () => readTotalNanites(workingNextData);
       settleOptions.laneKeyFor = txn => laneHub.resolveLaneKeyForTxn(txn, updatedLaneEnv);
@@ -971,6 +987,40 @@ export function settleFloor(
     }),
   };
 
+  // FD-55 · 在役民生与环保公共设施确定性滋养与断供反噬（Δt > 0 且本楼未显式变动民心时按日折算）
+  if (deltaMinutes > 0 && isMoraleEngaged(projSynced.next.morale, projSynced.next.exposure?.value ?? 0)) {
+    const prevMoraleVal = (prevData as Partial<StatData> | undefined)?.morale?.value;
+    const curMoraleVal = projSynced.next.morale?.value;
+    const moraleExplicitlyChanged =
+      typeof prevMoraleVal === 'number' &&
+      typeof curMoraleVal === 'number' &&
+      Math.abs(curMoraleVal - prevMoraleVal) > 1e-6;
+    if (!moraleExplicitlyChanged) {
+      const civicEval = evaluateCivicFacilities(readBases(projSynced.next), {
+        moraleEngaged: true,
+        moraleValue: curMoraleVal ?? 5.0,
+      });
+      if (
+        civicEval.installedFacilities.length > 0 &&
+        (civicEval.hasWaterOrSewageOutage || civicEval.effectiveDailyBonus > 0)
+      ) {
+        const civicSettled = settleExposureAndMorale(projSynced.next, {
+          deltaMinutes,
+          enableNaturalDrift: false,
+        });
+        if (civicSettled.morale.value !== curMoraleVal) {
+          projSynced.next = {
+            ...projSynced.next,
+            morale: {
+              ...projSynced.next.morale,
+              ...civicSettled.morale,
+            },
+          } as StatData;
+        }
+      }
+    }
+  }
+
   // ④⁗ 资金链事件、电网/天候工况硬联动与时钟结算（EVT-SETTLE-01 + EVT-OPR-01 · 事件系统总设计案 §3.3/§6.3）：
   const chainDecls = (options.eventDeclarations ?? []).filter(
     (d): d is EventDeclaration & { kind: 'chain' } => d.kind === 'chain' && d.chain !== undefined,
@@ -1068,18 +1118,48 @@ export function settleFloor(
         deltaMinutes > 0 && chains.length > 0
           ? withWeatherView(chains, weather, basesForWeather)
           : chains;
+      const moraleEngaged = isMoraleEngaged(
+        projSynced.next.morale,
+        projSynced.next.exposure?.value ?? 0,
+      );
+      const moraleChainMult = getMoraleChainMultiplier(projSynced.next.morale?.value, {
+        engaged: moraleEngaged,
+        exposureValue: projSynced.next.exposure?.value ?? 0,
+      });
       const chainsForSettle =
         deltaMinutes > 0 && weatherAdjustedChains.length > 0
           ? weatherAdjustedChains.map(c => {
-              if (c.flow === '支出' || !(c.rate_daily > 0)) return c;
+              if (c.flow === '支出') return c;
               const chainMods = evaluateCommandHQModifiers(
                 projSynced.next,
                 c.deps?.base_id || undefined,
               );
-              if (chainMods.positiveChainBonus <= 0) return c;
+              const posMult = (1 + Math.max(0, chainMods.positiveChainBonus)) * moraleChainMult;
+              const nextRateDaily =
+                c.rate_daily > 0 && Math.abs(posMult - 1.0) > 1e-6
+                  ? c.rate_daily * posMult
+                  : c.rate_daily;
+              let nextWalletDaily = c.wallet_daily;
+              if (c.wallet_daily && Math.abs(moraleChainMult - 1.0) > 1e-6) {
+                const scaledWallet: Record<string, number> = {};
+                let changed = false;
+                for (const [k, v] of Object.entries(c.wallet_daily)) {
+                  if (typeof v === 'number' && v > 0) {
+                    scaledWallet[k] = v * moraleChainMult;
+                    changed = true;
+                  } else {
+                    scaledWallet[k] = v;
+                  }
+                }
+                if (changed) nextWalletDaily = scaledWallet;
+              }
+              if (nextRateDaily === c.rate_daily && nextWalletDaily === c.wallet_daily) {
+                return c;
+              }
               return {
                 ...c,
-                rate_daily: c.rate_daily * (1 + chainMods.positiveChainBonus),
+                rate_daily: nextRateDaily,
+                ...(nextWalletDaily !== undefined ? { wallet_daily: nextWalletDaily } : {}),
               };
             })
           : weatherAdjustedChains;
@@ -1090,11 +1170,20 @@ export function settleFloor(
       const persistedChains = settledChains.nextChains.map((sc, idx) =>
         sc.status === 'exhausted' ||
         (sc.status === 'distressed' && sc.eff === 0 && sc.reason.includes('上游原料/外币不足暂停'))
-          ? { ...sc, rate_daily: chains[idx]?.rate_daily ?? sc.rate_daily }
+          ? {
+              ...sc,
+              rate_daily: chains[idx]?.rate_daily ?? sc.rate_daily,
+              ...(chains[idx]?.wallet_daily !== undefined
+                ? { wallet_daily: chains[idx].wallet_daily }
+                : {}),
+            }
           : {
               ...sc,
               eff: chains[idx]?.eff ?? sc.eff,
               rate_daily: chains[idx]?.rate_daily ?? sc.rate_daily,
+              ...(chains[idx]?.wallet_daily !== undefined
+                ? { wallet_daily: chains[idx].wallet_daily }
+                : {}),
             },
       );
       for (const ex of settledChains.exhaustedEvents) {
@@ -1156,12 +1245,21 @@ export function settleFloor(
         nextResources = clonedResources;
       }
 
+      const chainsForDailyNet =
+        Math.abs(moraleChainMult - 1.0) > 1e-6
+          ? persistedChains.map(c =>
+              c.flow !== '支出' && c.rate_daily > 0
+                ? { ...c, rate_daily: c.rate_daily * moraleChainMult }
+                : c,
+            )
+          : persistedChains;
+
       afterChains = {
         ...projSynced.next,
         economy: {
           ...eco,
           credits: Math.round((Number.isFinite(eco.credits) ? eco.credits : 0) + settledChains.deltaCredits),
-          credits_daily: calcDailyNet(persistedChains),
+          credits_daily: calcDailyNet(chainsForDailyNet),
           wallet: nextWallet,
           ...(nextResources !== undefined ? { resources: nextResources } : {}),
           chains: persistedChains,

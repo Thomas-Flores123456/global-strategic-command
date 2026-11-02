@@ -197,6 +197,14 @@ export interface ArmoryGirlItem {
   specialSkills: GirlSpecialSkill[];
   specialEquipment: GirlSpecialEquipment[];
   temperamentSpectrum: string;
+  /** 2~4 字简短战备状态徽章：'完好' | '执勤中' | '轻损' | '重损' | '离线' */
+  hpBadge: '完好' | '执勤中' | '轻损' | '重损' | '离线';
+  /** 当原始 status 为长句叙事（>6 字）或与 duty 互补时的实时勤务动态摘要 */
+  statusHeadline: string;
+  /** 结构化暴露分档条目列表（如 [{ code: 'EL-0', label: '无痕：微距扫描与日用品静默细织', tone: 'ok' }]） */
+  exposureGrades: Array<{ code: string; label: string; tone: 'ok' | 'warn' | 'danger' | 'accent' }>;
+  /** 结构化世界书章节列表（从 cleanDossierContent + cleanStoryContent 解析出的【标题】段落） */
+  worldbookSections: Array<{ title: string; source: 'dossier' | 'story'; lines: string[] }>;
   activeTransfer?: ArmoryTransferItem | null;
 }
 
@@ -356,6 +364,41 @@ export function canonKey(s: string | undefined | null): string {
   return String(s ?? '').trim().toLowerCase();
 }
 
+const TROOP_FACTION_PREFIX_RE = /^(?:盟军|苏军|苏联|尤里|厄普西隆|焚风|帝国|昇阳|旭日)[·•・\-—_/\s]*/;
+
+export interface ParsedTroopUnitAndDesignation {
+  baseUnit: string;
+  designation: string;
+  stemKey: string;
+}
+
+/**
+ * 识别兵种名称末尾的中文或英文括号注记：
+ * - 提取 `baseUnit`（括号前的主兵种名，如 `"美国大兵"`、`"战斗工兵"`、`"盟军侦察兵"`）
+ * - 提取 `designation`（括号内的编制/班组注记，如 `"突击一班"`；若无括号则为 `""`）
+ * - 提取用于跨基地/全局同兵种对齐的归一主键 `stemKey`（去空白、小写、剥离可选阵营前缀后长度 >= 2 的词干）
+ */
+export function parseTroopUnitAndDesignation(rawUnit: string): ParsedTroopUnitAndDesignation {
+  const trimmed = String(rawUnit ?? '').trim();
+  if (!trimmed) {
+    return { baseUnit: '', designation: '', stemKey: '' };
+  }
+  const match = trimmed.match(/^(.+?)\s*(?:（([^（）]+)）|\(([^()]+)\))\s*$/);
+  const baseUnit = match && match[1].trim() ? match[1].trim() : trimmed;
+  const designation = match && match[1].trim() ? (match[2] ?? match[3] ?? '').trim() : '';
+
+  const strippedFaction = baseUnit.replace(TROOP_FACTION_PREFIX_RE, '').trim();
+  const strippedCompact = strippedFaction.replace(/\s+/g, '');
+  const baseCompact = baseUnit.replace(/\s+/g, '');
+  const stemKey = (strippedCompact.length >= 2 ? strippedCompact : baseCompact).toLowerCase();
+
+  return {
+    baseUnit,
+    designation,
+    stemKey,
+  };
+}
+
 export function isAllScope(scope: string | undefined | null): boolean {
   const c = canonKey(scope);
   return !c || c === 'all' || c === '全局' || c === '战区全局';
@@ -424,6 +467,231 @@ export function rawBaseMatchesScope(
     return canonKey(trimmed) === canonKey(matchedBase.name) || canonKey(trimmed) === canonKey(matchedBase.id);
   }
   return false;
+}
+
+/**
+ * 将原始基地标识（如 `'base_1'`、`'b1'` 或基地名称）解析为人类可读的正式基地名称 `b.name`。
+ */
+export function resolveBaseDisplayName(
+  rawBase: string | undefined | null,
+  bases: readonly NormalizedBaseRecord[],
+  fallback = '战区直属',
+): string {
+  const trimmed = String(rawBase ?? '').trim();
+  if (!trimmed) return fallback;
+  const key = canonKey(trimmed);
+  const matched = bases.find(b => canonKey(b.id) === key || canonKey(b.name) === key);
+  return matched ? matched.name : trimmed;
+}
+
+const OFFLINE_STATUS_RE = /离线|阵亡|失联|瘫痪/;
+const HEAVY_DAMAGE_STATUS_RE = /重损|大修|重伤|濒危/;
+const LIGHT_DAMAGE_STATUS_RE = /轻损|受损|挂彩|待修/;
+const INTACT_SHORT_STATUS_RE = /^(?:完好|正常|待命|运转中)$/;
+const LONG_SENTENCE_PUNCT_RE = /[，。；！？,.;!?、：:]/;
+
+/**
+ * 智能分离 2~4 字简短战备状态徽章 `hpBadge` 与实时勤务动态长句 `statusHeadline`，
+ * 根治存档中 LLM 将 40~60 字叙事长句写入 `status` 导致左侧列表挤爆布局的问题。
+ */
+export function deriveGirlHpBadgeAndHeadline(
+  rawStatus: string,
+  rawHp?: string,
+  duty?: string,
+): {
+  hpBadge: '完好' | '执勤中' | '轻损' | '重损' | '离线';
+  statusHeadline: string;
+} {
+  const s = String(rawStatus ?? '').trim();
+  const h = String(rawHp ?? '').trim();
+  const d = String(duty ?? '').trim();
+  const cleanDuty = d && d !== '战区战备待命' ? d : '';
+  const combined = `${s} ${h}`;
+  const isLongStatus = s.length > 6 || LONG_SENTENCE_PUNCT_RE.test(s);
+
+  let hpBadge: '完好' | '执勤中' | '轻损' | '重损' | '离线';
+  if (OFFLINE_STATUS_RE.test(combined)) {
+    hpBadge = '离线';
+  } else if (HEAVY_DAMAGE_STATUS_RE.test(combined)) {
+    hpBadge = '重损';
+  } else if (LIGHT_DAMAGE_STATUS_RE.test(combined)) {
+    hpBadge = '轻损';
+  } else if (!isLongStatus && (!s || INTACT_SHORT_STATUS_RE.test(s))) {
+    hpBadge = '完好';
+  } else {
+    hpBadge = '执勤中';
+  }
+
+  let statusHeadline = '';
+  if (isLongStatus) {
+    statusHeadline = s;
+  } else if (hpBadge === '完好') {
+    statusHeadline = cleanDuty;
+  } else if (hpBadge === '执勤中') {
+    statusHeadline = s || cleanDuty || '';
+  } else {
+    // 轻损 / 重损 / 离线 且 rawStatus 为短词时，优先展示勤务职责，若 rawStatus 含额外短说明则保留
+    statusHeadline = cleanDuty || (s !== hpBadge ? s : '');
+  }
+
+  return { hpBadge, statusHeadline };
+}
+
+const NON_WHITELIST_EMOJI_RE = /(?![◆◇▲▼●○▸▾★])[\p{Extended_Pictographic}\uFE0F]/gu;
+
+function splitExposureSegments(raw: string): string[] {
+  const segments: string[] = [];
+  let current = '';
+  let depth = 0;
+
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === '(' || ch === '（' || ch === '[' || ch === '【') {
+      depth++;
+      current += ch;
+      continue;
+    }
+    if (ch === ')' || ch === '）' || ch === ']' || ch === '】') {
+      depth = Math.max(0, depth - 1);
+      current += ch;
+      continue;
+    }
+    if (depth === 0 && (ch === '/' || ch === '｜' || ch === '|' || ch === '；' || ch === ';' || ch === '\n' || ch === '\r')) {
+      if (current.trim()) segments.push(current.trim());
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim()) segments.push(current.trim());
+  return segments;
+}
+
+/**
+ * 将暴露分档原始字符串解析为结构化分档列表（支持 `EL-0 (...) / EL-2 (...) / EL-3 (...)` 或 `🟢 常规武装 / 🔴 极限超频`）。
+ */
+export function parseExposureGrades(
+  rawExposure: string | undefined | null,
+): Array<{ code: string; label: string; tone: 'ok' | 'warn' | 'danger' | 'accent' }> {
+  const raw = String(rawExposure ?? '').trim();
+  if (!raw || /^<\/?数据>$/i.test(raw) || raw.startsWith('</')) return [];
+
+  const segments = splitExposureSegments(raw);
+  const out: Array<{ code: string; label: string; tone: 'ok' | 'warn' | 'danger' | 'accent' }> = [];
+
+  for (const seg of segments) {
+    let tone: 'ok' | 'warn' | 'danger' | 'accent' = 'accent';
+    if (/EL-[34]|高烈度|极限|绝密|毁灭|红|🔴/i.test(seg)) {
+      tone = 'danger';
+    } else if (/EL-[12]|局部|受限|警戒|中度|黄|橙|🟡|🟠/i.test(seg)) {
+      tone = 'warn';
+    } else if (/EL-0|无痕|常规|内勤|日常|医疗|静默|绿|🟢/i.test(seg)) {
+      tone = 'ok';
+    }
+
+    const cleaned = seg
+      .replace(NON_WHITELIST_EMOJI_RE, '')
+      .replace(/^[\s·•\-*]+/, '')
+      .trim();
+    if (!cleaned) continue;
+
+    let code = '';
+    let label = '';
+
+    const elMatch = cleaned.match(
+      /^(EL-\d+)\s*(?:\(([\s\S]*)\)|（([\s\S]*)）|[:：\-—]\s*([\s\S]*)|\s+([\s\S]+))?$/i,
+    );
+    if (elMatch) {
+      code = elMatch[1].toUpperCase();
+      label = (elMatch[2] ?? elMatch[3] ?? elMatch[4] ?? elMatch[5] ?? '').trim() || code;
+    } else {
+      const parenMatch = cleaned.match(/^([^:：()（）]{1,12}?)\s*(?:\(([\s\S]+)\)|（([\s\S]+)）)$/);
+      const colonMatch = cleaned.match(/^([^:：]{1,12}?)\s*[:：]\s*([\s\S]+)$/);
+      if (parenMatch) {
+        code = parenMatch[1].trim();
+        label = (parenMatch[2] ?? parenMatch[3] ?? '').trim();
+      } else if (colonMatch) {
+        code = colonMatch[1].trim();
+        label = colonMatch[2].trim();
+      } else {
+        const prefixMatch = cleaned.match(/^(常规|极限|高烈度|局部|内勤|无痕)(.*)$/);
+        if (prefixMatch) {
+          code = prefixMatch[1];
+          label = cleaned;
+        } else {
+          code = cleaned.length <= 6 ? cleaned : cleaned.slice(0, 4);
+          label = cleaned;
+        }
+      }
+    }
+
+    out.push({ code, label, tone });
+  }
+
+  return out;
+}
+
+function parseSingleWorldbookText(
+  text: string,
+  source: 'dossier' | 'story',
+  defaultTitle: string,
+): Array<{ title: string; source: 'dossier' | 'story'; lines: string[] }> {
+  const trimmedText = String(text ?? '').trim();
+  if (!trimmedText) return [];
+
+  const sections: Array<{ title: string; source: 'dossier' | 'story'; lines: string[] }> = [];
+  let current: { title: string; source: 'dossier' | 'story'; lines: string[] } | null = null;
+
+  for (const rawLine of trimmedText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // 匹配独立章节头：`【标题】` 或 `[标题]`（兼容可选 Markdown # 前缀与末尾冒号）
+    const pureHeaderMatch = line.match(/^(?:#+\s*)?(?:【([^【】]{1,32})】|\[([^\[\]]{1,32})\])\s*[：:]?\s*$/);
+    if (pureHeaderMatch) {
+      const title = (pureHeaderMatch[1] ?? pureHeaderMatch[2] ?? '').trim();
+      if (title) {
+        current = { title, source, lines: [] };
+        sections.push(current);
+        continue;
+      }
+    }
+
+    // 匹配行首带正文的章节头：`【标题】正文...` 或 `[标题] 正文...`（排除以 · / - / * 开头的列表项）
+    const inlineHeaderMatch = line.match(
+      /^(?:#+\s*)?(?:【([^【】]{1,24})】|\[([^\[\]]{1,24})\])\s*[：:]?\s*(.+)$/,
+    );
+    if (inlineHeaderMatch) {
+      const title = (inlineHeaderMatch[1] ?? inlineHeaderMatch[2] ?? '').trim();
+      const rest = inlineHeaderMatch[3].trim();
+      if (title && rest) {
+        current = { title, source, lines: [rest] };
+        sections.push(current);
+        continue;
+      }
+    }
+
+    if (!current) {
+      current = { title: defaultTitle, source, lines: [] };
+      sections.push(current);
+    }
+    current.lines.push(line);
+  }
+
+  return sections.filter(s => s.lines.length > 0);
+}
+
+/**
+ * 将 `cleanDossier` 与 `cleanStory` 按 `【...】` 或 `[...]` 段落标题解析为结构化章节列表。
+ */
+export function parseWorldbookSections(
+  cleanDossier: string,
+  cleanStory: string,
+): Array<{ title: string; source: 'dossier' | 'story'; lines: string[] }> {
+  return [
+    ...parseSingleWorldbookText(cleanDossier, 'dossier', '机体与能力设定'),
+    ...parseSingleWorldbookText(cleanStory, 'story', '战史与勤务纪要'),
+  ];
 }
 
 export function splitLoadoutTokens(raw: string): string[] {
@@ -561,6 +829,11 @@ export function normalizeGirlRecord(
 
   const weapons = String(rec.weapons ?? rec['武器'] ?? '').trim();
   const loadouts = splitLoadoutTokens(weapons);
+  const rawHp = typeof rec.hp === 'string' ? rec.hp.trim() : '';
+  const exposure = String(rec.exposure ?? rec['暴露分档'] ?? '').trim();
+  const { hpBadge, statusHeadline } = deriveGirlHpBadgeAndHeadline(status, rawHp, duty);
+  const exposureGrades = parseExposureGrades(exposure);
+  const worldbookSections = parseWorldbookSections('', '');
 
   return {
     name,
@@ -575,7 +848,7 @@ export function normalizeGirlRecord(
     traits,
     weapons,
     skills: String(rec.skills ?? rec['能力'] ?? rec['技能'] ?? '').trim(),
-    exposure: String(rec.exposure ?? rec['暴露分档'] ?? '').trim(),
+    exposure,
     shell: String(rec.shell ?? rec['社会外壳'] ?? '').trim(),
     alias: String(rec.alias ?? rec['化名'] ?? '').trim(),
     form_mech: String(rec.form_mech ?? rec['形态机制'] ?? '').trim(),
@@ -598,6 +871,10 @@ export function normalizeGirlRecord(
     specialSkills: [],
     specialEquipment: [],
     temperamentSpectrum: '',
+    hpBadge,
+    statusHeadline,
+    exposureGrades,
+    worldbookSections,
   };
 }
 
@@ -746,6 +1023,11 @@ export function resolveFocusedGirlProfile(
     mergedData,
   );
 
+  const rawHp = String(pendingMatch?.hp || base.hp || status).trim();
+  const { hpBadge, statusHeadline } = deriveGirlHpBadgeAndHeadline(status, rawHp, duty);
+  const exposureGrades = parseExposureGrades(exposure);
+  const worldbookSections = parseWorldbookSections(cleanDossierContent, cleanStoryContent);
+
   return {
     ...base,
     name: finalName,
@@ -778,6 +1060,10 @@ export function resolveFocusedGirlProfile(
     specialSkills,
     specialEquipment,
     temperamentSpectrum,
+    hpBadge,
+    statusHeadline,
+    exposureGrades,
+    worldbookSections,
   };
 }
 

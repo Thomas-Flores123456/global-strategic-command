@@ -572,4 +572,21 @@ describe('presetPromptManager', () => {
       expect(dramatronCot).toContain('所有预设任务/情报链方向仅作参考、严禁机械照抄标题，须结合现场态势自主发挥');
     }
   });
+
+  it('FD-55：buildIncrementalCotPromptContent 与 buildKeminiDramatronCotPromptContent 均包含抚民善政/民生基建通水开放/扰民断供事故按需输出 民心变化 与 民心事件 自检锚点', () => {
+    const kemini = createKeminiFixturePreset();
+    const tagSpec = detectPresetScenarioTag(kemini.prompts);
+    const expectedAnchor =
+      '若本轮剧情发生波及周边聚落/平民的抚民善政、民生基建通水开放或扰民/断供事故，须在 <态势> 按需输出 民心变化 与 民心事件；';
+
+    for (const profile of ['generic', 'kemini_aether'] as const) {
+      const cot = buildIncrementalCotPromptContent(tagSpec, profile);
+      expect(cot).toContain(expectedAnchor);
+    }
+
+    for (const profile of ['kemini_dramatron', 'kemini_dramatron_uau'] as const) {
+      const dramatronCot = buildKeminiDramatronCotPromptContent(profile);
+      expect(dramatronCot).toContain(expectedAnchor);
+    }
+  });
 });

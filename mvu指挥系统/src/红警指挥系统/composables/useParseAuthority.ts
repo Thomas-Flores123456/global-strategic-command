@@ -173,6 +173,11 @@ export function hydrateZeroFloorFromBoot(
   }
   const choices = boot.choices as Record<string, unknown>;
   const eff = _.isPlainObject(choices.effective) ? (choices.effective as Record<string, unknown>) : null;
+  const rawSnap = _.isPlainObject(boot.importedStatSnapshot)
+    ? (boot.importedStatSnapshot as Record<string, unknown>)
+    : _.isPlainObject(choices.importedStatSnapshot)
+      ? (choices.importedStatSnapshot as Record<string, unknown>)
+      : null;
 
   const bootCredits =
     typeof eff?.credits === 'number' && Number.isFinite(eff.credits) && eff.credits >= 0
@@ -191,6 +196,9 @@ export function hydrateZeroFloorFromBoot(
   const bootWorldId = typeof choices.worldId === 'string' && choices.worldId.trim() ? choices.worldId.trim() : '';
 
   if (!hasOriginal) {
+    if (rawSnap) {
+      return { stat_data: structuredClone(rawSnap), has_stat_data: true };
+    }
     if (bootCredits === null && bootTechDone.length === 0 && !bootWorldId) {
       return { stat_data: statData, has_stat_data: false };
     }
@@ -211,6 +219,54 @@ export function hydrateZeroFloorFromBoot(
     );
   if (!queuesEmpty || !noBuildings) {
     return { stat_data: statData, has_stat_data: true };
+  }
+
+  if (rawSnap) {
+    const rawBases = Array.isArray(rawSnap.bases) ? rawSnap.bases : [];
+    const curBases = Array.isArray(sd.bases) ? sd.bases : [];
+    const lostBases = rawBases.length > 0 && curBases.length === 0;
+
+    const rawForces = _.isPlainObject(rawSnap.forces) ? (rawSnap.forces as Record<string, unknown>) : {};
+    const rawGirls = Array.isArray(rawForces.girls) ? rawForces.girls : [];
+    const curForces = _.isPlainObject(sd.forces) ? (sd.forces as Record<string, unknown>) : {};
+    const curGirls = Array.isArray(curForces.girls) ? curForces.girls : [];
+    const lostGirls = rawGirls.length > 0 && curGirls.length < rawGirls.length;
+
+    const rawCodex = Array.isArray(rawSnap.codex) ? rawSnap.codex : [];
+    const curCodex = Array.isArray(sd.codex) ? sd.codex : [];
+    const lostCodex = rawCodex.length > 0 && curCodex.length < rawCodex.length;
+
+    if (lostBases || lostGirls || lostCodex) {
+      const restored = structuredClone(rawSnap);
+      if (bootCredits !== null && bootCredits > 0) {
+        const nextEco = _.isPlainObject(restored.economy)
+          ? (restored.economy as Record<string, unknown>)
+          : {};
+        nextEco.credits = bootCredits;
+        restored.economy = nextEco;
+      }
+      if (bootTechDone.length > 0) {
+        const nextTech = _.isPlainObject(restored.tech)
+          ? (restored.tech as Record<string, unknown>)
+          : {};
+        const snapDone = Array.isArray(nextTech.done)
+          ? nextTech.done.filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+          : [];
+        const addTechs = bootTechDone.filter(t => !snapDone.includes(t));
+        nextTech.done = [...snapDone, ...addTechs];
+        restored.tech = nextTech;
+      }
+      if (bootWorldId) {
+        const nextMeta = _.isPlainObject(restored.meta)
+          ? (restored.meta as Record<string, unknown>)
+          : {};
+        if (!nextMeta.world_id) {
+          nextMeta.world_id = bootWorldId;
+        }
+        restored.meta = nextMeta;
+      }
+      return { stat_data: restored, has_stat_data: true };
+    }
   }
 
   const eco = _.isPlainObject(sd.economy) ? (sd.economy as Record<string, unknown>) : {};

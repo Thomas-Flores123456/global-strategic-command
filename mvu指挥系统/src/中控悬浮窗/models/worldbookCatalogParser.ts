@@ -419,14 +419,18 @@ export function parseWorldbookEntries(raw: unknown, options?: ParserOptions): Pa
 
       switch (item.type) {
         case 'building':
-          buildings.push(item);
+          if (item.buildable !== false) {
+            buildings.push(item);
+          }
           break;
         case 'research':
-          researches.push(item);
+          if (item.buildable !== false) {
+            researches.push(item);
+          }
           break;
         case 'production':
-          // 排除混入 production 块但属于非实物的条令/总览（category === 'doctrine'）
-          if (item.category !== 'doctrine') {
+          // 排除混入 production 块但属于非实物的条令/总览（category === 'doctrine'）或显式标记不可由本系统制造（buildable === false）的孤品/外部造物
+          if (item.category !== 'doctrine' && item.buildable !== false) {
             productions.push(item);
           }
           break;

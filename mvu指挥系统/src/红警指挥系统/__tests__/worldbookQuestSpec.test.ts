@@ -522,4 +522,28 @@ describe('FD-29 ~ FD-36 PKG-D: 世界书 uid=18, uid=19 & uid=21 规约校验', 
     expect(pdaChainsVue).toContain('wallet_daily');
     expect(pdaChainsVue).toContain('resources_daily');
   });
+
+  it('FD-55: uid=18 与 uid=19 包含民生基建通水开放/抚民/断供事件输出指引、民心变动事件四档参考标尺及在役民生设施月度滋养/民间眼线联动规范', () => {
+    const rawJson = fs.readFileSync(wbPath, 'utf8');
+    const parsed = JSON.parse(rawJson) as WorldbookJson;
+    const uid18 =
+      parsed.entries['18'] ?? Object.values(parsed.entries).find(e => e.uid === 18);
+    const uid19 =
+      parsed.entries['19'] ?? Object.values(parsed.entries).find(e => e.uid === 19);
+
+    // uid=18 第二节民生主力基建与基地局部民心说明
+    expect(uid18.content).toContain('抚民善政');
+    expect(uid18.content).toContain('净水站/污水站/生态公园/环卫站/分拣站/深井泵站');
+    expect(uid18.content).toContain('基地子块支持可选局部 民心 字段');
+
+    // uid=19 第四节新增两段规范
+    expect(uid19.content).toContain('· 【民心变动事件四档参考标尺】（供结合现场态势自主裁量，严禁机械照搬）');
+    expect(uid19.content).toContain('① 日常惠民与军纪严明（+0.1～+0.3');
+    expect(uid19.content).toContain('② 民生基建落成与雪中送炭（+0.3～+0.6');
+    expect(uid19.content).toContain('③ 救民水火与重塑秩序（+0.6～+1.2');
+    expect(uid19.content).toContain('④ 扰民摩擦与断供事故（-0.2～-1.5');
+    expect(uid19.content).toContain('· 【在役民生设施月度滋养与民间眼线联动】');
+    expect(uid19.content).toContain('严禁将日常挂机滋养重复累加');
+    expect(uid19.content).toContain('自动点亮「民间眼线」社区情报渠道');
+  });
 });

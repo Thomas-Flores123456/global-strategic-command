@@ -1259,7 +1259,7 @@ function applyWarStat(
       deltaMorale,
       moraleTrend: moraleTrendT?.value != null ? String(moraleTrendT.value) : null,
       moraleLastChange: moraleLastChangeT?.value != null ? String(moraleLastChangeT.value) : null,
-      enableNaturalDrift: hasAnyExpInput || hasAnyMoraleInput,
+      enableNaturalDrift: true,
     });
 
     if (settled.conflictExposureBothProvided) {
@@ -1339,7 +1339,12 @@ function applyWarStat(
       );
     }
 
-    if (hasAnyExpInput || settled.exposure.floor > 0 || data.exposure.floor !== undefined) {
+    if (
+      hasAnyExpInput ||
+      settled.exposure.floor > 0 ||
+      data.exposure.floor !== undefined ||
+      settled.exposure.value !== data.exposure.value
+    ) {
       data.exposure.value = settled.exposure.value;
       data.exposure.floor = settled.exposure.floor;
       data.exposure.level = settled.exposure.level;

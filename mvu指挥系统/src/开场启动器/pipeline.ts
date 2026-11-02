@@ -15,7 +15,7 @@ import {
 } from '../红警指挥系统/core/commandPresets';
 import { migrateV1toV2, Schema, type Adjutant } from '../红警指挥系统/core/schema';
 import { confirmBoot, readBootFrom, type BootState } from './boot';
-import { getSavePackForImportedStat, type SavePack } from './importSave';
+import { getSavePackForImportedStat, type SavePack, type SavePackWorldbookEntry } from './importSave';
 import {
   computeMultiFactionLaunchImpact,
   defaultDateForWorld,
@@ -34,6 +34,7 @@ import {
   resolveSelectedFactions,
   resolveSystemLinkMode,
   STARTING_VEHICLES,
+  type ImportSaveMode,
   type LaunchChoices,
   type LocationDef,
   type OpeningMaidenIncubationMode,
@@ -41,6 +42,7 @@ import {
 } from './presets';
 import {
   hasSameManagedWorldbooks,
+  isChatArchiveWorldbookName,
   managedWorldbookNames,
   planManagedWorldbookRecovery,
   planWorldbookSync,
@@ -79,6 +81,19 @@ export function resolveDifficulty(choices: LaunchChoices): EffectiveDifficulty {
     }
     baseExposure = preset.exposure;
     narrativeSeed = preset.narrativeSeed;
+  }
+
+  if (
+    choices.importedStat !== null &&
+    choices.importedStat !== undefined &&
+    (choices.importMode ?? 'continuation') === 'continuation'
+  ) {
+    return {
+      credits: baseCredits,
+      techDone,
+      exposure: baseExposure,
+      narrativeSeed,
+    };
   }
 
   const selectedFactions = resolveSelectedFactions(choices);
@@ -356,10 +371,13 @@ export function buildStatData(choices: LaunchChoices): Schema {
   if (!world) throw new Error(`未注册世界「${choices.worldId || '空'}」，不能安全初始化`);
   const loc = resolveLaunchLocation(choices);
 
-  // ── G2 修正：导入开局以存档全量为基线（机娘/建筑/图鉴/队列/情报等无缝继承），
-  //    表单可调字段（日期/资金/暴露/科技/地点）以向导终值覆写（回填后未改则等值无害）。
-  //    真机血泪：旧版从归零基线重建，导致导入存档的白凌（girls）、建造厂、codex 全部丢失。
-  if (choices.importedStat) {
+  const importMode: ImportSaveMode = choices.importMode ?? 'continuation';
+
+  // ── G2 修正 + FD-53 双模式分流：
+  //    1. continuation（战局接力续写，默认）：以存档全量为基线（基地/建筑/机娘/图鉴/队列/情报等无缝继承），
+  //       清空跨聊天残留的旧楼层绑定摘要缓冲 micro_summaries / pending_summaries；
+  //    2. new_game_plus（二周目遗产新开荒）：走下方归零基线 MCV 开荒构建，仅合并继承 codex、tech.done 与 forces.girls（重置 base=''）。
+  if (choices.importedStat && importMode === 'continuation') {
     // JSON 克隆而非 structuredClone：真机上 choices 是 Vue reactive，importedStat 是 Proxy，
     // structuredClone 对 Proxy 直接抛 DataCloneError（纯对象测试测不出，真机血泪）
     const imported = JSON.parse(JSON.stringify(choices.importedStat)) as unknown;
@@ -372,6 +390,9 @@ export function buildStatData(choices: LaunchChoices): Schema {
     // Schema.parse 要求 exposure.value <= 10，parse 通过后再写入多阵营折算后的真实暴露度
     base.exposure.value = Math.min(10, Math.max(0, eff.exposure));
     base.tech.done = [...eff.techDone];
+    // 清空跨聊天残留的旧楼层号绑定摘要缓冲，防阻塞新聊天 1~20 楼摘要漏斗
+    base.micro_summaries = [];
+    base.pending_summaries = [];
     // 地点：与存档主基地一致则全量保留 bases；用户主动改址则换标识但保留建筑/状态/电力，并级联更新全树基地引用
     if (base.bases[0] && (base.bases[0].id !== loc.id || base.bases[0].name !== loc.name)) {
       const oldId = base.bases[0].id;
@@ -388,6 +409,15 @@ export function buildStatData(choices: LaunchChoices): Schema {
     base.exposure.value = normalizedExp;
     const parsedImported = Schema.parse(base);
     return parsedImported;
+  }
+
+  let legacyStat: Schema | null = null;
+  if (choices.importedStat && importMode === 'new_game_plus') {
+    const importedRaw = JSON.parse(JSON.stringify(choices.importedStat)) as unknown;
+    legacyStat = Schema.parse(migrateV1toV2(importedRaw));
+    if (legacyStat.meta.world_id !== world.world_id) {
+      throw new Error(`导入存档属于「${legacyStat.meta.world_id}」，不能以「${world.world_id}」发射`);
+    }
   }
 
   const selectedFactions = resolveSelectedFactions(choices);
@@ -443,6 +473,20 @@ export function buildStatData(choices: LaunchChoices): Schema {
   }
   if (vehicles.length === 0) {
     vehicles.push(...STARTING_VEHICLES);
+  }
+
+  if (legacyStat && Array.isArray(legacyStat.forces?.girls)) {
+    for (const ig of legacyStat.forces.girls) {
+      const gName = ig?.name?.trim();
+      if (!gName || girls.some(g => g.name === gName)) continue;
+      girls.push({
+        ...ig,
+        name: gName,
+        duty: ig.duty || '',
+        hp: '完好',
+        base: '',
+      });
+    }
   }
 
   const commanderName = choices.personaMode !== 'skip' ? choices.personaName.trim() : '';
@@ -517,6 +561,18 @@ export function buildStatData(choices: LaunchChoices): Schema {
     });
   }
 
+  if (legacyStat && Array.isArray(legacyStat.codex)) {
+    for (const ic of legacyStat.codex) {
+      const cName = ic?.name?.trim();
+      if (!cName || initialCodex.some(c => c.name === cName)) continue;
+      initialCodex.push({ ...ic, name: cName });
+    }
+  }
+
+  const mergedTechDone = legacyStat
+    ? [...new Set([...eff.techDone, ...(legacyStat.tech?.done ?? [])])]
+    : [...eff.techDone];
+
   const next = {
     ...zero,
     codex: initialCodex,
@@ -532,7 +588,7 @@ export function buildStatData(choices: LaunchChoices): Schema {
       wallet: Object.fromEntries(world.currencies.map(name => [name, 0])),
     },
     exposure: { ...zero.exposure, value: Math.min(10, Math.max(0, eff.exposure)) },
-    tech: { ...zero.tech, done: [...eff.techDone] },
+    tech: { ...zero.tech, done: mergedTechDone },
     // MCV-ZERO-BASE-01：开局零预设基地铁律——MCV 尚未选点展开前，在役基地严格为空数组 []；
     // 拟定预选区域仅保存在 meta.location 与 $boot.choices 中，待剧情中下达 MCV 展开指令后再正式奠基建立首座基地。
     bases: [],
@@ -769,8 +825,110 @@ function buildInitialFootingParagraph(
   return `${creditClause}；${techClause}。${stealthClause}`;
 }
 
+/**
+ * FD-53：为跨战局战局接力模式（continuation 且存档含在役基地）组装首条态势交接简报。
+ */
+export function composeImportedContinuationMessage(choices: LaunchChoices): string {
+  const eff = resolveDifficulty(choices);
+  const world = getWorldManifest(choices.worldId);
+  if (!world) throw new Error(`未注册世界「${choices.worldId || '空'}」，不能组装开局消息`);
+  const sd = buildStatData(choices);
+  const loc = resolveLaunchLocation(choices);
+  const selectedFactions = resolveSelectedFactions(choices);
+  const factionNames = selectedFactions.map(id => findFaction(id).name).join('、');
+  const tone = findTone(choices.toneId);
+  const date = sd.meta.date.trim() || choices.date.trim() || defaultDateForWorld(world.world_id);
+  const techText = eff.techDone.length > 0 ? eff.techDone.join('、') : '无';
+  const { rosterSummary, commanderCallsign } = buildCabinAndOfficersScene(choices, selectedFactions);
+  const sourceLabel = choices.importedFrom.trim() || '跨战局战地档案';
+  const primaryBaseName = sd.bases[0]?.name || loc.name;
+
+  const baseLines: string[] = [];
+  for (const b of sd.bases) {
+    const bLoc = b.location || loc.location || b.id;
+    const bStatus = b.status || '正常运转';
+    const bBuildings = Array.isArray(b.buildings) ? b.buildings : [];
+    const bBuildingSummary =
+      bBuildings.length > 0
+        ? bBuildings
+            .map(item => {
+              const countSuffix = typeof item.count === 'number' && item.count > 1 ? `×${item.count}` : '';
+              const stateText = item.state || '';
+              return `${item.name}${countSuffix}${stateText ? `（${stateText}）` : ''}`;
+            })
+            .join('、')
+        : '暂无已登记建筑';
+    baseLines.push(`- ${b.name}（标识：${b.id}｜坐标：${bLoc}｜状态：${bStatus}）：已建成建筑 ${bBuildings.length} 项 —— ${bBuildingSummary}`);
+  }
+
+  const girlItems = Array.isArray(sd.forces?.girls) ? sd.forces.girls : [];
+  const girlsText =
+    girlItems.length > 0
+      ? girlItems
+          .map(g => `${g.name}（职务：${g.duty || '核心机娘'}｜驻地：${g.base || primaryBaseName}｜状态：${g.hp || '完好'}）`)
+          .join('、')
+      : '暂无在编机娘';
+  const vehiclesList = Array.isArray(sd.forces?.vehicles) ? sd.forces.vehicles : [];
+  const infantryList = Array.isArray(sd.forces?.infantry) ? sd.forces.infantry : [];
+  const vehiclesSummary = vehiclesList.length > 0 ? vehiclesList.join('、') : '无独立待命载具（MCV 已展开入驻基地）';
+  const infantrySummary = infantryList.length > 0 ? infantryList.join('、') : '常规基地警卫编制';
+  const queueCount = Array.isArray(sd.queues) ? sd.queues.length : 0;
+  const projectCount = Array.isArray(sd.projects) ? sd.projects.length : 0;
+
+  const lines: string[] = [
+    '【跨战局接力·战区态势交接简报】',
+    '',
+    '【战局接力序幕】',
+    `最高统帅部主控全息沙盘已完成跨战局档案同步（继承来源：${sourceLabel}）。在「${world.display_name}」的既有战区防线上，以「${primaryBaseName}」为核心的在役基地群、能源电网、矿石精炼产线与驻防机娘干员均处于持续运转状态，指挥链路已无缝移交至${commanderCallsign}手中。`,
+    '',
+    '【当前继承战区态势】',
+    `- 世界：${world.display_name}`,
+    `- 作战纪年：${date}`,
+    `- 参战阵营：${factionNames}`,
+    `- 统帅与在任副官/参谋：${rosterSummary}`,
+    `- 继承来源：${sourceLabel}`,
+    '',
+    '【在役基地与产线实况】',
+    ...baseLines,
+    '',
+    '【在编机娘与部队实力】',
+    `- 在编机娘：${girlsText}`,
+    `- 装甲与载具编制：${vehiclesSummary}`,
+    `- 步兵与地面编制：${infantrySummary}`,
+    `- 可用系统资金：${eff.credits}`,
+    `- 已解锁科技（共 ${eff.techDone.length} 项）：${techText}`,
+    `- 当前暴露度：${eff.exposure}`,
+    `- 进行中队列与工程：排产队列 ${queueCount} 项｜专项工程 ${projectCount} 项`,
+    '',
+    `【叙事基调】${tone.instruction}`,
+  ];
+
+  if (eff.narrativeSeed) {
+    lines.push(`态势基调：${eff.narrativeSeed}`);
+  }
+  const custom = choices.customPrompt.trim();
+  if (custom) {
+    lines.push('', '【指挥官附加指示】', custom);
+  }
+
+  lines.push(
+    '',
+    '【接力推演准则与现场请示】',
+    `当前为既有战局存档接力续写，上述在役基地（主基地：${primaryBaseName}）、建筑产线与机娘干员均已实际部署并正常运转；严禁退回“MCV 尚未展开”的荒野初抵状态，本轮 <战况> 必须正常输出当前主基地名称（${primaryBaseName}），请紧密承接现有基地态势与指挥官指示继续推演。`,
+  );
+
+  return lines.join('\n');
+}
+
 /** 组装首条 user 消息（战地初抵序幕 + 开局设定与初期家底处境 + 慢热模拟经营准则 + 首幕推演与现场请示） */
 export function composeLaunchMessage(choices: LaunchChoices): string {
+  if (
+    choices.importedStat &&
+    (choices.importMode ?? 'continuation') === 'continuation' &&
+    (choices.importedStat.bases?.length ?? 0) > 0
+  ) {
+    return composeImportedContinuationMessage(choices);
+  }
   const eff = resolveDifficulty(choices);
   const world = getWorldManifest(choices.worldId);
   if (!world) throw new Error(`未注册世界「${choices.worldId || '空'}」，不能组装开局消息`);
@@ -1407,12 +1565,162 @@ export interface RestoreGatewayLike {
   getCurrentCharacterName?(): string;
 }
 
+export const IMPORTED_SUMMARY_OVERVIEW_NAME = '00·前情战史总纲（继承自旧档）';
+
+function cloneRestoreEntry(e: RestoreWorldbookEntry): RestoreWorldbookEntry {
+  return JSON.parse(JSON.stringify(e)) as RestoreWorldbookEntry;
+}
+
+function isSummaryEntryLike(e: RestoreWorldbookEntry): boolean {
+  const n = (e.name ?? '').trim();
+  const c = (e.comment ?? '').trim();
+  return n.startsWith('摘要·') || c.startsWith('摘要·');
+}
+
+function isLegacySummaryEntryLike(e: RestoreWorldbookEntry): boolean {
+  const n = (e.name ?? '').trim();
+  const c = (e.comment ?? '').trim();
+  return (
+    n === IMPORTED_SUMMARY_OVERVIEW_NAME ||
+    c === IMPORTED_SUMMARY_OVERVIEW_NAME ||
+    n.startsWith('00·前情战史总纲') ||
+    c.startsWith('00·前情战史总纲') ||
+    n.startsWith('前情卷宗·大·') ||
+    c.startsWith('前情卷宗·大·') ||
+    n.startsWith('旧档阶段纪要·') ||
+    c.startsWith('旧档阶段纪要·')
+  );
+}
+
+function isLegacyMesoEntryLike(e: RestoreWorldbookEntry): boolean {
+  const n = (e.name ?? '').trim();
+  const c = (e.comment ?? '').trim();
+  return n.startsWith('旧档阶段纪要·') || c.startsWith('旧档阶段纪要·');
+}
+
+function enforceLegacyOpeningWindow(
+  entries: RestoreWorldbookEntry[],
+  keepOpeningMesoCount = 3,
+): RestoreWorldbookEntry[] {
+  const mesos = entries
+    .filter(isLegacyMesoEntryLike)
+    .sort((a, b) => extractSummaryStartFloor(a) - extractSummaryStartFloor(b));
+  if (mesos.length === 0) return entries;
+  const keepCount = Math.max(0, Math.floor(keepOpeningMesoCount));
+  const activeStartIdx = Math.max(0, mesos.length - keepCount);
+  const activeSet = new Set(mesos.slice(activeStartIdx));
+  for (const m of mesos) {
+    const shouldEnable = activeSet.has(m);
+    m.enabled = shouldEnable;
+    const ex = { ...(m.extra ?? {}) };
+    if (shouldEnable) {
+      delete ex.coldArchived;
+    } else {
+      ex.coldArchived = true;
+    }
+    m.extra = ex;
+    if (m.strategy) {
+      m.strategy = { ...m.strategy, type: 'selective' };
+    }
+  }
+  return entries;
+}
+
+function extractSummaryStartFloor(e: RestoreWorldbookEntry): number {
+  if (e.extra && typeof e.extra.from === 'number' && Number.isFinite(e.extra.from)) {
+    return e.extra.from;
+  }
+  if (e.extra && typeof e.extra.legacyMesoFrom === 'number' && Number.isFinite(e.extra.legacyMesoFrom)) {
+    return e.extra.legacyMesoFrom;
+  }
+  if (e.extra && typeof e.extra.legacyMacroFrom === 'number' && Number.isFinite(e.extra.legacyMacroFrom)) {
+    return e.extra.legacyMacroFrom;
+  }
+  const m = /(\d{1,4})\s*-\s*(\d{1,4})/.exec(`${e.name ?? ''} ${e.comment ?? ''}`);
+  if (m) {
+    return Number.parseInt(m[1], 10);
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
 /**
- * FD-37 · BUG-SAVE-03：跨聊天导入存档时重锚定 $timeline 账本基线。
+ * FD-53：跨聊天导入开新局时归并或剔除旧局分段剧情摘要，并执行「旧档阶段纪要开局滑窗冷存」：
+ * - new_game_plus：直接剔除全部 `摘要·*`、`前情卷宗·大·*`、`旧档阶段纪要·*` 与既有总纲，仅保留机娘档案与扩展设定；
+ * - continuation（默认）：将未被大摘要覆盖的 `摘要·*` 合成为单条常驻词条 `00·前情战史总纲（继承自旧档）` 置于首位，
+ *   彻底移除原 `摘要·001-020` 等楼层号词条避免阻塞新聊天 1~20 楼摘要漏斗；
+ *   同时对 `旧档阶段纪要·*` 自动执行开局滑窗：仅保留末尾最后 3 段近场纪要开启，其余远期纪要全部设为 `enabled: false` 冷存关闭。
+ */
+export function consolidateImportedSummaryEntries(
+  entries: readonly RestoreWorldbookEntry[],
+  options?: { mode?: ImportSaveMode; sourceChat?: string; keepOpeningMesoCount?: number },
+): RestoreWorldbookEntry[] {
+  const mode: ImportSaveMode = options?.mode ?? 'continuation';
+  if (mode === 'new_game_plus') {
+    return entries
+      .filter(e => !isSummaryEntryLike(e) && !isLegacySummaryEntryLike(e))
+      .map(cloneRestoreEntry);
+  }
+
+  const summaryEntries = entries.filter(e => isSummaryEntryLike(e) && e.extra?.legacy !== true);
+  if (summaryEntries.length === 0) {
+    return enforceLegacyOpeningWindow(entries.map(cloneRestoreEntry), options?.keepOpeningMesoCount ?? 3);
+  }
+
+  const existingOverviews = entries.filter(
+    e => !isSummaryEntryLike(e) && (e.name ?? '').trim() === IMPORTED_SUMMARY_OVERVIEW_NAME,
+  );
+  const regularEntries = entries.filter(
+    e => !isSummaryEntryLike(e) && (e.name ?? '').trim() !== IMPORTED_SUMMARY_OVERVIEW_NAME,
+  );
+
+  const uncovered = summaryEntries.filter(e => !e.extra?.coveredByMacro);
+  const selectedSummaries = uncovered.length > 0 ? uncovered : summaryEntries;
+  const sortedSummaries = [...selectedSummaries].sort((a, b) => {
+    const fa = extractSummaryStartFloor(a);
+    const fb = extractSummaryStartFloor(b);
+    if (fa !== fb) return fa - fb;
+    return (a.name ?? '').localeCompare(b.name ?? '', 'zh-CN');
+  });
+
+  const sourceTag = options?.sourceChat?.trim() ? `（来源：${options.sourceChat.trim()}）` : '';
+  const sections: string[] = [];
+  for (const ov of existingOverviews) {
+    if (ov.content.trim()) {
+      sections.push(ov.content.trim());
+    }
+  }
+  for (const item of sortedSummaries) {
+    const title = item.name.trim();
+    const body = item.content.trim();
+    sections.push(body ? `### 【${title}】\n${body}` : `### 【${title}】`);
+  }
+
+  const header = `[跨战局前情战史总纲${sourceTag}]`;
+  const mergedContent = sections.length > 0 ? `${header}\n\n${sections.join('\n\n')}` : header;
+
+  const overviewEntry: RestoreWorldbookEntry = {
+    name: IMPORTED_SUMMARY_OVERVIEW_NAME,
+    content: mergedContent,
+    enabled: true,
+    comment: IMPORTED_SUMMARY_OVERVIEW_NAME,
+    keys: ['前情战史', '旧档纪要'],
+    strategy: { type: 'constant', keys: ['前情战史', '旧档纪要'] },
+    position: { type: 'at_depth', role: 'system', depth: 5, order: 95 },
+  };
+
+  return enforceLegacyOpeningWindow(
+    [overviewEntry, ...regularEntries.map(cloneRestoreEntry)],
+    options?.keepOpeningMesoCount ?? 3,
+  );
+}
+
+/**
+ * FD-37 · BUG-SAVE-03 + FD-53：跨聊天导入存档时重锚定 $timeline 账本基线。
  * - 若可读到非空 currentChatId，则覆盖 originChatId = currentChatId；否则置空 originChatId 待新聊天首次锚定；
  * - 若本次恢复绑定了 boundBookName，则覆盖 boundBookName；
- * - 清空高于 #0 楼的所有历史 wbJournal（保留 opLog 与 maxFloorWatermark），
- *   确保新聊天首次触发 ensureBranchWorldbookIsolation({ branchMaxFloor: 0 }) 时绝不会把刚恢复的世界书词条逆向删掉。
+ * - 清空高于 #0 楼的所有历史 wbJournal 与 opLog，并将顶层 maxFloorWatermark 置为 0，
+ *   确保新聊天首次触发 ensureBranchWorldbookIsolation({ branchMaxFloor: 0 }) 时绝不会误删恢复的世界书词条，
+ *   且新聊天推进至 #1、#2 楼时不会误重放旧局 opLog。
  */
 export function reanchorTimelineForImportedChat(
   ledger: Record<string, unknown>,
@@ -1425,6 +1733,9 @@ export function reanchorTimelineForImportedChat(
   const trimmedBook = typeof boundBookName === 'string' ? boundBookName.trim() : '';
   if (trimmedBook) {
     next.boundBookName = trimmedBook;
+  }
+  if (typeof next.maxFloorWatermark === 'number') {
+    next.maxFloorWatermark = 0;
   }
   if (next.floors && typeof next.floors === 'object' && !Array.isArray(next.floors)) {
     const floors = next.floors as Record<string, Record<string, unknown>>;
@@ -1441,8 +1752,13 @@ export function reanchorTimelineForImportedChat(
       if (floorRec.swipes && typeof floorRec.swipes === 'object' && !Array.isArray(floorRec.swipes)) {
         const swipes = floorRec.swipes as Record<string, Record<string, unknown>>;
         for (const slot of Object.values(swipes)) {
-          if (slot && typeof slot === 'object' && !Array.isArray(slot) && Array.isArray(slot.wbJournal)) {
-            slot.wbJournal = [];
+          if (slot && typeof slot === 'object' && !Array.isArray(slot)) {
+            if (Array.isArray(slot.wbJournal)) {
+              slot.wbJournal = [];
+            }
+            if (Array.isArray(slot.opLog)) {
+              slot.opLog = [];
+            }
           }
         }
       }
@@ -1451,8 +1767,61 @@ export function reanchorTimelineForImportedChat(
   return next;
 }
 
+function collectPackDynamicBookNames(pack: SavePack, boundBookName: string): string[] {
+  const names = new Set<string>();
+  if (boundBookName.trim()) {
+    names.add(boundBookName.trim());
+  }
+  const isPlain = (v: unknown): v is Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v);
+
+  if (isPlain(pack.promoted_worldbooks)) {
+    for (const key of Object.keys(pack.promoted_worldbooks)) {
+      if (key.trim()) names.add(key.trim());
+    }
+  }
+
+  const scanPromotedObj = (obj: Record<string, unknown>) => {
+    for (const val of Object.values(obj)) {
+      if (!isPlain(val)) continue;
+      if (typeof val.targetBook === 'string' && val.targetBook.trim()) {
+        names.add(val.targetBook.trim());
+      }
+      if (typeof val.bookName === 'string' && val.bookName.trim()) {
+        names.add(val.bookName.trim());
+      }
+    }
+  };
+
+  if (isPlain(pack.promoted_registry)) {
+    scanPromotedObj(pack.promoted_registry);
+    if (isPlain(pack.promoted_registry.entries)) {
+      scanPromotedObj(pack.promoted_registry.entries);
+    }
+  }
+
+  if (Array.isArray(pack.dlc_registry)) {
+    for (const item of pack.dlc_registry) {
+      if (typeof item === 'string' && item.trim()) {
+        names.add(item.trim());
+      } else if (isPlain(item)) {
+        const candidate =
+          (typeof item.bookName === 'string' && item.bookName.trim()) ||
+          (typeof item.worldbookName === 'string' && item.worldbookName.trim()) ||
+          (typeof item.worldbook === 'string' && item.worldbook.trim()) ||
+          (typeof item.targetBook === 'string' && item.targetBook.trim()) ||
+          (typeof item.book === 'string' && item.book.trim()) ||
+          '';
+        if (candidate) names.add(candidate);
+      }
+    }
+  }
+
+  return [...names];
+}
+
 /**
- * SEAM-06 / FD-37：恢复 SavePack V2 扩展状态（`$parse`、`$dlc`、`$timeline` 与聊天绑定档案世界书词条）
+ * SEAM-06 / FD-37 / FD-53：恢复 SavePack V2 扩展状态（`$parse`、`$dlc`、`$timeline`、`$promoted`、`$archive` 与聊天绑定档案世界书/私产书词条）
  */
 export async function restoreSavePackExtendedState(
   pack: SavePack,
@@ -1460,54 +1829,60 @@ export async function restoreSavePackExtendedState(
     adapter?: HostAdapter;
     gateway?: ChatBookGatewayLike & RestoreGatewayLike;
     currentChatId?: string;
+    importMode?: ImportSaveMode;
   },
 ): Promise<RestoreSavePackExtendedResult> {
+  const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
+    typeof v === 'object' && v !== null && !Array.isArray(v);
+
   const restoredVars: string[] = [];
   const hasParse = pack.parse_state !== undefined;
   const hasDlc = pack.dlc_registry !== undefined;
   const hasTimeline = pack.timeline_ledger !== undefined;
+  const hasPromoted = isPlainRecord(pack.promoted_registry);
+  const hasArchive = isPlainRecord(pack.archive_registry);
+  const hasSaveSchema = typeof pack.save_schema === 'number';
 
   if (hasParse) restoredVars.push('$parse');
   if (hasDlc) restoredVars.push('$dlc');
   if (hasTimeline) restoredVars.push('$timeline');
+  if (hasPromoted) restoredVars.push('$promoted');
+  if (hasArchive) restoredVars.push('$archive');
 
   let restoredWorldbookEntries = 0;
   let boundBookName = '';
 
-  if (Array.isArray(pack.chat_worldbook_entries) && pack.chat_worldbook_entries.length > 0) {
-    const rawGw = (options?.gateway ?? {}) as ChatBookGatewayLike & RestoreGatewayLike;
-    const getChatWbName =
-      typeof rawGw.getChatWorldbookName === 'function'
-        ? (t?: string) => rawGw.getChatWorldbookName!(t)
-        : tav<(t?: string) => string | null>('getChatWorldbookName');
-    const getWbNames =
-      typeof rawGw.getWorldbookNames === 'function'
-        ? () => rawGw.getWorldbookNames!()
-        : tav<() => string[]>('getWorldbookNames');
-    const updateWbWith =
-      typeof rawGw.updateWorldbookWith === 'function'
-        ? (b: string, u: (e: RestoreWorldbookEntry[]) => RestoreWorldbookEntry[]) => rawGw.updateWorldbookWith!(b, u)
-        : tav<(b: string, u: (e: RestoreWorldbookEntry[]) => RestoreWorldbookEntry[]) => Promise<unknown>>(
-            'updateWorldbookWith',
-          );
-    const createWb =
-      typeof rawGw.createWorldbook === 'function'
-        ? (b: string, e: RestoreWorldbookEntry[]) => rawGw.createWorldbook!(b, e)
-        : tav<(b: string, e: RestoreWorldbookEntry[]) => Promise<unknown>>('createWorldbook');
-    const rebindChatWb =
-      typeof rawGw.rebindChatWorldbook === 'function'
-        ? (t: string, b: string) => rawGw.rebindChatWorldbook!(t, b)
-        : tav<(t: string, b: string) => Promise<unknown>>('rebindChatWorldbook');
-    const getCharName =
-      typeof rawGw.getCurrentCharacterName === 'function'
-        ? () => rawGw.getCurrentCharacterName!()
-        : () =>
-            ((globalThis as { SillyTavern?: { name2?: string } }).SillyTavern?.name2 ?? '').trim() || '未命名角色';
+  const rawGw = (options?.gateway ?? {}) as ChatBookGatewayLike & RestoreGatewayLike;
+  const getChatWbName =
+    typeof rawGw.getChatWorldbookName === 'function'
+      ? (t?: string) => rawGw.getChatWorldbookName!(t)
+      : tav<(t?: string) => string | null>('getChatWorldbookName');
+  const getWbNames =
+    typeof rawGw.getWorldbookNames === 'function'
+      ? () => rawGw.getWorldbookNames!()
+      : tav<() => string[]>('getWorldbookNames');
+  const updateWbWith =
+    typeof rawGw.updateWorldbookWith === 'function'
+      ? (b: string, u: (e: RestoreWorldbookEntry[]) => RestoreWorldbookEntry[]) => rawGw.updateWorldbookWith!(b, u)
+      : tav<(b: string, u: (e: RestoreWorldbookEntry[]) => RestoreWorldbookEntry[]) => Promise<unknown>>(
+          'updateWorldbookWith',
+        );
+  const createWb =
+    typeof rawGw.createWorldbook === 'function'
+      ? (b: string, e: RestoreWorldbookEntry[]) => rawGw.createWorldbook!(b, e)
+      : tav<(b: string, e: RestoreWorldbookEntry[]) => Promise<unknown>>('createWorldbook');
+  const rebindChatWb =
+    typeof rawGw.rebindChatWorldbook === 'function'
+      ? (t: string, b: string) => rawGw.rebindChatWorldbook!(t, b)
+      : tav<(t: string, b: string) => Promise<unknown>>('rebindChatWorldbook');
+  const getCharName =
+    typeof rawGw.getCurrentCharacterName === 'function'
+      ? () => rawGw.getCurrentCharacterName!()
+      : () =>
+          ((globalThis as { SillyTavern?: { name2?: string } }).SillyTavern?.name2 ?? '').trim() || '未命名角色';
 
-    const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
-      typeof v === 'object' && v !== null && !Array.isArray(v);
-
-    const entriesToWrite: RestoreWorldbookEntry[] = pack.chat_worldbook_entries.map(e => ({
+  const toRestoreEntries = (rawList: readonly SavePackWorldbookEntry[]): RestoreWorldbookEntry[] =>
+    rawList.map(e => ({
       name: e.name,
       content: e.content,
       enabled: e.enabled ?? true,
@@ -1518,6 +1893,13 @@ export async function restoreSavePackExtendedState(
       ...(isPlainRecord(e.recursion) ? { recursion: JSON.parse(JSON.stringify(e.recursion)) } : {}),
       ...(isPlainRecord(e.extra) ? { extra: JSON.parse(JSON.stringify(e.extra)) } : {}),
     }));
+
+  if (Array.isArray(pack.chat_worldbook_entries) && pack.chat_worldbook_entries.length > 0) {
+    const rawEntries = toRestoreEntries(pack.chat_worldbook_entries);
+    const entriesToWrite = consolidateImportedSummaryEntries(rawEntries, {
+      mode: options?.importMode,
+      sourceChat: pack.source?.chat,
+    });
     try {
       let targetBook = (getChatWbName?.('current') ?? '').trim();
       const allBooks = getWbNames?.() ?? [];
@@ -1552,6 +1934,35 @@ export async function restoreSavePackExtendedState(
     }
   }
 
+  if (isPlainRecord(pack.promoted_worldbooks)) {
+    for (const [rawBookName, rawBookEntries] of Object.entries(pack.promoted_worldbooks)) {
+      const bookName = rawBookName.trim();
+      if (!bookName || !Array.isArray(rawBookEntries) || rawBookEntries.length === 0) continue;
+      const entriesToWrite = toRestoreEntries(rawBookEntries);
+      try {
+        const allBooks = getWbNames?.() ?? [];
+        if (allBooks.includes(bookName) && updateWbWith) {
+          await updateWbWith(bookName, existing => {
+            const next = Array.isArray(existing) ? [...existing] : [];
+            for (const item of entriesToWrite) {
+              const idx = next.findIndex(x => x?.name === item.name);
+              if (idx >= 0) {
+                next[idx] = { ...next[idx], ...item };
+              } else {
+                next.push({ ...item });
+              }
+            }
+            return next;
+          });
+        } else if (createWb) {
+          await createWb(bookName, entriesToWrite);
+        }
+      } catch {
+        /* ignore single promoted worldbook restore failure */
+      }
+    }
+  }
+
   let effectiveTimeline: Record<string, unknown> | undefined;
   if (hasTimeline && pack.timeline_ledger) {
     let resolvedChatId = (options?.currentChatId ?? '').trim();
@@ -1583,9 +1994,12 @@ export async function restoreSavePackExtendedState(
     if (hasParse) cv['$parse'] = structuredClone(pack.parse_state);
     if (hasDlc) cv['$dlc'] = structuredClone(pack.dlc_registry);
     if (hasTimeline && effectiveTimeline) cv['$timeline'] = structuredClone(effectiveTimeline);
+    if (hasPromoted) cv['$promoted'] = structuredClone(pack.promoted_registry);
+    if (hasArchive) cv['$archive'] = structuredClone(pack.archive_registry);
+    if (hasSaveSchema) cv['$save_schema'] = pack.save_schema;
   }
 
-  if (restoredVars.length > 0) {
+  if (restoredVars.length > 0 || hasSaveSchema) {
     const uv = tav<
       (fn: (v: Record<string, unknown>) => Record<string, unknown>, o: { type: string }) => Promise<void> | void
     >('updateVariablesWith');
@@ -1599,6 +2013,9 @@ export async function restoreSavePackExtendedState(
             if (hasParse) vars.$parse = structuredClone(pack.parse_state);
             if (hasDlc) vars.$dlc = structuredClone(pack.dlc_registry);
             if (hasTimeline && effectiveTimeline) vars.$timeline = structuredClone(effectiveTimeline);
+            if (hasPromoted) vars.$promoted = structuredClone(pack.promoted_registry);
+            if (hasArchive) vars.$archive = structuredClone(pack.archive_registry);
+            if (hasSaveSchema) vars.$save_schema = pack.save_schema;
             return vars;
           },
           { type: 'chat' },
@@ -1612,9 +2029,65 @@ export async function restoreSavePackExtendedState(
         if (hasParse) patch.$parse = structuredClone(pack.parse_state);
         if (hasDlc) patch.$dlc = structuredClone(pack.dlc_registry);
         if (hasTimeline && effectiveTimeline) patch.$timeline = structuredClone(effectiveTimeline);
+        if (hasPromoted) patch.$promoted = structuredClone(pack.promoted_registry);
+        if (hasArchive) patch.$archive = structuredClone(pack.archive_registry);
+        if (hasSaveSchema) patch.$save_schema = pack.save_schema;
         await ia(patch, { type: 'chat' });
       } catch {
         /* ignore */
+      }
+    }
+  }
+
+  // FD-53：将 boundBookName、$promoted 中的 targetBook、$dlc 中的书立即加入全局启用列表（Active Global），
+  // 并排他移除全局启用列表中其他非本聊天的 红警档案·* 档案书
+  const dynamicBooksToActivate = collectPackDynamicBookNames(pack, boundBookName);
+  if (options?.adapter) {
+    try {
+      const currentGlobal = options.adapter.globalWorldbookNames();
+      const hasStaleChatArchive = currentGlobal.some(
+        name => isChatArchiveWorldbookName(name) && (!boundBookName || name !== boundBookName),
+      );
+      const filteredGlobal = currentGlobal.filter(
+        name => !isChatArchiveWorldbookName(name) || (Boolean(boundBookName) && name === boundBookName),
+      );
+      const mockLike = options.adapter as Partial<MockHostAdapter>;
+      if (Array.isArray(mockLike.globalBooks)) {
+        mockLike.globalBooks = filteredGlobal;
+      }
+      if (Array.isArray(mockLike.tavernBooks)) {
+        for (const bName of dynamicBooksToActivate) {
+          if (!mockLike.tavernBooks.includes(bName)) {
+            mockLike.tavernBooks.push(bName);
+          }
+        }
+      }
+      const rebindGlobalWb = tav<(names: string[]) => Promise<unknown>>('rebindGlobalWorldbooks');
+      if (!Array.isArray(mockLike.globalBooks) && rebindGlobalWb && (hasStaleChatArchive || dynamicBooksToActivate.length > 0)) {
+        await rebindGlobalWb([...new Set([...filteredGlobal, ...dynamicBooksToActivate])]);
+      } else if (dynamicBooksToActivate.length > 0) {
+        await options.adapter.activateWorldbooks(dynamicBooksToActivate);
+      }
+    } catch {
+      /* ignore adapter worldbook sync errors */
+    }
+  } else {
+    const getGlobalWb = tav<() => string[]>('getGlobalWorldbookNames');
+    const rebindGlobalWb = tav<(names: string[]) => Promise<unknown>>('rebindGlobalWorldbooks');
+    if (getGlobalWb && rebindGlobalWb) {
+      try {
+        const currentGlobal = getGlobalWb() ?? [];
+        const hasStaleChatArchive = currentGlobal.some(
+          name => isChatArchiveWorldbookName(name) && (!boundBookName || name !== boundBookName),
+        );
+        if (hasStaleChatArchive || dynamicBooksToActivate.length > 0) {
+          const filteredGlobal = currentGlobal.filter(
+            name => !isChatArchiveWorldbookName(name) || (Boolean(boundBookName) && name === boundBookName),
+          );
+          await rebindGlobalWb([...new Set([...filteredGlobal, ...dynamicBooksToActivate])]);
+        }
+      } catch {
+        /* ignore host worldbook sync errors */
       }
     }
   }
@@ -1710,11 +2183,19 @@ export function createLaunchSteps(): LaunchStep[] {
           personaId: ctx.choices.personaMode === 'skip' ? null : ctx.choices.personaName.trim(),
           // G2：导入开局记录来源聊天名（非导入开局为 null）；快照内 choices.importedFrom 同步透传
           importedFrom: ctx.choices.importedFrom.trim() ? ctx.choices.importedFrom.trim() : null,
-        });
+        }) as BootState & { importedStatSnapshot?: unknown };
+        if (ctx.choices.importedStat) {
+          next.importedStatSnapshot = JSON.parse(
+            JSON.stringify(ctx.statData ?? ctx.choices.importedStat),
+          );
+        }
         await ctx.adapter.setBoot(next);
         const importedPack = ctx.importedPack ?? getSavePackForImportedStat(ctx.choices.importedStat);
         if (importedPack) {
-          await restoreSavePackExtendedState(importedPack, { adapter: ctx.adapter });
+          await restoreSavePackExtendedState(importedPack, {
+            adapter: ctx.adapter,
+            importMode: ctx.choices.importMode ?? 'continuation',
+          });
         }
         // 锁定开局铭牌后立即跨 frame 广播 ra-boot-state-changed，不必等 triggerGeneration 跑完，
         // 使中控悬浮窗在点击发射瞬间即刻解锁并读取 #0 楼的开局资金与已解锁科技。
@@ -1773,4 +2254,11 @@ export function createLaunchSteps(): LaunchStep[] {
       },
     },
   ];
+}
+
+/**
+ * FD-53：免发消息直接接管首楼工序（仅执行核验战区、同步世界书、登记统帅身份、写入 #0 楼 stat_data、锁定 $boot 并恢复扩展状态与聊天世界书，不发送 #1 楼消息也不触发 AI 生成）
+ */
+export function createImportTakeoverSteps(): LaunchStep[] {
+  return createLaunchSteps().filter(step => step.name !== 'composeAndSend');
 }

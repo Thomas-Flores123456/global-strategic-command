@@ -107,28 +107,42 @@
     </div>
 
     <!-- 第二层（战略态势双指标栏）：暴露度 EL 等级胶囊 + 民心五阶胶囊（两列等宽对称排布，告别阶梯折行） -->
-    <div class="ra-top-nav__metrics pointer-events-none grid grid-cols-2 gap-1.5" data-test="topnav-metrics-row">
-      <!-- 暴露度 EL 等级胶囊（FD-36 · PKG-C） -->
+    <div
+      class="ra-top-nav__metrics grid grid-cols-2 gap-1.5"
+      data-test="topnav-metrics-row"
+      @pointerdown.stop
+    >
+      <!-- 暴露度 EL 等级胶囊（FD-36 · PKG-C / FD-55 可点击打开态势面板） -->
       <span
-        class="ra-metric-pill flex min-w-0 items-center justify-center gap-1 truncate rounded-[2px] border px-2 py-1 font-mono text-[11px] leading-none font-bold"
+        class="ra-metric-pill flex min-w-0 cursor-pointer items-center justify-center gap-1 truncate rounded-[2px] border px-2 py-1 font-mono text-[11px] leading-none font-bold"
         :class="exposurePillClass"
         :title="exposureTooltip"
         :data-exposure-level="exposureInfo.code"
+        role="button"
+        tabindex="0"
         data-test="topnav-exposure-pill"
         data-testid="topnav-exposure-pill"
+        @click="!preLaunchLocked && $emit('open-modal', 'exposure')"
+        @keydown.enter.prevent="!preLaunchLocked && $emit('open-modal', 'exposure')"
+        @keydown.space.prevent="!preLaunchLocked && $emit('open-modal', 'exposure')"
       >
         <Icon name="eye" :size="11" class="shrink-0 opacity-80" />
         <span class="truncate">暴露 {{ exposureValueText }} · {{ exposureInfo.code }}</span>
       </span>
 
-      <!-- 民心五阶指数胶囊（FD-36 · PKG-C） -->
+      <!-- 民心五阶指数胶囊（FD-36 · PKG-C / FD-55 可点击打开态势面板） -->
       <span
-        class="ra-metric-pill flex min-w-0 items-center justify-center gap-1 truncate rounded-[2px] border px-2 py-1 font-mono text-[11px] leading-none font-bold"
+        class="ra-metric-pill flex min-w-0 cursor-pointer items-center justify-center gap-1 truncate rounded-[2px] border px-2 py-1 font-mono text-[11px] leading-none font-bold"
         :class="moralePillClass"
         :title="moraleTooltip"
         :data-morale-stage="moraleInfo.stage"
+        role="button"
+        tabindex="0"
         data-test="topnav-morale-pill"
         data-testid="topnav-morale-pill"
+        @click="!preLaunchLocked && $emit('open-modal', 'morale')"
+        @keydown.enter.prevent="!preLaunchLocked && $emit('open-modal', 'morale')"
+        @keydown.space.prevent="!preLaunchLocked && $emit('open-modal', 'morale')"
       >
         <span class="truncate">{{
           moraleInfo.stage === '无人在意' ? '民心 · 无人在意' : `民心 ${moraleValueText} · ${moraleInfo.stage}`
@@ -261,7 +275,10 @@ const emit = defineEmits<{
       | 'resources'
       | 'buildings'
       | 'dataflow'
-      | 'card-update',
+      | 'card-update'
+      | 'exposure'
+      | 'morale'
+      | 'situation',
   ): void;
   (e: 'refresh'): void;
   (e: 'drag-start', evt: PointerEvent): void;

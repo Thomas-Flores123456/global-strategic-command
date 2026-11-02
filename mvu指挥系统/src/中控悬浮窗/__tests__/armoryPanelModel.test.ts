@@ -2,8 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { Schema } from '../../红警指挥系统/core/schema';
 import {
   buildArmoryViewModel,
+  deriveGirlHpBadgeAndHeadline,
   parseDossierDataBlock,
+  parseExposureGrades,
+  parseTroopUnitAndDesignation,
   parseVehicleToken,
+  parseWorldbookSections,
+  resolveBaseDisplayName,
   type ArmoryDossierInput,
   type ArmorySnapshotLike,
 } from '../models/armoryPanelModel';
@@ -450,5 +455,346 @@ describe('armoryPanelModel · 四维军备管理纯函数投影模型 (ARM-03)',
     // 切换到「北坡主基地」：保留全局参谋叶琳娜 + 驻北坡主基地的周镇长，排除二号前哨站的老铁匠
     const vmBase1 = buildArmoryViewModel(snap, '北坡主基地');
     expect(vmBase1.notableCharacters.map(c => c.name)).toEqual(['叶琳娜', '周镇长']);
+  });
+
+  it('暖石防务 #792 真实样例：人员兵力主兵种与括号编制番号双层识别、3基地带班组番号 + 全局带括号注记 = 32人/3类且机动直属=0', () => {
+    expect(
+      parseTroopUnitAndDesignation('美国大兵（量产战斗步兵·含徐磊/穆勒/宋蕊/周锐/铁楔子）'),
+    ).toEqual({
+      baseUnit: '美国大兵',
+      designation: '量产战斗步兵·含徐磊/穆勒/宋蕊/周锐/铁楔子',
+      stemKey: '美国大兵',
+    });
+    expect(parseTroopUnitAndDesignation('盟军侦察兵（外勤侦察班）')).toEqual({
+      baseUnit: '盟军侦察兵',
+      designation: '外勤侦察班',
+      stemKey: '侦察兵',
+    });
+    expect(parseTroopUnitAndDesignation('侦察兵')).toEqual({
+      baseUnit: '侦察兵',
+      designation: '',
+      stemKey: '侦察兵',
+    });
+
+    const snap792: ArmorySnapshotLike = {
+      forces: {
+        troops: {
+          '美国大兵（量产战斗步兵·含徐磊/穆勒/宋蕊/周锐/铁楔子）': 20,
+          '战斗工兵（量产工兵班）': 6,
+          '盟军侦察兵（量产侦察班）': 6,
+        },
+      },
+      bases: [
+        {
+          id: 'base_dark_river',
+          name: '暗河地下主基地',
+          forces: {
+            troops: {
+              '美国大兵（突击一班）': 10,
+              '盟军侦察兵（外勤侦察班）': 4,
+              '战斗工兵（主基地维保组）': 2,
+            },
+          },
+        },
+        {
+          id: 'base_pit_38',
+          name: '三十八号矿坑前哨（道班客栈）',
+          forces: {
+            troops: {
+              '美国大兵（矿坑驻防分队·穆勒领衔）': 5,
+              '战斗工兵（白芷筑城班）': 4,
+              '盟军侦察兵（外围哨组）': 1,
+            },
+          },
+        },
+        {
+          id: 'base_rockyridge',
+          name: '罗基里奇水泥厂总部（Corp-Bud）',
+          forces: {
+            troops: {
+              '美国大兵（突击二班·徐磊领衔）': 5,
+              '盟军侦察兵（公路警戒组）': 1,
+            },
+          },
+        },
+      ],
+    };
+
+    const vmAll = buildArmoryViewModel(snap792, 'ALL');
+    expect(vmAll.unassignedPersonnelCount).toBe(0);
+    expect(vmAll.personnel.unassignedCount).toBe(0);
+    expect(vmAll.personnel.totalCount).toBe(32);
+    expect(vmAll.personnel.rows).toHaveLength(3);
+    expect(vmAll.personnel.rows).toEqual([
+      {
+        unitType: '美国大兵',
+        total: 20,
+        byBase: [
+          { base: '暗河地下主基地（突击一班）', count: 10 },
+          { base: '三十八号矿坑前哨（道班客栈）（矿坑驻防分队·穆勒领衔）', count: 5 },
+          { base: '罗基里奇水泥厂总部（Corp-Bud）（突击二班·徐磊领衔）', count: 5 },
+        ],
+      },
+      {
+        unitType: '盟军侦察兵',
+        total: 6,
+        byBase: [
+          { base: '暗河地下主基地（外勤侦察班）', count: 4 },
+          { base: '三十八号矿坑前哨（道班客栈）（外围哨组）', count: 1 },
+          { base: '罗基里奇水泥厂总部（Corp-Bud）（公路警戒组）', count: 1 },
+        ],
+      },
+      {
+        unitType: '战斗工兵',
+        total: 6,
+        byBase: [
+          { base: '暗河地下主基地（主基地维保组）', count: 2 },
+          { base: '三十八号矿坑前哨（道班客栈）（白芷筑城班）', count: 4 },
+        ],
+      },
+    ]);
+
+    const vmDarkRiver = buildArmoryViewModel(snap792, '暗河地下主基地');
+    expect(vmDarkRiver.personnel.totalCount).toBe(16);
+    expect(vmDarkRiver.personnel.rows).toEqual([
+      {
+        unitType: '美国大兵',
+        total: 10,
+        byBase: [{ base: '暗河地下主基地（突击一班）', count: 10 }],
+      },
+      {
+        unitType: '盟军侦察兵',
+        total: 4,
+        byBase: [{ base: '暗河地下主基地（外勤侦察班）', count: 4 }],
+      },
+      {
+        unitType: '战斗工兵',
+        total: 2,
+        byBase: [{ base: '暗河地下主基地（主基地维保组）', count: 2 }],
+      },
+    ]);
+  });
+
+  it('FD-54 W1：自动将 base_1 / base_2 等内部基地 ID 解析为基地正式名称（涵盖机娘、挂载、队列、调配与重要人物）', () => {
+    const snap: ArmorySnapshotLike = {
+      bases: [
+        {
+          id: 'base_1',
+          name: '暗河地下主基地',
+          status: '隐蔽运转',
+          power: { gen: 500, use: 320 },
+        },
+        {
+          id: 'base_2',
+          name: '三十八号矿坑前哨',
+          status: '警戒',
+          power: { gen: 180, use: 110 },
+        },
+      ],
+      girls: [
+        {
+          name: '白凌',
+          model: '盟军机动建设车（MCV）',
+          base: 'base_1',
+          status: '完好',
+          duty: '基地主控与纳米织造总管',
+          weapons: '多维纳米织造阵列；战术护盾发生器',
+        },
+      ],
+      queues: [
+        {
+          type: '生产',
+          item: '美国大兵',
+          base: 'base_1',
+          progress: 50,
+          eta: '余1小时',
+          status: 'active',
+          lane: 'personnel',
+        },
+        {
+          type: '生产',
+          item: '灰熊主战坦克',
+          base: 'base_2',
+          progress: 30,
+          eta: '余3小时',
+          status: 'active',
+          lane: 'land',
+        },
+        {
+          type: '改装',
+          item: '纳米微流道散热模组',
+          base: 'base_1',
+          progress: 80,
+          eta: '余30分',
+          status: 'active',
+          lane: 'equipment',
+        },
+      ],
+      pending_transfers: [
+        {
+          id: 'xfer-1',
+          unit: '白凌',
+          category: 'girls',
+          qty: 1,
+          from_base: 'base_1',
+          to_base: 'base_2',
+          total_minutes: 60,
+          remaining_minutes: 25,
+          method: '地下暗河机动',
+        },
+      ],
+      command: {
+        adjutants: [
+          {
+            name: '萧栖雪',
+            role: 'staff',
+            title: '首席后勤参谋',
+            base: 'base_1',
+          },
+        ],
+      },
+      codex: [
+        {
+          name: '老陈',
+          kind: '人物',
+          desc: '矿坑联络人',
+          params: {
+            身份: '矿工代表',
+            驻地: 'base_2',
+          },
+        },
+      ],
+    };
+
+    const vm = buildArmoryViewModel(snap, 'ALL');
+    expect(resolveBaseDisplayName('base_1', vm.basesMeta as never)).toBe('暗河地下主基地');
+    expect(resolveBaseDisplayName('', vm.basesMeta as never, '战区直属')).toBe('战区直属');
+
+    // 机娘驻地名已解析为正式名称，且保留 rawBase 供作用域匹配
+    const bailing = vm.girls.items[0];
+    expect(bailing.base).toBe('暗河地下主基地');
+    expect(bailing.rawBase).toBe('base_1');
+
+    // 机娘挂载装备驻地名
+    expect(vm.equipment.girlLoadouts.map(l => l.base)).toEqual([
+      '暗河地下主基地',
+      '暗河地下主基地',
+    ]);
+
+    // 三类队列的 base 已解析为基地正式名称
+    expect(vm.personnel.trainingQueues[0].base).toBe('暗河地下主基地');
+    expect(vm.vehicles.productionQueues[0].base).toBe('三十八号矿坑前哨');
+    expect(vm.equipment.activeQueues[0].base).toBe('暗河地下主基地');
+
+    // 在途调配 fromBase / toBase 已解析为基地正式名称
+    expect(vm.pendingTransfers[0].fromBase).toBe('暗河地下主基地');
+    expect(vm.pendingTransfers[0].toBase).toBe('三十八号矿坑前哨');
+
+    // 重要人物 statusOrBase 已解析为基地正式名称
+    expect(vm.notableCharacters.find(c => c.name === '萧栖雪')?.statusOrBase).toBe('暗河地下主基地');
+    expect(vm.notableCharacters.find(c => c.name === '老陈')?.statusOrBase).toBe('三十八号矿坑前哨');
+  });
+
+  it('FD-54 W1：长句叙事 status 自动分离为 2~3 字 hpBadge 与完整 statusHeadline，短状态保持完好/轻损/重损/离线', () => {
+    const longNarrativeStatus =
+      '坐镇暗河主基地主控室，逆向拆解圣诞夜缴获的荒坂车载卫星通讯终端，并监控全战区纳米能源管网负载。';
+    const derivedLong = deriveGirlHpBadgeAndHeadline(longNarrativeStatus, undefined, '中枢调度');
+    expect(derivedLong).toEqual({
+      hpBadge: '执勤中',
+      statusHeadline: longNarrativeStatus,
+    });
+
+    const derivedShortIntact = deriveGirlHpBadgeAndHeadline('完好', '完好', '前线突击队长');
+    expect(derivedShortIntact).toEqual({
+      hpBadge: '完好',
+      statusHeadline: '前线突击队长',
+    });
+
+    const derivedDefaultDuty = deriveGirlHpBadgeAndHeadline('完好', '完好', '战区战备待命');
+    expect(derivedDefaultDuty).toEqual({
+      hpBadge: '完好',
+      statusHeadline: '',
+    });
+
+    expect(
+      deriveGirlHpBadgeAndHeadline('右臂液压回路受损，正在维修坞待修', '轻损', '重装突击'),
+    ).toEqual({
+      hpBadge: '轻损',
+      statusHeadline: '右臂液压回路受损，正在维修坞待修',
+    });
+
+    expect(deriveGirlHpBadgeAndHeadline('核心重损大修中', '重损', '火力支点')).toEqual({
+      hpBadge: '重损',
+      statusHeadline: '核心重损大修中',
+    });
+
+    expect(deriveGirlHpBadgeAndHeadline('信号失联', '离线', '外围侦察')).toEqual({
+      hpBadge: '离线',
+      statusHeadline: '外围侦察',
+    });
+
+    const vm = buildArmoryViewModel({
+      girls: [
+        {
+          name: '白凌',
+          model: 'MCV',
+          status: longNarrativeStatus,
+          duty: '基地总管',
+          base: '暗河地下主基地',
+        },
+      ],
+    });
+    expect(vm.girls.items[0].hpBadge).toBe('执勤中');
+    expect(vm.girls.items[0].statusHeadline).toBe(longNarrativeStatus);
+    expect(vm.girls.items[0].status).toBe(longNarrativeStatus);
+  });
+
+  it('FD-54 W1：parseExposureGrades 与 parseWorldbookSections 结构化解析多档暴露与世界书章节', () => {
+    const multiEl =
+      'EL-0 (无痕：微距扫描与日用品静默细织) / EL-2 (局部交战：大件整夜满负荷纳米织造) / EL-3 (高烈度展开：MCV本体展开落桩)';
+    const grades = parseExposureGrades(multiEl);
+    expect(grades).toEqual([
+      { code: 'EL-0', label: '无痕：微距扫描与日用品静默细织', tone: 'ok' },
+      { code: 'EL-2', label: '局部交战：大件整夜满负荷纳米织造', tone: 'warn' },
+      { code: 'EL-3', label: '高烈度展开：MCV本体展开落桩', tone: 'danger' },
+    ]);
+
+    const emojiGrades = parseExposureGrades('🟢 常规武装 / 🔴 极限超频');
+    expect(emojiGrades).toEqual([
+      { code: '常规', label: '常规武装', tone: 'ok' },
+      { code: '极限', label: '极限超频', tone: 'danger' },
+    ]);
+
+    const sections = parseWorldbookSections(
+      '首台原型机总纲说明。\n【机体构造与纳米核心】\n搭载盟军第四代多维纳米织造炉。\n[结构性短板]\n展开落桩期间机动性归零。',
+      '当前驻防暗河主基地。\n【北坡防卫纪要】\n成功保障圣诞夜前线物资供应。',
+    );
+    expect(sections).toEqual([
+      {
+        title: '机体与能力设定',
+        source: 'dossier',
+        lines: ['首台原型机总纲说明。'],
+      },
+      {
+        title: '机体构造与纳米核心',
+        source: 'dossier',
+        lines: ['搭载盟军第四代多维纳米织造炉。'],
+      },
+      {
+        title: '结构性短板',
+        source: 'dossier',
+        lines: ['展开落桩期间机动性归零。'],
+      },
+      {
+        title: '战史与勤务纪要',
+        source: 'story',
+        lines: ['当前驻防暗河主基地。'],
+      },
+      {
+        title: '北坡防卫纪要',
+        source: 'story',
+        lines: ['成功保障圣诞夜前线物资供应。'],
+      },
+    ]);
   });
 });

@@ -136,6 +136,24 @@
         :snapshot="floating.snapshot"
         @close="closeModal"
       />
+      <ModalSituation
+        v-if="activeModal === 'morale' || activeModal === 'exposure' || activeModal === 'situation'"
+        :open="activeModal === 'morale' || activeModal === 'exposure' || activeModal === 'situation'"
+        :snapshot="floating.snapshot"
+        :initial-tab="activeModal === 'exposure' ? 'exposure' : 'morale'"
+        @close="closeModal"
+        @jump-to-build="closeModal"
+      />
+
+      <!-- ══ 战区舆情与暴露态势中枢（FD-55 · PKG-C） ══ -->
+      <ModalSituation
+        v-if="activeModal === 'morale' || activeModal === 'exposure' || activeModal === 'situation'"
+        :open="activeModal === 'morale' || activeModal === 'exposure' || activeModal === 'situation'"
+        :snapshot="floating.snapshot"
+        :initial-tab="activeModal === 'exposure' ? 'exposure' : 'morale'"
+        @close="closeModal"
+        @jump-to-build="closeModal"
+      />
 
       <!-- ══ 工程指挥弹窗（ENG-UI-01 骨架；D17 一级主模态 + DetailDrawer 详情复用；生产环境默认关闭，DEV 开启） ══ -->
       <ModalEngineering
@@ -325,6 +343,7 @@ import ModalMechaGirl from '../modals/ModalMechaGirl.vue';
 import ModalResources from '../modals/ModalResources.vue';
 import ModalSchedule from '../modals/ModalSchedule.vue';
 import ModalSettings from '../modals/ModalSettings.vue';
+import ModalSituation from '../modals/ModalSituation.vue';
 import ModalDataFlowInspector from '../modals/ModalDataFlowInspector.vue';
 import ModalCardUpdate from '../modals/ModalCardUpdate.vue';
 import ModalTechTree from '../modals/ModalTechTree.vue';
@@ -507,7 +526,10 @@ type ModalKey =
   | 'pda'
   | 'command'
   | 'dataflow'
-  | 'card-update';
+  | 'card-update'
+  | 'morale'
+  | 'exposure'
+  | 'situation';
 const activeModal = ref<ModalKey | null>(null);
 
 const pendingPatchesCount = computed(() => {
@@ -660,6 +682,7 @@ useModalErrorGuard({
     ModalDataFlowInspector,
     ModalCardUpdate,
     ModalResources,
+    ModalSituation,
     ModalSchedule,
     ModalEngineering,
     ModalBuildings,

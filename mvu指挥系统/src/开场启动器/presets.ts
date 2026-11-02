@@ -990,6 +990,30 @@ export function findTone(id: string): ToneDef {
 
 export type PersonaMode = 'skip' | 'existing' | 'create';
 
+export type ImportSaveMode = 'continuation' | 'new_game_plus';
+
+export interface ImportSaveModeOption {
+  id: ImportSaveMode;
+  label: string;
+  shortTag: string;
+  summary: string;
+}
+
+export const IMPORT_SAVE_MODES: readonly ImportSaveModeOption[] = [
+  {
+    id: 'continuation',
+    label: '战局接力续写（默认）',
+    shortTag: '全量接力',
+    summary: '完整继承既有基地、建筑产线、部队编制、在建队列与前情战史，直接从存档当前态势继续推演。',
+  },
+  {
+    id: 'new_game_plus',
+    label: '二周目新开局（遗产开荒）',
+    shortTag: '遗产重开',
+    summary: '仅继承已解锁科技、在册图鉴与机娘名录，基地与产线归零，随移动基地车在新战区重新选址开荒。',
+  },
+];
+
 /** 四步向导贯穿始终的单一 reactive 对象结构 */
 export interface LaunchChoices {
   /** 开局世界；确认后写入 meta.world_id，中途不可切换 */
@@ -1042,6 +1066,8 @@ export interface LaunchChoices {
    * 不进 $boot 快照（snapshotChoices 剔除，防膨胀）。
    */
   importedStat: Schema | null;
+  /** 跨战局导入模式：'continuation'（全量战局接力，默认） | 'new_game_plus'（二周目遗产新开荒） */
+  importMode?: ImportSaveMode;
 }
 
 export function defaultChoices(worldId: string = DEFAULT_WORLD_ID): LaunchChoices {
@@ -1076,6 +1102,7 @@ export function defaultChoices(worldId: string = DEFAULT_WORLD_ID): LaunchChoice
     customPrompt: '',
     importedFrom: '',
     importedStat: null,
+    importMode: 'continuation',
   };
 }
 

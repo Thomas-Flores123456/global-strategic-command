@@ -99,6 +99,10 @@ export interface SchedulePanelInput {
     name?: string;
     status?: string;
     buildings?: Array<{ name?: string; state?: string; status?: string; mode?: string; accel_scope?: string }>;
+    forces?: {
+      vehicles?: ReadonlyArray<string | { name?: string; type?: string }> | Record<string, number>;
+      [key: string]: unknown;
+    };
   }>;
   queues?: MilestoneQueueItemLike[];
   projects?: Project[];
@@ -107,6 +111,14 @@ export interface SchedulePanelInput {
   pending_transfers?: ReadonlyArray<Partial<PendingUnitTransfer>>;
   clock?: { day: number; time: string };
   planning?: { latest_receipt?: PlanningReceipt | null; protected_task_refs?: string[] } | null;
+  forces?: {
+    girls?: ReadonlyArray<Record<string, unknown>>;
+    vehicles?: ReadonlyArray<string | { name?: string; type?: string }>;
+    [key: string]: unknown;
+  };
+  mecha_girls?: Record<string, unknown>;
+  unit_Attachment?: Record<string, unknown>;
+  vehicles_by_base?: Record<string, unknown>;
 }
 
 export type ScheduleGanttState = 'active' | 'queued' | 'paused' | 'settling' | 'done';
@@ -580,9 +592,14 @@ export function schedulePanelModel(
         state: bd.state,
         mode: bd.mode,
       })),
+      forces: b.forces,
     })),
     queues: queues as unknown as ReadonlyArray<TransactionItem>,
     catalog: safeCatalog,
+    forces: stat.forces,
+    mecha_girls: stat.mecha_girls,
+    unit_Attachment: stat.unit_Attachment,
+    vehicles_by_base: stat.vehicles_by_base,
   };
 
   /* ── 1. UTO 工位矩阵与单向只读任务投影 ── */
@@ -710,7 +727,11 @@ export function schedulePanelModel(
       const queuedCount = tasks.filter(t => t.task.status === 'queued' || t.task.status === 'held').length;
       const stranded = view.capacity === 0 && (activeCount > 0 || queuedCount > 0 || tasks.length > 0);
 
-      const dualModeSummary = summarizeLaneDualModeBuildings(bases, baseRefKey, stationId, 1, globalAccelByLane);
+      const rawDualModeSummary = summarizeLaneDualModeBuildings(bases, baseRefKey, stationId, 1, globalAccelByLane);
+      const dualModeSummary =
+        view.capacity > 0 && rawDualModeSummary.productionCount === 0 && rawDualModeSummary.accelCount === 0
+          ? { ...rawDualModeSummary, productionCount: view.capacity }
+          : rawDualModeSummary;
       const rawTxns = buildTxnRows(tasks, effFor);
       const laneEff =
         rawTxns.length > 0 && rawTxns[0].effectiveAccel !== undefined

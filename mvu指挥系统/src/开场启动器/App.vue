@@ -96,8 +96,39 @@
         <button type="button" class="btn go sm" :disabled="!topImportText.trim()" @click="applyTopImport">
           解析并载入存档
         </button>
+        <button
+          v-if="choices.importedStat"
+          type="button"
+          class="btn go sm"
+          :disabled="busy"
+          data-testid="top-import-takeover-btn"
+          @click="takeoverZeroFloorFromTopDrawer"
+        >
+          ◆ 直接落盘接管首楼（不发开场消息）
+        </button>
         <span v-if="topImportInfo" class="wb-ok">{{ topImportInfo }}</span>
         <span v-if="topImportErr" class="wb-bad">✗ {{ topImportErr }}</span>
+      </div>
+      <div
+        v-if="choices.importedStat"
+        class="import-mode-switch"
+        data-testid="import-mode-switch"
+      >
+        <div class="import-mode-btns">
+          <button
+            v-for="mode in IMPORT_SAVE_MODES"
+            :key="mode.id"
+            type="button"
+            class="btn sm"
+            :class="{ active: (choices.importMode ?? 'continuation') === mode.id }"
+            :data-testid="mode.id === 'new_game_plus' ? 'import-mode-new-game-plus' : 'import-mode-continuation'"
+            :aria-pressed="(choices.importMode ?? 'continuation') === mode.id"
+            @click="choices.importMode = mode.id"
+          >
+            {{ (choices.importMode ?? 'continuation') === mode.id ? '◆' : '◇' }} {{ mode.label }}
+          </button>
+        </div>
+        <div class="import-mode-desc">{{ activeImportMode.summary }}</div>
       </div>
       <div v-for="w in topImportWarnings" :key="w" class="wb-warn">⚠ {{ w }}</div>
     </section>
@@ -262,7 +293,13 @@
               </div>
               <div class="telem-row">
                 <span class="tk">初始基地</span>
-                <span class="tv mono">{{ choices.importedStat ? `${choices.importedStat.bases.length} 座（继承）` : '0 座（待 MCV 展开）' }}</span>
+                <span class="tv mono">{{
+                  choices.importedStat
+                    ? choices.importMode === 'new_game_plus'
+                      ? '0 座（二周目重开）'
+                      : `${choices.importedStat.bases.length} 座（继承）`
+                    : '0 座（待 MCV 展开）'
+                }}</span>
               </div>
             </div>
 
@@ -324,11 +361,18 @@
 <script setup lang="ts">
 import { WORLD_MANIFESTS } from '../红警指挥系统/core/worlds';
 import { emptyBoot, readBootFrom, type BootState } from './boot';
-import { clearLastParsedSavePack, packToChoices, parseSavePack } from './importSave';
 import {
+  clearLastParsedSavePack,
+  getSavePackForImportedStat,
+  packToChoices,
+  parseSavePack,
+} from './importSave';
+import {
+  createImportTakeoverSteps,
   getHostAdapter,
   resolveDifficulty,
   resolveLaunchLocation,
+  runLaunchPipeline,
   syncWorldbooksForWorld,
 } from './pipeline';
 import {
@@ -343,6 +387,7 @@ import {
   findTone,
   formatLocationLabel,
   HUMAN_ADJUTANT_DAILY_UPKEEP,
+  IMPORT_SAVE_MODES,
   resolveMaidenIncubationMode,
   resolveSelectedFactions,
   resolveStarterMcvInfo,
@@ -441,6 +486,12 @@ watch([step, topImportOpen, maintenanceOpen], () => {
   );
 });
 
+const activeImportMode = computed(
+  () =>
+    IMPORT_SAVE_MODES.find(m => m.id === (choices.importMode ?? 'continuation')) ??
+    IMPORT_SAVE_MODES[0],
+);
+
 function applyTopImport() {
   topImportErr.value = '';
   topImportInfo.value = '';
@@ -456,10 +507,32 @@ function applyTopImport() {
   topImportInfo.value = `✓ 已载入存档（来源：${res.pack.source.chat || '未知聊天'}），可随时跳至第 5 步发射`;
 }
 
+async function takeoverZeroFloorFromTopDrawer() {
+  if (!choices.importedStat || busy.value) return;
+  busy.value = true;
+  topImportErr.value = '';
+  err.value = '';
+  try {
+    await runLaunchPipeline(createImportTakeoverSteps(), {
+      adapter,
+      choices,
+      importedPack: getSavePackForImportedStat(choices.importedStat),
+    });
+    topImportOpen.value = false;
+    onLaunched();
+    msg.value = '✓ 已完成首楼战局数据与世界书接管，可直接在对话框自由输入';
+  } catch (e) {
+    topImportErr.value = `接管首楼失败：${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    busy.value = false;
+  }
+}
+
 function clearImportedSave() {
   clearLastParsedSavePack();
   choices.importedStat = null;
   choices.importedFrom = '';
+  choices.importMode = 'continuation';
   choices.preset = 'normal';
   choices.customCredits = 2000;
   choices.customExposure = 0;
@@ -901,6 +974,26 @@ h1 {
   gap: 10px;
   flex-wrap: wrap;
   margin-top: 8px;
+}
+
+.import-mode-switch {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--rac-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.import-mode-btns {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.import-mode-desc {
+  font-size: 11.5px;
+  color: var(--rac-muted);
 }
 
 /* ── 五步可点击导航条 ── */

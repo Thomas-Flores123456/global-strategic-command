@@ -4,6 +4,7 @@
  * 约束：零 IO / 零酒馆 API / 零 Vue 依赖。
  */
 import { parseString } from '@util/common';
+import { checkBuildingAllowedByAuthority, evaluateBaseBuildAuthority } from '../core/buildAuthority';
 import { resolveBaseReference, type RuntimeBaseLike } from '../core/catalogRuntimeContext';
 import { QueueItem } from '../core/schema';
 import { resolveMcvVehicleAliases } from '../engines/deploymentEngine';
@@ -462,6 +463,17 @@ export function checkBuildWhitelistOnMount(queue: Record<string, unknown>, data:
   if (allowed === null) return; // 无启用校验的前沿工地
   const item = String(queue.item ?? '');
   if (allowed.some(w => canon(w) === canon(item))) return;
+  const authority = evaluateBaseBuildAuthority({
+    base: base as { id?: string; name?: string; location?: string; buildings?: { name: string; state?: string }[] },
+    snapshot: data as unknown as {
+      forces?: { vehicles?: string[]; girls?: unknown[] };
+      girls?: unknown[];
+      pending_lore?: unknown[];
+    },
+  });
+  if (authority.fcvGirl && checkBuildingAllowedByAuthority({ building: { name: item }, authority }).grantedByGirlSkill) {
+    return;
+  }
   const summary = allowed.length > 4 ? `${allowed.slice(0, 4).join('、')} 等 ${allowed.length} 项` : allowed.join('、');
   const baseName = String(base?.name ?? baseId);
   yellow(

@@ -24,6 +24,7 @@ import {
 import { canon } from '../parse/parseCommon';
 import { calcDailyNet } from '../engines/chainEngine';
 import { resolveBuildingRelativeCoord } from '../engines/buildingCoordEngine';
+import * as exposureMoraleMod from '../engines/exposureMoraleEngine';
 import {
   computeExposureFloor,
   isMoraleEngaged,
@@ -2576,18 +2577,74 @@ export function analyzeTacticalCombos(
     }
   }
 
-  // ── 维度 8：兵种配比与暴露度诊断（force_balance / exposure） ──
+  // ── 维度 8：隐蔽、民心与市政公用及兵种配比诊断（force_balance / exposure / morale & civic · FD-55 升级） ──
   const totalInfantry = Object.values(troops).reduce((s, n) => s + (typeof n === 'number' ? n : 0), 0);
   const combatVehicles = vehicles.filter(v => !/机动建设车|基地车|采矿车|矿车/i.test(v));
   const exposureVal = data.exposure?.value ?? 0;
+  const moraleVal = data.morale?.value ?? 5;
+  const moraleEngaged = isMoraleEngaged(data.morale, exposureVal);
+  const moraleSt = resolveMoraleStage(moraleVal, {
+    engaged: moraleEngaged,
+    exposureValue: exposureVal,
+  });
+  const civicEval = safeEvaluateCivicFacilities(bases, {
+    moraleEngaged,
+    moraleValue: moraleVal,
+  });
+  const floorExplain = safeExplainExposureFloor(data);
+  const expFloorVal = data.exposure?.floor ?? floorExplain.totalFloor;
+
+  if (civicEval.hasWaterOrSewageOutage) {
+    const outageFacilities = civicEval.installedFacilities
+      .filter(f => f.powerDeficit && /净水|供水|污水/i.test(f.buildingName))
+      .map(f => `${f.buildingName}@${f.baseName}`)
+      .join('、');
+    findings.push({
+      category: 'force_balance',
+      priority: 'P0',
+      focusTag: '民生断供预警',
+      title: '主电网赤字导致驻地净水/排污设施停摆，面临民心崩盘风险',
+      diagnosis: `驻地主电网处于电力赤字状态，导致核心民生设施（${outageFacilities || '净水与供水站/生活污水处理站'}）降载停供，随时引发社区断水与排污反噬。`,
+      recommendedAction: '建议立即补建发电厂或拉闸关停高耗电武备，恢复社区供水与排污运转。',
+      preferredDomain: 'allied',
+    });
+  }
+
+  if (moraleEngaged && moraleVal < 4.2) {
+    findings.push({
+      category: 'force_balance',
+      priority: 'P1',
+      focusTag: '民心舆情抚恤',
+      title: `战区民心偏低（${moraleVal}/10 · ${moraleSt.stage}），面临流言告密与资金链折损`,
+      diagnosis: `当前战区民心已跌至 ${moraleVal}/10（${moraleSt.stage}｜${moraleSt.effectSummary}），地方舆情恶化将导致资金链收益折损并加剧暴露风险。`,
+      recommendedAction:
+        '建议建造净水与供水站、社区环卫服务站等民生设施，或执行平民救援与物资抚恤任务扭转地方舆情。',
+      preferredDomain: 'allied',
+    });
+  } else if (exposureVal >= 4.0 && bases.length > 0 && civicEval.installedFacilities.length === 0) {
+    findings.push({
+      category: 'force_balance',
+      priority: 'P1',
+      focusTag: '民生伪装屏障',
+      title: `基地已引起外界注意（暴露度 ${exposureVal}/10），但缺乏民生公共设施外壳与民心锚点`,
+      diagnosis: `当前战区暴露度已达 ${exposureVal}/10，基地已引起外部视线注意，但驻地缺乏民生公共设施外壳与民心锚点（在役民生设施 0 座）。`,
+      recommendedAction:
+        '建议建设净水与供水站 / 基础废物分拣站 / 生活污水处理站，构建市政惠民外壳、消除排污暴露并培育民间眼线。',
+      preferredDomain: 'allied',
+    });
+  }
 
   if (exposureVal >= 5) {
+    const floorNotice =
+      expFloorVal > 0
+        ? `，常驻暴露底线 ${expFloorVal}${floorExplain.compactSummary ? ` [${floorExplain.compactSummary}]` : ''}`
+        : `，常驻暴露底线 ${expFloorVal}`;
     findings.push({
       category: 'force_balance',
       priority: 'P0',
       focusTag: '隐蔽与防务',
       title: `战区暴露度偏高（${exposureVal}/10），面临敌方侦察或突袭风险`,
-      diagnosis: `当前战区暴露度已达 ${exposureVal}/10（趋势：${data.exposure?.trend || '上升'}），继续高调扩建可能招致地方敌对势力围剿。`,
+      diagnosis: `当前战区暴露度已达 ${exposureVal}/10（趋势：${data.exposure?.trend || '上升'}${floorNotice}），继续高调扩建可能招致地方敌对势力围剿。`,
       recommendedAction: `建议构筑伪装网/防空哨卡降低暴露度，并整备机动防御兵力应对突发袭扰。`,
       preferredDomain: 'yuri',
     });
@@ -2622,6 +2679,307 @@ export function analyzeTacticalCombos(
 export const STRATEGIC_FEEDFORWARD_READONLY_NOTICE =
   '本段为中控台根据最新有效楼 stat_data、世界书目录与排产引擎自动计算的【战区全局态势与八维组合诊断】只读前馈视图：' +
   '仅供主 LLM 构思本轮剧情、核对硬约束以及在 <态势> 内生成「参谋建议」使用，严禁将本段原样复读进正文。';
+
+const CIVIC_MILESTONE_TITLE_RE =
+  /净水与供水|净水站|生态公园|绿化设施|社区环卫|环卫站|基础废物分拣|废物分拣站|生活污水处理|污水处理站|深井泵站|水文净化|生态修复站|环境监测站/i;
+
+interface FallbackCivicFacilitySpec {
+  canonicalName: string;
+  pattern: RegExp;
+  monthlyMoraleBonus: number;
+  criticalWaterOrSewage: boolean;
+  unlocksInformant: boolean;
+  powerDeficitMultiplier: number;
+}
+
+const FALLBACK_CIVIC_SPECS: readonly FallbackCivicFacilitySpec[] = [
+  {
+    canonicalName: '净水与供水站',
+    pattern: /净水与供水|净水站|water_purification/i,
+    monthlyMoraleBonus: 0.15,
+    criticalWaterOrSewage: true,
+    unlocksInformant: false,
+    powerDeficitMultiplier: 0,
+  },
+  {
+    canonicalName: '生态公园与绿化设施',
+    pattern: /生态公园|绿化设施|eco_park/i,
+    monthlyMoraleBonus: 0.12,
+    criticalWaterOrSewage: false,
+    unlocksInformant: false,
+    powerDeficitMultiplier: 0.8,
+  },
+  {
+    canonicalName: '社区环卫服务站',
+    pattern: /社区环卫|环卫服务站|环卫站|sanitation/i,
+    monthlyMoraleBonus: 0.12,
+    criticalWaterOrSewage: false,
+    unlocksInformant: true,
+    powerDeficitMultiplier: 0.5,
+  },
+  {
+    canonicalName: '基础废物分拣站',
+    pattern: /基础废物分拣|废物分拣站|分拣站|waste_sorting/i,
+    monthlyMoraleBonus: 0.1,
+    criticalWaterOrSewage: false,
+    unlocksInformant: true,
+    powerDeficitMultiplier: 0.5,
+  },
+  {
+    canonicalName: '生活污水处理站',
+    pattern: /生活污水处理|污水处理站|污水站|sewage_treatment/i,
+    monthlyMoraleBonus: 0.09,
+    criticalWaterOrSewage: true,
+    unlocksInformant: false,
+    powerDeficitMultiplier: 0,
+  },
+  {
+    canonicalName: '深井泵站与水文净化设施',
+    pattern: /深井泵站|水文净化|deep_well/i,
+    monthlyMoraleBonus: 0.09,
+    criticalWaterOrSewage: false,
+    unlocksInformant: false,
+    powerDeficitMultiplier: 0,
+  },
+  {
+    canonicalName: '生态修复站',
+    pattern: /生态修复站|生态修复|eco_restoration/i,
+    monthlyMoraleBonus: 0.15,
+    criticalWaterOrSewage: false,
+    unlocksInformant: false,
+    powerDeficitMultiplier: 0,
+  },
+  {
+    canonicalName: '环境监测站',
+    pattern: /环境监测站|环境监测|env_monitoring/i,
+    monthlyMoraleBonus: 0.06,
+    criticalWaterOrSewage: false,
+    unlocksInformant: false,
+    powerDeficitMultiplier: 0.5,
+  },
+];
+
+interface NormalizedCivicFacilityItem {
+  buildingName: string;
+  baseName: string;
+  statusText: string;
+  powerDeficit: boolean;
+}
+
+interface NormalizedCivicEvaluation {
+  installedFacilities: NormalizedCivicFacilityItem[];
+  totalMonthlyBonus: number;
+  hasWaterOrSewageOutage: boolean;
+  unlocksCivilInformantChannel: boolean;
+}
+
+function safeEvaluateCivicFacilities(
+  bases: ReadonlyArray<{
+    id?: string;
+    name?: string;
+    status?: string;
+    power?: { gen?: number; use?: number };
+    buildings?: ReadonlyArray<{ name?: string; layer?: string; state?: string }>;
+  }> = [],
+  opts?: { moraleEngaged?: boolean; moraleValue?: number },
+): NormalizedCivicEvaluation {
+  const fallbackFacilities: NormalizedCivicFacilityItem[] = [];
+  let fallbackMonthly = 0;
+  let fallbackOutage = false;
+  let fallbackInformant = Boolean(opts?.moraleEngaged && (opts?.moraleValue ?? 5) >= 6.5);
+
+  for (const base of bases ?? []) {
+    if (!base || base.status === '废弃' || base.status === '失守') continue;
+    const baseName = String(base.name || base.id || '主基地');
+    const powerGen = Number(base.power?.gen ?? 0);
+    const powerUse = Number(base.power?.use ?? 0);
+    const powerDeficit = powerUse > powerGen;
+
+    for (const bld of base.buildings ?? []) {
+      const bName = String(bld?.name ?? '').trim();
+      if (!bName) continue;
+      const spec = FALLBACK_CIVIC_SPECS.find(s => s.pattern.test(bName));
+      if (!spec) continue;
+      const rawState = String(bld?.state || '运转').trim();
+      const isRunning = rawState === '运转';
+      let statusText = rawState;
+      let bonus = 0;
+      if (isRunning) {
+        if (powerDeficit) {
+          statusText = spec.criticalWaterOrSewage ? '缺电停供' : '缺电降载';
+          bonus = spec.monthlyMoraleBonus * spec.powerDeficitMultiplier;
+          if (spec.criticalWaterOrSewage) {
+            fallbackOutage = true;
+          }
+        } else {
+          statusText = '运转';
+          bonus = spec.monthlyMoraleBonus;
+        }
+        if (spec.unlocksInformant) {
+          fallbackInformant = true;
+        }
+      }
+      fallbackMonthly += bonus;
+      fallbackFacilities.push({
+        buildingName: bName,
+        baseName,
+        statusText,
+        powerDeficit,
+      });
+    }
+  }
+
+  const engineFn = (
+    exposureMoraleMod as unknown as {
+      evaluateCivicFacilities?: (
+        b: unknown,
+        o?: { moraleEngaged?: boolean; moraleValue?: number },
+      ) => Record<string, unknown>;
+    }
+  ).evaluateCivicFacilities;
+
+  if (typeof engineFn === 'function') {
+    try {
+      const raw = engineFn(bases, opts);
+      if (raw && typeof raw === 'object') {
+        const rawList = Array.isArray(raw.installedFacilities)
+          ? (raw.installedFacilities as Array<Record<string, unknown>>)
+          : null;
+        const normalizedList: NormalizedCivicFacilityItem[] = rawList
+          ? rawList.map((item, idx) => {
+              const fb = fallbackFacilities[idx];
+              const pDeficit = Boolean(
+                item.powerDeficit ?? item.basePowerDeficit ?? fb?.powerDeficit ?? false,
+              );
+              return {
+                buildingName: String(
+                  item.buildingName ?? item.name ?? item.canonicalName ?? fb?.buildingName ?? '民生设施',
+                ),
+                baseName: String(item.baseName ?? fb?.baseName ?? '主基地'),
+                statusText: String(
+                  item.statusText ??
+                    item.status ??
+                    item.state ??
+                    fb?.statusText ??
+                    (pDeficit ? '缺电降载' : '运转'),
+                ),
+                powerDeficit: pDeficit,
+              };
+            })
+          : fallbackFacilities;
+        const totalMonthly =
+          typeof raw.totalMonthlyBonus === 'number' && Number.isFinite(raw.totalMonthlyBonus)
+            ? raw.totalMonthlyBonus
+            : Math.round(fallbackMonthly * 100) / 100;
+        return {
+          installedFacilities: normalizedList,
+          totalMonthlyBonus: totalMonthly,
+          hasWaterOrSewageOutage: Boolean(raw.hasWaterOrSewageOutage || fallbackOutage),
+          unlocksCivilInformantChannel: Boolean(
+            raw.unlocksCivilInformantChannel || fallbackInformant,
+          ),
+        };
+      }
+    } catch {
+      // ignore and fall back to deterministic local scan
+    }
+  }
+
+  return {
+    installedFacilities: fallbackFacilities,
+    totalMonthlyBonus: Math.round(fallbackMonthly * 100) / 100,
+    hasWaterOrSewageOutage: fallbackOutage,
+    unlocksCivilInformantChannel: fallbackInformant,
+  };
+}
+
+function safeExplainExposureFloor(state: StatData): {
+  totalFloor: number;
+  compactSummary: string;
+} {
+  const totalFloor = state.exposure?.floor ?? computeExposureFloor(state);
+  const engineFn = (
+    exposureMoraleMod as unknown as {
+      explainExposureFloor?: (s: unknown) => Record<string, unknown>;
+    }
+  ).explainExposureFloor;
+
+  if (typeof engineFn === 'function') {
+    try {
+      const raw = engineFn(state);
+      if (raw && typeof raw === 'object') {
+        const cs = typeof raw.compactSummary === 'string' ? raw.compactSummary.trim() : '';
+        if (cs) {
+          return {
+            totalFloor:
+              typeof raw.totalFloor === 'number' && Number.isFinite(raw.totalFloor)
+                ? raw.totalFloor
+                : totalFloor,
+            compactSummary: cs,
+          };
+        }
+      }
+    } catch {
+      // fall back to deterministic local breakdown
+    }
+  }
+
+  let mixSum = 0;
+  let heavySum = 0;
+  let stealthSum = 0;
+  let siteSum = 0;
+  const superweaponRe =
+    /天气控制|核弹发射井|基因突变|心灵控制塔|心灵信标|铁幕装置|巨炮|要塞巨炮|航天发射|质量投射/i;
+  const stealthRe = /裂缝产生器|超维暗网|暗网中继|伪装网|电磁欺骗/i;
+  const alliedRe = /盟军|光棱|爱国者|空指部|裂缝产生器|超时空|天气控制/i;
+  const sovietRe = /苏联|苏军|磁能|磁暴|特斯拉|铁幕|核子反应堆|核弹发射井|复制中心/i;
+  const yuriRe = /尤里|心灵|生物反应炉|基因突变|盖特|精神控制/i;
+
+  for (const base of state.bases ?? []) {
+    if (!base || base.status === '废弃' || base.status === '失守') continue;
+    const siteType = String(base.site_type ?? '');
+    if (siteType === 'orbital_dock' || siteType === 'lunar_surface') continue;
+
+    const facs = new Set<'allied' | 'soviet' | 'yuri'>();
+    let heavyCount = 0;
+    let stealthCount = 0;
+    for (const bld of base.buildings ?? []) {
+      if (!bld || bld.state === '停机') continue;
+      const bName = String(bld.name ?? '');
+      const isUnderground = /地下|空腔|掩体/.test(String(bld.layer ?? ''));
+      if (!isUnderground) {
+        if (alliedRe.test(bName)) facs.add('allied');
+        if (sovietRe.test(bName)) facs.add('soviet');
+        if (yuriRe.test(bName)) facs.add('yuri');
+        if (superweaponRe.test(bName)) heavyCount++;
+      }
+      if (stealthRe.test(bName)) stealthCount++;
+    }
+    if (facs.size === 2) mixSum += 0.4;
+    if (facs.size >= 3) mixSum += 0.9;
+    heavySum += heavyCount * 0.6;
+    stealthSum += stealthCount * 0.35;
+    if (siteType === 'inland_canyon' || siteType === 'high_latitude') {
+      siteSum -= 0.15;
+    } else if (siteType === 'sea_platform') {
+      siteSum -= 0.25;
+    }
+  }
+
+  const parts: string[] = [];
+  if (mixSum > 0) parts.push(`混建+${Number(mixSum.toFixed(2))}`);
+  if (heavySum > 0) parts.push(`超武+${Number(heavySum.toFixed(2))}`);
+  if (stealthSum > 0) parts.push(`伪装-${Number(stealthSum.toFixed(2))}`);
+  if (siteSum < 0) parts.push(`选址${Number(siteSum.toFixed(2))}`);
+  if (parts.length === 0 && totalFloor >= 9.0) {
+    parts.push('EL-4不可逆锁');
+  }
+
+  return {
+    totalFloor,
+    compactSummary: parts.join('｜'),
+  };
+}
 
 function summarizeUnlockedResources(data: StatData): string {
   const res = data.economy?.resources as unknown as Record<string, Record<string, number | null>> | undefined;
@@ -2717,6 +3075,20 @@ export function deriveStrategicFeedforward(
     /间谍|特工/.test(Object.keys(data.forces?.troops ?? {}).join(' '))
   ) {
     availableIntelChannels.push('渗透内线');
+  }
+  const expValForChannels = data.exposure?.value ?? 0;
+  const moraleValForChannels = data.morale?.value ?? 5;
+  const moraleEngagedForChannels = isMoraleEngaged(data.morale, expValForChannels);
+  const civicForChannels = safeEvaluateCivicFacilities(data.bases ?? [], {
+    moraleEngaged: moraleEngagedForChannels,
+    moraleValue: moraleValForChannels,
+  });
+  if (
+    (civicForChannels.unlocksCivilInformantChannel ||
+      (moraleEngagedForChannels && moraleValForChannels >= 6.5)) &&
+    !availableIntelChannels.includes('民间眼线')
+  ) {
+    availableIntelChannels.push('民间眼线');
   }
   const intelChainHints =
     phaseRes.phase === 'prologue_unbound' || phaseRes.phase === 'silent_standby'
@@ -2950,15 +3322,35 @@ export function formatStrategicFeedforwardPrompt(feed: StrategicFeedforward): st
   const expVal = data.exposure?.value ?? 0;
   const expLv = resolveExposureLevel(expVal);
   const expFloor = data.exposure?.floor ?? computeExposureFloor(data);
+  const floorExplain = safeExplainExposureFloor(data);
+  const expFloorText =
+    expFloor > 0 && floorExplain.compactSummary
+      ? `常驻底线 ${expFloor} [${floorExplain.compactSummary}]`
+      : `常驻底线 ${expFloor}`;
   const moraleVal = data.morale?.value ?? 5;
   const moraleEngaged = isMoraleEngaged(data.morale, expVal);
   const moraleSt = resolveMoraleStage(moraleVal, { engaged: moraleEngaged, exposureValue: expVal });
   const moraleSummaryPart = moraleSt.engaged
     ? `${moraleVal}/10（${moraleSt.stage}｜${moraleSt.effectSummary}）`
     : `无人在意（${moraleSt.effectSummary}）`;
+  const civicEval = safeEvaluateCivicFacilities(data.bases ?? [], {
+    moraleEngaged,
+    moraleValue: moraleVal,
+  });
   lines.push(
-    `【一、战区宏观态势】日期：${meta?.date || '未详'}（第 ${clock?.day ?? 0} 日 ${clock?.time || '08:00'}）｜地点：${meta?.location || '未勘定'}｜天气：${meta?.weather || '晴'}｜暴露度：${expVal}/10（${expLv.canonicalLabel}｜常驻底线 ${expFloor}｜趋势：${data.exposure?.trend || '平稳'}）｜民心指数：${moraleSummaryPart}｜已启封阵营：${unlockedFacs}｜战略机密点：${intelPts}`,
+    `【一、战区宏观态势】日期：${meta?.date || '未详'}（第 ${clock?.day ?? 0} 日 ${clock?.time || '08:00'}）｜地点：${meta?.location || '未勘定'}｜天气：${meta?.weather || '晴'}｜暴露度：${expVal}/10（${expLv.canonicalLabel}｜${expFloorText}｜趋势：${data.exposure?.trend || '平稳'}）｜民心指数：${moraleSummaryPart}｜已启封阵营：${unlockedFacs}｜战略机密点：${intelPts}`,
   );
+  if (
+    !isPrologueUnbound &&
+    (civicEval.installedFacilities.length > 0 || civicEval.hasWaterOrSewageOutage)
+  ) {
+    const installedFacilities = civicEval.installedFacilities;
+    const totalMonthlyBonus = civicEval.totalMonthlyBonus;
+    const hasWaterOrSewageOutage = civicEval.hasWaterOrSewageOutage;
+    lines.push(
+      `· 驻地民生与环保屏障：在役民生设施(${installedFacilities.length}) = ${installedFacilities.map(f => `${f.buildingName}@${f.baseName}[${f.statusText}]`).join('、')}｜月度民心滋养：+${totalMonthlyBonus.toFixed(2)}/月${hasWaterOrSewageOutage ? '｜⚠️[民生断供预警：主电网赤字致净水/污水设施降载停供，面临严重民心滑坡风险！]' : ''}`,
+    );
+  }
   if (isPrologueUnbound) {
     lines.push(
       '· ⚠️ 当前处于原世界穿越前夕·零系统未绑定阶段：主角脑海中无任何系统提示音，不知道 MCV 与白凌/喀秋莎/尤里卡等机娘的存在，严禁在正文中提前觉醒系统或让机娘跨界联系主角。',
@@ -3013,8 +3405,12 @@ export function formatStrategicFeedforwardPrompt(feed: StrategicFeedforward): st
       `【二、经济与六柱资源】当前处于原世界穿越前夕·零系统未绑定阶段（系统资金与六柱资源库尚未向主角开放，主角脑海中无任何系统提示音）｜本地钱袋：${walletText}`,
     );
   } else {
+    const moraleNetSuffix =
+      moraleSt.engaged && moraleSt.chainMultiplier !== 1.0
+        ? `｜民心修正：${moraleSt.chainBonusText}[${moraleSt.stage}]`
+        : '';
     lines.push(
-      `【二、经济与六柱资源】系统资金：${credits}（日均净流 ${netSign}/日｜活跃资金链：${chainsSummary}）｜本地钱袋：${walletText}`,
+      `【二、经济与六柱资源】系统资金：${credits}（日均净流 ${netSign}/日${moraleNetSuffix}｜活跃资金链：${chainsSummary}）｜本地钱袋：${walletText}`,
     );
     lines.push(`· 六柱战略资源库存：${summarizeUnlockedResources(data)}`);
     lines.push(
@@ -3058,8 +3454,11 @@ export function formatStrategicFeedforwardPrompt(feed: StrategicFeedforward): st
         cItem.domain === 'intel'
           ? ' 👉 请在正文中展现情报核实成果，并可按需顺势派生关联 <任务>（含多环任务链）、新增/更新 <扩展档案>（人物/势力）或解锁战略 <协议> 线索！'
           : '';
+      const civicCompletedSuffix = CIVIC_MILESTONE_TITLE_RE.test(cItem.title)
+        ? '｜🏡[民生基建落成·民心跃升契机] 该设施为驻地民生主力基建，请在本轮正文描写向驻地/周边聚落通水/环卫/收购惠民的现场反响，并在 <态势> 输出对应的 民心变化（+0.3~+0.5）与 民心事件！'
+        : '';
       lines.push(
-        `· 🎉 [本轮刚竣工入账·勿重复报账] ${cItem.title}（${cItem.detail}）${unlockSuffix}${birthSuffix}${intelConversionSuffix}`,
+        `· 🎉 [本轮刚竣工入账·勿重复报账] ${cItem.title}（${cItem.detail}）${unlockSuffix}${birthSuffix}${intelConversionSuffix}${civicCompletedSuffix}`,
       );
     }
     if (milestones.completedItems.length > 0) {
@@ -3339,6 +3738,12 @@ export function formatStrategicFeedforwardPrompt(feed: StrategicFeedforward): st
   if (/暗网|中继/.test(allBldNames)) availableChannels.push('暗网流言');
   if ((data.factions ?? []).some(f => f.attitude === '友善') || /间谍|特工/.test(Object.keys(data.forces?.troops ?? {}).join(' '))) {
     availableChannels.push('渗透内线');
+  }
+  if (
+    (civicEval.unlocksCivilInformantChannel || (moraleEngaged && moraleVal >= 6.5)) &&
+    !availableChannels.includes('民间眼线')
+  ) {
+    availableChannels.push('民间眼线');
   }
   const intelPool = data.intel ?? [];
   const formatTacticalIntelChainBadge = (it: (typeof intelPool)[number]): string => {

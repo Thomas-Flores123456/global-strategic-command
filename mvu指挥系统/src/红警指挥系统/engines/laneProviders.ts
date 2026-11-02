@@ -105,6 +105,10 @@ function toProdStateView(env: LaneResolveEnv): LaneStateView {
   return {
     bases: env.bases,
     queues: env.queues,
+    forces: env.forces,
+    mecha_girls: env.mecha_girls,
+    unit_Attachment: env.unit_Attachment,
+    vehicles_by_base: env.vehicles_by_base,
   };
 }
 

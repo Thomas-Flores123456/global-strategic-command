@@ -274,11 +274,64 @@ function findGirlInState(
   });
 }
 
-function findRecordKey(rec: Record<string, number> | undefined, query: string): string | undefined {
+const TROOP_FACTION_PREFIX_RE = /^(?:盟军|苏军|苏联|尤里|厄普西隆|焚风|帝国|昇阳|旭日)[·•・\-—_/\s]*/;
+
+function stripTroopSquadDesignation(raw: unknown): string {
+  const trimmed = String(raw ?? '').trim();
+  if (!trimmed) return '';
+  const m = trimmed.match(/^(.+?)\s*(?:（([^（）]+)）|\(([^()]+)\))\s*$/);
+  return m && m[1].trim() ? m[1].trim() : trimmed;
+}
+
+function normalizeTroopUnitCore(raw: unknown): string {
+  const baseUnit = stripTroopSquadDesignation(raw);
+  if (!baseUnit) return '';
+  const strippedFaction = baseUnit.replace(TROOP_FACTION_PREFIX_RE, '').trim();
+  const strippedCompact = strippedFaction.replace(/\s+/g, '');
+  const baseCompact = baseUnit.replace(/\s+/g, '');
+  return (strippedCompact.length >= 2 ? strippedCompact : baseCompact).toLowerCase();
+}
+
+function findRecordKey(
+  rec: Record<string, number> | undefined,
+  query: string,
+  allowTroopStemFallback = true,
+): string | undefined {
   if (!rec || typeof rec !== 'object') return undefined;
   if (Object.prototype.hasOwnProperty.call(rec, query)) return query;
   const q = normKey(query);
-  return Object.keys(rec).find(k => normKey(k) === q);
+  const exactHit = Object.keys(rec).find(k => normKey(k) === q);
+  if (exactHit !== undefined) return exactHit;
+  if (!allowTroopStemFallback) return undefined;
+  const qCore = normalizeTroopUnitCore(query);
+  if (!qCore) return undefined;
+  const keys = Object.keys(rec);
+  const cleanHit = keys.find(
+    k => stripTroopSquadDesignation(k) === k.trim() && normalizeTroopUnitCore(k) === qCore,
+  );
+  if (cleanHit !== undefined) return cleanHit;
+  return keys.find(k => normalizeTroopUnitCore(k) === qCore);
+}
+
+function findMatchingTroopKeys(rec: Record<string, number> | undefined, query: string): string[] {
+  if (!rec || typeof rec !== 'object') return [];
+  const q = normKey(query);
+  const queryHasDesignation = stripTroopSquadDesignation(query) !== String(query ?? '').trim();
+  const keys = Object.keys(rec);
+  if (queryHasDesignation) {
+    const exactMatches = keys.filter(k => normKey(k) === q);
+    if (exactMatches.length > 0) return exactMatches;
+  }
+  const qCore = normalizeTroopUnitCore(query);
+  if (!qCore) return keys.filter(k => normKey(k) === q);
+  const exactMatches = keys.filter(k => normKey(k) === q);
+  const stemMatches = keys.filter(k => normKey(k) !== q && normalizeTroopUnitCore(k) === qCore);
+  return [...exactMatches, ...stemMatches];
+}
+
+function sumTroopRecordByUnit(rec: Record<string, number> | undefined, query: string): number {
+  const keys = findMatchingTroopKeys(rec, query);
+  return keys.reduce((sum, k) => sum + Math.max(0, Number(rec?.[k] ?? 0)), 0);
 }
 
 const INFANTRY_RE = /兵|步兵|动员|工程师|警犬|狙击|特工|谭雅|鲍里斯|军医|卫队|小队|蛙人|尤里/i;
@@ -330,9 +383,9 @@ export function resolveTransferCategory(
     if (countVehiclesInList(b.forces?.vehicles, unitName) > 0) return 'vehicles';
   }
 
-  if (findRecordKey(state.forces?.equipment, unitName)) return 'equipment';
+  if (findRecordKey(state.forces?.equipment, unitName, false)) return 'equipment';
   for (const b of state.bases ?? []) {
-    if (findRecordKey(b.forces?.equipment, unitName)) return 'equipment';
+    if (findRecordKey(b.forces?.equipment, unitName, false)) return 'equipment';
   }
 
   if (EQUIPMENT_RE.test(unitName)) return 'equipment';
@@ -405,7 +458,10 @@ function getAvailableCountAtSource(
     .filter(
       p =>
         p.category === category &&
-        normKey(p.unit) === normKey(unitName) &&
+        (normKey(p.unit) === normKey(unitName) ||
+          (category === 'troops' &&
+            Boolean(normalizeTroopUnitCore(unitName)) &&
+            normalizeTroopUnitCore(p.unit) === normalizeTroopUnitCore(unitName))) &&
         normKey(p.from_base || UNASSIGNED_POOL_LABEL) === normKey(fromBaseCanonical || UNASSIGNED_POOL_LABEL),
     )
     .reduce((sum, p) => sum + Math.max(0, p.qty || 0), 0);
@@ -418,38 +474,35 @@ function getAvailableCountAtSource(
 
   if (category === 'troops') {
     if (isUnassignedBaseRef(fromBaseCanonical)) {
-      const gKey = findRecordKey(state.forces?.troops, unitName);
-      const globalTotal = gKey ? Number(state.forces?.troops?.[gKey] ?? 0) : 0;
+      const globalTotal = sumTroopRecordByUnit(state.forces?.troops ?? state.forces?.infantry, unitName);
       let allocated = 0;
       for (const b of bases) {
         const bRec = b.forces?.troops ?? b.forces?.infantry;
-        const bKey = findRecordKey(bRec, unitName);
-        if (bKey) allocated += Number(bRec?.[bKey] ?? 0);
+        allocated += sumTroopRecordByUnit(bRec, unitName);
       }
       return Math.max(0, globalTotal - allocated - pendingFromSameSource);
     }
     const base = findBaseInList(bases, fromBaseCanonical);
     const bRec = base?.forces?.troops ?? base?.forces?.infantry;
-    const bKey = findRecordKey(bRec, unitName);
-    const baseCount = bKey ? Number(bRec?.[bKey] ?? 0) : 0;
+    const baseCount = sumTroopRecordByUnit(bRec, unitName);
     return Math.max(0, baseCount - pendingFromSameSource);
   }
 
   if (category === 'equipment') {
     if (isUnassignedBaseRef(fromBaseCanonical)) {
-      const gKey = findRecordKey(state.forces?.equipment, unitName);
+      const gKey = findRecordKey(state.forces?.equipment, unitName, false);
       const globalTotal = gKey ? Number(state.forces?.equipment?.[gKey] ?? 0) : 0;
       let allocated = 0;
       for (const b of bases) {
         const bRec = b.forces?.equipment;
-        const bKey = findRecordKey(bRec, unitName);
+        const bKey = findRecordKey(bRec, unitName, false);
         if (bKey) allocated += Number(bRec?.[bKey] ?? 0);
       }
       return Math.max(0, globalTotal - allocated - pendingFromSameSource);
     }
     const base = findBaseInList(bases, fromBaseCanonical);
     const bRec = base?.forces?.equipment;
-    const bKey = findRecordKey(bRec, unitName);
+    const bKey = findRecordKey(bRec, unitName, false);
     const baseCount = bKey ? Number(bRec?.[bKey] ?? 0) : 0;
     return Math.max(0, baseCount - pendingFromSameSource);
   }
@@ -576,8 +629,9 @@ export function applyUnitTransferArrival<S extends UnitTransferState>(
   // 2. 人员（troops）或 制式装备（equipment）守恒划转
   if (transfer.category === 'troops' || transfer.category === 'equipment') {
     const field = transfer.category;
+    const isTroops = field === 'troops';
     const globalRec = { ...(state.forces?.[field] ?? {}) };
-    const canonicalUnitKey = findRecordKey(globalRec, transfer.unit) ?? transfer.unit;
+    const canonicalUnitKey = findRecordKey(globalRec, transfer.unit, isTroops) ?? transfer.unit;
 
     let actualQty = Math.max(1, Math.floor(transfer.qty || 1));
     const nextBases = bases.map(b => ({
@@ -595,28 +649,59 @@ export function applyUnitTransferArrival<S extends UnitTransferState>(
         };
       }
       const srcRec = { ...(nextBases[srcIdx].forces?.[field] ?? {}) };
-      const srcKey = findRecordKey(srcRec, transfer.unit) ?? canonicalUnitKey;
-      const avail = Math.max(0, Number(srcRec[srcKey] ?? 0));
-      actualQty = Math.min(actualQty, avail);
-      if (actualQty <= 0) {
-        return {
-          next: state,
-          actualQty: 0,
-          detail: `源基地「${fromLabel}」无可用「${transfer.unit}」库存，调配出账跳过`,
-        };
+      if (isTroops) {
+        const srcKeys = findMatchingTroopKeys(srcRec, transfer.unit);
+        const avail = srcKeys.reduce((sum, k) => sum + Math.max(0, Number(srcRec[k] ?? 0)), 0);
+        actualQty = Math.min(actualQty, avail);
+        if (actualQty <= 0) {
+          return {
+            next: state,
+            actualQty: 0,
+            detail: `源基地「${fromLabel}」无可用「${transfer.unit}」库存，调配出账跳过`,
+          };
+        }
+        let remainingToDeduct = actualQty;
+        for (const k of srcKeys) {
+          if (remainingToDeduct <= 0) break;
+          const cur = Math.max(0, Number(srcRec[k] ?? 0));
+          if (cur <= 0) continue;
+          const take = Math.min(cur, remainingToDeduct);
+          const left = cur - take;
+          if (left <= 0) delete srcRec[k];
+          else srcRec[k] = left;
+          remainingToDeduct -= take;
+        }
+        nextBases[srcIdx].forces = { ...nextBases[srcIdx].forces, [field]: srcRec };
+      } else {
+        const srcKey = findRecordKey(srcRec, transfer.unit, false) ?? canonicalUnitKey;
+        const avail = Math.max(0, Number(srcRec[srcKey] ?? 0));
+        actualQty = Math.min(actualQty, avail);
+        if (actualQty <= 0) {
+          return {
+            next: state,
+            actualQty: 0,
+            detail: `源基地「${fromLabel}」无可用「${transfer.unit}」库存，调配出账跳过`,
+          };
+        }
+        const left = avail - actualQty;
+        if (left <= 0) delete srcRec[srcKey];
+        else srcRec[srcKey] = left;
+        nextBases[srcIdx].forces = { ...nextBases[srcIdx].forces, [field]: srcRec };
       }
-      const left = avail - actualQty;
-      if (left <= 0) delete srcRec[srcKey];
-      else srcRec[srcKey] = left;
-      nextBases[srcIdx].forces = { ...nextBases[srcIdx].forces, [field]: srcRec };
     } else {
       // 从战区机动直属调出：核验未分配余量
-      const globalTotal = Number(globalRec[canonicalUnitKey] ?? 0);
+      const globalTotal = isTroops
+        ? sumTroopRecordByUnit(globalRec, transfer.unit)
+        : Number(globalRec[canonicalUnitKey] ?? 0);
       let allocated = 0;
       for (const b of nextBases) {
         const bRec = b.forces?.[field];
-        const bKey = findRecordKey(bRec, transfer.unit);
-        if (bKey) allocated += Number(bRec?.[bKey] ?? 0);
+        if (isTroops) {
+          allocated += sumTroopRecordByUnit(bRec, transfer.unit);
+        } else {
+          const bKey = findRecordKey(bRec, transfer.unit, false);
+          if (bKey) allocated += Number(bRec?.[bKey] ?? 0);
+        }
       }
       const unassignedAvail = Math.max(0, globalTotal - allocated);
       actualQty = Math.min(actualQty, unassignedAvail);
@@ -633,7 +718,10 @@ export function applyUnitTransferArrival<S extends UnitTransferState>(
       const dstIdx = nextBases.findIndex(b => b.id === targetBase.id && b.name === targetBase.name);
       if (dstIdx >= 0) {
         const dstRec = { ...(nextBases[dstIdx].forces?.[field] ?? {}) };
-        const dstKey = findRecordKey(dstRec, transfer.unit) ?? canonicalUnitKey;
+        const cleanBaseUnit = isTroops
+          ? stripTroopSquadDesignation(transfer.unit) || stripTroopSquadDesignation(canonicalUnitKey) || transfer.unit
+          : canonicalUnitKey;
+        const dstKey = findRecordKey(dstRec, transfer.unit, isTroops) ?? cleanBaseUnit;
         dstRec[dstKey] = Number(dstRec[dstKey] ?? 0) + actualQty;
         nextBases[dstIdx].forces = { ...nextBases[dstIdx].forces, [field]: dstRec };
       }
@@ -643,12 +731,27 @@ export function applyUnitTransferArrival<S extends UnitTransferState>(
     let totalAllocatedAfter = 0;
     for (const b of nextBases) {
       const bRec = b.forces?.[field];
-      const bKey = findRecordKey(bRec, transfer.unit);
-      if (bKey) totalAllocatedAfter += Number(bRec?.[bKey] ?? 0);
+      if (isTroops) {
+        totalAllocatedAfter += sumTroopRecordByUnit(bRec, transfer.unit);
+      } else {
+        const bKey = findRecordKey(bRec, transfer.unit, false);
+        if (bKey) totalAllocatedAfter += Number(bRec?.[bKey] ?? 0);
+      }
     }
-    if (Number(globalRec[canonicalUnitKey] ?? 0) < totalAllocatedAfter) {
+    if (isTroops) {
+      const currentGlobalTotal = sumTroopRecordByUnit(globalRec, transfer.unit);
+      if (currentGlobalTotal < totalAllocatedAfter) {
+        const diff = totalAllocatedAfter - currentGlobalTotal;
+        globalRec[canonicalUnitKey] = Number(globalRec[canonicalUnitKey] ?? 0) + diff;
+      }
+    } else if (Number(globalRec[canonicalUnitKey] ?? 0) < totalAllocatedAfter) {
       globalRec[canonicalUnitKey] = totalAllocatedAfter;
     }
+
+    const detailUnitLabel =
+      isTroops && stripTroopSquadDesignation(transfer.unit) === transfer.unit.trim()
+        ? stripTroopSquadDesignation(canonicalUnitKey) || transfer.unit
+        : canonicalUnitKey;
 
     const nextState: Record<string, unknown> = {
       ...state,
@@ -661,7 +764,7 @@ export function applyUnitTransferArrival<S extends UnitTransferState>(
     return {
       next: nextState as S,
       actualQty,
-      detail: `「${canonicalUnitKey}」×${actualQty} 已调配入驻「${toLabel}」（源自「${fromLabel}」）`,
+      detail: `「${detailUnitLabel}」×${actualQty} 已调配入驻「${toLabel}」（源自「${fromLabel}」）`,
     };
   }
 

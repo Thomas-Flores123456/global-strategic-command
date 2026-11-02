@@ -9,14 +9,18 @@ import { readBootFrom } from '../boot';
 import { getSavePackForImportedStat, packToChoices, parseSavePack, unwrapRawObject } from '../importSave';
 import {
   buildStatData,
+  composeImportedContinuationMessage,
+  composeLaunchMessage,
+  createImportTakeoverSteps,
   createLaunchSteps,
   createMockHostAdapter,
   remapBaseReferencesInStat,
+  resolveDifficulty,
   runLaunchPipeline,
   snapshotChoices,
   syncWorldbooksForWorld,
 } from '../pipeline';
-import { defaultChoices, type LaunchChoices } from '../presets';
+import { defaultChoices, IMPORT_SAVE_MODES, type LaunchChoices } from '../presets';
 import { checkWorldbookActivation, planWorldbookSync, WORLD_BOOK_MANIFESTS } from '../worldbookManifest';
 
 const manifest = WORLD_BOOK_MANIFESTS.xiuzhen;
@@ -529,7 +533,7 @@ describe('G2 修正 · 导入开局全量继承', () => {
     await runLaunchPipeline(createLaunchSteps(), { adapter, choices: reactiveChoices });
     expect(adapter.chatVars['$parse']).toEqual({ aliases: { 电厂: '磁能反应堆' } });
     expect(adapter.chatVars['$dlc']).toEqual([{ id: 'dlc_test' }]);
-    expect((adapter.chatVars['$timeline'] as { maxFloorWatermark?: number })?.maxFloorWatermark).toBe(6);
+    expect((adapter.chatVars['$timeline'] as { maxFloorWatermark?: number })?.maxFloorWatermark).toBe(0);
   });
 
   it('FD-37 · BUG-SAVE-04：导入改址后 girls / queues / pending_mode_switches / pending_deployments / projects / space / economy.chains 引用同步级联迁移', () => {
@@ -612,5 +616,197 @@ describe('G2 修正 · 导入开局全量继承', () => {
     sd.economy.chains.push(chainWithDirectBase);
     remapBaseReferencesInStat(sd, 'beipo', '北坡主基地', newId, newName);
     expect((sd.economy.chains[1] as unknown as { base?: string }).base).toBe(newId);
+  });
+
+  it('FD-53 · 双/三阵营存档在 continuation 模式下导入，资金不打八五折/七五折、暴露度不重复加 15/30', () => {
+    expect(IMPORT_SAVE_MODES.map(m => m.id)).toEqual(['continuation', 'new_game_plus']);
+
+    const dualStat = Schema.parse({
+      meta: { world_id: 'xiuzhen', date: '秋·九月十九', location: '青岚山北坡' },
+      economy: { credits: 2000 },
+      exposure: { value: 3 },
+      command: {
+        unlocked_factions: ['allied', 'soviet'],
+        mcv_granted_factions: ['allied', 'soviet'],
+      },
+      bases: [{ id: 'beipo', name: '北坡主基地', location: '青岚山北坡' }],
+    });
+    const dualRes = parseSavePack(validPackText({ stat_data: dualStat }));
+    expect(dualRes.ok).toBe(true);
+    if (!dualRes.ok) return;
+
+    const { choices: dualChoices } = packToChoices(dualRes.pack, defaultChoices());
+    expect(dualChoices.importMode).toBe('continuation');
+    expect(resolveDifficulty(dualChoices).credits).toBe(2000);
+    expect(resolveDifficulty(dualChoices).exposure).toBe(3);
+    const rebuiltDual = buildStatData(dualChoices);
+    expect(rebuiltDual.economy.credits).toBe(2000);
+    expect(rebuiltDual.exposure.value).toBe(3);
+
+    const triStat = Schema.parse({
+      meta: { world_id: 'xiuzhen', date: '秋·九月十九', location: '青岚山北坡' },
+      economy: { credits: 2000 },
+      exposure: { value: 2 },
+      command: {
+        unlocked_factions: ['allied', 'soviet', 'yuri'],
+        mcv_granted_factions: ['allied', 'soviet', 'yuri'],
+      },
+      bases: [{ id: 'beipo', name: '北坡主基地', location: '青岚山北坡' }],
+    });
+    const triRes = parseSavePack(validPackText({ stat_data: triStat }));
+    expect(triRes.ok).toBe(true);
+    if (!triRes.ok) return;
+
+    const { choices: triChoices } = packToChoices(triRes.pack, defaultChoices());
+    expect(resolveDifficulty(triChoices).credits).toBe(2000);
+    expect(resolveDifficulty(triChoices).exposure).toBe(2);
+    const rebuiltTri = buildStatData(triChoices);
+    expect(rebuiltTri.economy.credits).toBe(2000);
+    expect(rebuiltTri.exposure.value).toBe(2);
+
+    // 切换为 new_game_plus 时，恢复正常多阵营开局折算（三阵营 ×0.75 = 1500）
+    triChoices.importMode = 'new_game_plus';
+    expect(resolveDifficulty(triChoices).credits).toBe(1500);
+    expect(resolveDifficulty(triChoices).exposure).toBeGreaterThan(2);
+  });
+
+  it('FD-53 · new_game_plus 模式下导入：保留 codex、tech.done、forces.girls（base 归空），bases 归零为 []；continuation 下清空旧摘要缓冲', () => {
+    const stat = Schema.parse({
+      meta: { world_id: 'xiuzhen', date: '秋·九月十九', location: '青岚山北坡' },
+      economy: { credits: 2400 },
+      tech: { done: ['化石燃料发电学', '高能激光学'] },
+      bases: [
+        { id: 'beipo', name: '北坡主基地', location: '青岚山北坡', buildings: [{ name: '建造厂核心', state: '运转' }] },
+      ],
+      forces: {
+        girls: [
+          { name: '白凌', duty: '首台机娘', hp: '轻伤', base: 'beipo' },
+          { name: '苏离', duty: '制空联队核心', hp: '重伤', base: 'beipo' },
+        ],
+        vehicles: ['灰熊主战坦克×3'],
+      },
+      codex: [
+        { name: '磁暴线圈', kind: '建筑', desc: '苏联高等电磁防御塔' },
+        { name: '苏离', kind: '人员', desc: 'F-47 制空机娘' },
+      ],
+      queues: [{ type: '建造', item: '发电厂', base: 'beipo', progress: 40 }],
+      micro_summaries: [{ floor: 3, text: '第3楼小摘要' }],
+      pending_summaries: [{ from: 1, to: 5, text: '第1~5楼待归并摘要' }],
+    });
+
+    const res = parseSavePack(validPackText({ stat_data: stat }));
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    // 1. continuation 模式：保留基地与队列，但清空 micro_summaries 与 pending_summaries
+    const { choices: contChoices } = packToChoices(res.pack, defaultChoices());
+    const contSd = buildStatData(contChoices);
+    expect(contSd.bases).toHaveLength(1);
+    expect(contSd.micro_summaries).toEqual([]);
+    expect(contSd.pending_summaries).toEqual([]);
+
+    // 2. new_game_plus 模式：bases 归零为 []，保留 codex / tech.done / forces.girls（base 归空、hp 设为完好）
+    const { choices: ngpChoices } = packToChoices(res.pack, defaultChoices());
+    ngpChoices.importMode = 'new_game_plus';
+    const ngpSd = buildStatData(ngpChoices);
+    expect(ngpSd.bases).toEqual([]);
+    expect(ngpSd.queues).toEqual([]);
+    expect(ngpSd.tech.done).toEqual(expect.arrayContaining(['化石燃料发电学', '高能激光学']));
+    expect(ngpSd.codex.map(c => c.name)).toEqual(expect.arrayContaining(['磁暴线圈', '苏离', '白凌']));
+    expect(ngpSd.forces.girls.map(g => g.name)).toEqual(['白凌', '苏离']);
+    for (const g of ngpSd.forces.girls) {
+      expect(g.base).toBe('');
+      expect(g.hp).toBe('完好');
+    }
+    expect(ngpSd.forces.vehicles.length).toBeGreaterThan(0);
+  });
+
+  it('FD-53 · composeLaunchMessage 在导入含基地存档（continuation）时输出【跨战局接力·战区态势交接简报】而非“无在役基地”', () => {
+    const res = parseSavePack(richPackText());
+    if (!res.ok) throw new Error(res.error);
+    const { choices } = packToChoices(res.pack, defaultChoices());
+    choices.customPrompt = '优先稳固北坡防空阵地';
+
+    const msg = composeLaunchMessage(choices);
+    expect(msg).toBe(composeImportedContinuationMessage(choices));
+    expect(msg).toContain('【跨战局接力·战区态势交接简报】');
+    expect(msg).toContain('【在役基地与产线实况】');
+    expect(msg).toContain('【在编机娘与部队实力】');
+    expect(msg).toContain('【指挥官附加指示】');
+    expect(msg).toContain('优先稳固北坡防空阵地');
+    expect(msg).toContain('【接力推演准则与现场请示】');
+    expect(msg).toContain('北坡主基地');
+    expect(msg).toContain('建造厂核心');
+    expect(msg).toContain('白凌');
+    expect(msg).not.toContain('无在役基地');
+
+    // 切换为 new_game_plus 时，按重新开荒生成初抵简报
+    choices.importMode = 'new_game_plus';
+    const ngpMsg = composeLaunchMessage(choices);
+    expect(ngpMsg).toContain('【战地初抵序幕】');
+    expect(ngpMsg).toContain('无在役基地');
+  });
+
+  it('FD-53 · createImportTakeoverSteps 跑完后 #0 楼 stat_data、$boot.confirmed、$boot.importedStatSnapshot 与聊天世界书均已就绪，且 sentMessages.length === 0', async () => {
+    const res = parseSavePack(
+      validPackText({
+        version: 2,
+        promoted_registry: {
+          entries: {
+            girl_bailing: { targetBook: '私产·白凌专属设定集' },
+          },
+        },
+        archive_registry: {
+          entries: { old_entry: { archivedAt: '2026-10-01' } },
+        },
+      }),
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+
+    expect(res.pack.promoted_registry).toEqual({
+      entries: { girl_bailing: { targetBook: '私产·白凌专属设定集' } },
+    });
+    expect(res.pack.archive_registry).toEqual({
+      entries: { old_entry: { archivedAt: '2026-10-01' } },
+    });
+
+    const { choices } = packToChoices(res.pack, defaultChoices());
+    const adapter = createMockHostAdapter();
+    await adapter.activateWorldbooks(requiredNames);
+
+    const steps = createImportTakeoverSteps();
+    expect(steps.map(s => s.name)).toEqual([
+      'validateWorld',
+      'bindWorldBooks',
+      'applyPersona',
+      'writeStatData',
+      'markBoot',
+    ]);
+
+    await runLaunchPipeline(steps, { adapter, choices, importedPack: res.pack });
+
+    expect(adapter.sentMessages).toHaveLength(0);
+    expect(adapter.generateCount).toBe(0);
+
+    const sd = adapter.getStatData() as Schema | undefined;
+    expect(sd).toBeDefined();
+    expect(sd?.bases[0]?.id).toBe('yunxi');
+    expect(sd?.economy.credits).toBe(1330);
+
+    const rawBoot = adapter.chatVars['$boot'] as Record<string, unknown> | undefined;
+    expect(rawBoot?.confirmed).toBe(true);
+    const snap = rawBoot?.importedStatSnapshot as Schema | undefined;
+    expect(snap).toBeDefined();
+    expect(snap?.bases[0]?.id).toBe('yunxi');
+    expect(snap?.economy.credits).toBe(1330);
+
+    expect(adapter.chatVars['$promoted']).toEqual({
+      entries: { girl_bailing: { targetBook: '私产·白凌专属设定集' } },
+    });
+    expect(adapter.chatVars['$archive']).toEqual({
+      entries: { old_entry: { archivedAt: '2026-10-01' } },
+    });
+    expect(adapter.globalBooks).toContain('私产·白凌专属设定集');
   });
 });

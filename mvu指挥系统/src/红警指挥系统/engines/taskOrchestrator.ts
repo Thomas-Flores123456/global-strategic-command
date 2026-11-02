@@ -184,9 +184,21 @@ export interface LaneResolveEnv {
     name?: string;
     status?: string;
     buildings?: ReadonlyArray<{ name: string; state?: string; mode?: string }>;
+    forces?: {
+      vehicles?: ReadonlyArray<string | { name?: string; type?: string }> | Record<string, number>;
+      [key: string]: unknown;
+    };
   }>;
   queues?: ReadonlyArray<TransactionItem>;
   catalog: EffectiveCatalog;
+  forces?: {
+    girls?: ReadonlyArray<Record<string, unknown>>;
+    vehicles?: ReadonlyArray<string | { name?: string; type?: string }>;
+    [key: string]: unknown;
+  };
+  mecha_girls?: Record<string, unknown>;
+  unit_Attachment?: Record<string, unknown>;
+  vehicles_by_base?: Record<string, unknown>;
 }
 
 /** 领域工位提供者接口（ProductionLaneProvider / ResearchLaneProvider / EngineeringLaneProvider ＋ ProtocolLaneProvider 预留） */

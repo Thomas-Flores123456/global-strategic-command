@@ -3559,6 +3559,47 @@
       "cooldown": 0,
       "delay": 0,
       "displayIndex": 93
+    },
+    "94": {
+      "uid": 94,
+      "key": [
+        "前沿基地建设车",
+        "FCV",
+        "FCV机娘",
+        "前沿建设车机娘",
+        "独立现地筑城",
+        "前沿工地机娘"
+      ],
+      "keysecondary": [],
+      "comment": "95·前沿基地建设车·现地筑城母板（FCV首台·外围据点独立筑城与水电并网）",
+      "content": "[机娘·能力档案 | 前沿基地建设车首台——8.5吨前沿基地建设车（FCV）现地筑城母板]\n前沿基地建设车（FCV）首台机娘系依托《战场工程载具学》由战车工厂总装下线的首制心智核心工程平台，出厂序列编号 FCV-A01，专司外围据点（废弃矿坑、水泥厂、交通咽喉与前哨支点）的独立现地筑城与水电微网并网。与七成质量锁定于主基地不可移动母机的盟军 MCV 首台「白凌」不同，她采用人车高频耦合的 8.5 吨高机动工程载具本体构型，兼具人类生物体温体征与高强度战术内骨骼/载具同频接口，可随工程车队与量产工兵班直接前出至主基地建造半径之外的荒原废墟开展独立施工。\n在工程权能上，她最核心的战略价值在于「不占主基地队列的独立现地筑城」：依托 8.5 吨前沿基地建设车本体集成的纳米喷涂臂、轻钢龙骨成型机、混凝土地坪找平系统与独立柴油微网接口，配合随行量产工兵班，可在外围据点独立并行建造战地维修所、营舍（模块化战勤生活营区）、旅馆/商业驿站、水培站（生态副食与水循环保障站）、基础电站及 T1 级防御碉堡，彻底解放白凌主基地建造队列；同时具备「工业废墟快速翻新与水电并网」权能，可在数日内将废弃矿坑与水泥厂改造为恒温供暖、通水通电的现代化军事前哨与商业驿站。受限于车体未内置重型纳米织造母机，她高度依赖后方主基地的纳米补给走廊与最高指挥官的精神锚定，且无权越级建造兵营、战车工厂、空军指挥部、战斗实验室或战略超级武器等主基地核心母厂。\n\n<数据>\n{\n  \"schema_version\": 1,\n  \"type\": \"maiden\",\n  \"id\": \"maiden.allied.fcv_01\",\n  \"name\": \"前沿基地建设车首台\",\n  \"callsign\": \"Pioneer-01\",\n  \"serial\": \"FCV-A01\",\n  \"model\": \"前沿基地建设车\",\n  \"seq\": \"首台原型\",\n  \"faction\": \"盟军\",\n  \"tier\": 1,\n  \"incubation_mode\": \"blindbox_christen\",\n  \"preset_name\": \"筑城首台\",\n  \"form_mech\": \"红警盟军纳米核心织造体，兼具人类生物体温体征与高强度战术内骨骼/载具同频接口\",\n  \"temperament_spectrum\": \"干练踏实、眼里有活、把荒原废墟一砖一瓦收拾成温暖前哨的现地总工程师。\",\n  \"special_skills\": [\n    {\n      \"name\": \"不占主基地队列的独立现地筑城\",\n      \"kind\": \"核心权能\",\n      \"desc\": \"依托8.5吨前沿基地建设车本体与量产工兵班，在外围据点（矿坑B、水泥厂C）独立并行建造维修所、营舍、旅馆、水培站与防御碉堡，彻底解放白凌主队列。\"\n    },\n    {\n      \"name\": \"工业废墟快速翻新与水电并网\",\n      \"kind\": \"核心权能\",\n      \"desc\": \"数日内将废弃矿坑与水泥厂改造为恒温供暖、通水通电的现代化军事前哨与商业驿站。\"\n    }\n  ],\n  \"special_equipment\": [\n    {\n      \"name\": \"8.5吨前沿基地建设车（FCV）本体\",\n      \"slot\": \"专属载具本体\",\n      \"desc\": \"集成纳米喷涂臂、轻钢龙骨成型机、混凝土地坪找平与独立柴油微网接口。\"\n    }\n  ],\n  \"flaws\": \"高度依赖主基地纳米补给与指挥官精神锚定\",\n  \"exposure_grade\": \"🟡 中危（伪装为市政矿山工程车与废墟内部翻新为EL-0~1；露天大规模纳米喷涂筑城触发EL-2）\",\n  \"balance_slot\": \"T1 外围据点独立现地筑城与废墟水电翻新核心\"\n}\n</数据>\n\n*系统映射：kind=maiden-profile | tier=T1 | slot=ext.personnel.maiden.unit_94 | 关联武备: 前沿基地建设车 | 家族池: pool.maiden.roster*",
+      "constant": false,
+      "vectorized": false,
+      "selective": false,
+      "selectiveLogic": 0,
+      "addMemo": true,
+      "order": 70094,
+      "position": 0,
+      "disable": false,
+      "excludeRecursion": true,
+      "preventRecursion": true,
+      "delayUntilRecursion": false,
+      "probability": 100,
+      "useProbability": true,
+      "depth": 4,
+      "group": "",
+      "groupOverride": false,
+      "groupWeight": 100,
+      "scanDepth": null,
+      "caseSensitive": null,
+      "matchWholeWords": null,
+      "useGroupScoring": null,
+      "automationId": "",
+      "role": null,
+      "sticky": 0,
+      "cooldown": 0,
+      "delay": 0,
+      "displayIndex": 94
     }
   }
 }

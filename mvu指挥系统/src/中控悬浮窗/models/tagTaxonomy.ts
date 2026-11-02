@@ -533,6 +533,9 @@ export const CONYARD_ORIGIN_NAMES: ReadonlySet<string> = new Set([
   '尤里建造厂核心',
   '前沿工地',
   '作战前哨站',
+  '一次展开前沿节点',
+  'Sputnik一次展开前沿节点',
+  '前哨基地节点',
 ]);
 
 /** 判定是否为 MCV 展开原点建筑（不应在右侧建造蓝图面板作为普通建筑出售） */

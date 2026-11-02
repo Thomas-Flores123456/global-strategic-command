@@ -47,6 +47,19 @@
               >
                 <Icon name="sun" :size="11" class="mr-1 inline-block text-(--rac-accent)" />{{ activeBaseTimezoneWeather.weatherBadge }}
               </span>
+              <span
+                v-if="overview.buildAuthority && overview.buildAuthority.canBuild"
+                class="rounded-[2px] border px-1.5 py-0.5 font-mono text-[11px] font-bold"
+                :class="
+                  overview.buildAuthority.tier === 'full'
+                    ? 'border-(--rac-accent)/50 bg-(--rac-panel-2) text-(--rac-accent)'
+                    : 'border-(--rac-ok)/60 bg-(--rac-panel-2) text-(--rac-ok)'
+                "
+                :title="overview.buildAuthority.scopeHint"
+                data-test="building-authority-tier-badge"
+              >
+                ◆ {{ overview.buildAuthority.tierLabel }}
+              </span>
             </div>
             <p class="font-mono text-[12px] text-(--rac-muted)">
               点击任意建筑可查阅设定档案，或向聊天框填入建造与模式切换指令
@@ -303,7 +316,7 @@
         >
           <span class="inline-flex items-center gap-1">
             <Icon name="alert" :size="12" />
-            建造厂尚未展开：当前{{ scopeMode === 'global' ? '战区' : '基地' }}无运转中的建造厂，暂无法新建任何设施。
+            建造核心尚未建立：当前{{ scopeMode === 'global' ? '战区' : '基地' }}无运转中的建造厂或 FCV 筑城核心，暂无法新建设施。
           </span>
           <button
             type="button"
@@ -313,6 +326,31 @@
           >
             下令展开基地车 (MCV)
           </button>
+        </div>
+
+        <!-- FCV 现地筑城 / 前哨节点 建造权限说明条 -->
+        <div
+          v-else-if="
+            scopeMode === 'base' &&
+            overview.buildAuthority &&
+            overview.buildAuthority.canBuild &&
+            (overview.buildAuthority.tier !== 'full' || overview.buildAuthority.fcvGirl)
+          "
+          class="flex flex-none shrink-0 flex-wrap items-center justify-between gap-2 rounded-[2px] border border-(--rac-ok)/50 bg-(--rac-panel-2) px-3 py-1.5 font-mono text-[12px]"
+          data-test="modal-building-authority-banner"
+        >
+          <div class="flex flex-wrap items-center gap-1.5">
+            <Icon name="shield" :size="13" class="text-(--rac-ok)" />
+            <span class="font-bold text-(--rac-hi)">{{ overview.buildAuthority.tierLabel }}</span>
+            <span class="text-(--rac-accent)">· {{ overview.buildAuthority.sourceSummary }}</span>
+            <span class="text-(--rac-muted)">｜{{ overview.buildAuthority.scopeHint }}</span>
+          </div>
+          <span
+            v-if="overview.buildAuthority.independentQueue"
+            class="rounded-[2px] border border-(--rac-ok)/60 bg-(--rac-panel) px-2 py-0.5 text-[11px] font-bold text-(--rac-ok)"
+          >
+            ◆ 不占主基地队列 · 独立并行筑城
+          </span>
         </div>
 
         <!-- ══ FD-39 · 基地实况三环/分层沙盘与防区工程看板区 ══ -->
@@ -345,7 +383,15 @@
                 <span v-if="hub.layer" class="text-[11px] text-(--rac-muted)">[{{ hub.layer }}]</span>
               </span>
               <span
-                v-if="liveSandbox.conyardHubs.length === 0"
+                v-if="liveSandbox.conyardHubs.length === 0 && overview.buildAuthority?.fcvGirl"
+                class="inline-flex items-center gap-1 rounded-[2px] border border-(--rac-ok)/50 bg-(--rac-panel-2) px-1.5 py-0.5 text-[11px] text-(--rac-ok)"
+                data-test="live-fcv-girl-hub-pill"
+              >
+                <Icon name="shield" :size="11" />
+                <span>◆ FCV 现地筑城中枢：{{ overview.buildAuthority.fcvGirl.girlName }}（独立并行队列）</span>
+              </span>
+              <span
+                v-else-if="liveSandbox.conyardHubs.length === 0"
                 class="inline-flex items-center gap-1 text-[12px] text-(--rac-warn)"
               >
                 <Icon name="alert" :size="12" /> 尚未展开建造厂核心

@@ -1972,6 +1972,145 @@ describe('FD-51 · 链网物理三要素成熟度诊断与三轨收支前馈汇�
   });
 });
 
+describe('FD-55 PKG-B · 战略前馈七大板块民心/暴露/市政增强与维度 8 战术诊断', () => {
+  it('1. 板块一暴露底线成因拆解与在役民生屏障、板块二民心资金链修正、板块三民生基建落成契机与板块五民间眼线渠道', () => {
+    const prevState = zero();
+    prevState.bases.push({
+      id: 'base-1',
+      name: '北坡主基地',
+      location: '北坡',
+      status: '运转中',
+      power: { gen: 200, use: 100 },
+      alerts: [],
+      buildings: [
+        { name: '盟军建造厂', layer: '地面', state: '运转', progress: 100, eta: '' },
+        { name: '苏联磁能反应炉', layer: '地面', state: '运转', progress: 100, eta: '' },
+        { name: '天气控制仪', layer: '地面', state: '运转', progress: 100, eta: '' },
+        { name: '净水与供水站', layer: '地面', state: '建造中', progress: 80, eta: '余1日' },
+        { name: '基础废物分拣站', layer: '地面', state: '运转', progress: 100, eta: '' },
+      ],
+    });
+
+    const currState = zero();
+    currState.economy.credits = 3200;
+    currState.exposure.value = 5.2;
+    currState.exposure.floor = 1.0;
+    currState.morale.value = 7.2;
+    currState.morale.engaged = true;
+    currState.bases.push({
+      id: 'base-1',
+      name: '北坡主基地',
+      location: '北坡',
+      status: '运转中',
+      power: { gen: 200, use: 120 },
+      alerts: [],
+      buildings: [
+        { name: '盟军建造厂', layer: '地面', state: '运转', progress: 100, eta: '' },
+        { name: '苏联磁能反应炉', layer: '地面', state: '运转', progress: 100, eta: '' },
+        { name: '天气控制仪', layer: '地面', state: '运转', progress: 100, eta: '' },
+        { name: '净水与供水站', layer: '地面', state: '运转', progress: 100, eta: '' },
+        { name: '基础废物分拣站', layer: '地面', state: '运转', progress: 100, eta: '' },
+      ],
+    });
+
+    const feed = deriveStrategicFeedforward(
+      { floorId: 8, schemaVersion: '2.0', data: currState },
+      [],
+      null,
+      { prevData: prevState },
+    );
+    expect(feed).not.toBeNull();
+    const prompt = formatStrategicFeedforwardPrompt(feed!);
+
+    // 板块一：常驻底线附带成因拆解 [混建+0.4｜超武+0.6]
+    expect(prompt).toContain('常驻底线 1 [混建+0.4｜超武+0.6]');
+    // 板块一：驻地民生与环保屏障
+    expect(prompt).toContain(
+      '· 驻地民生与环保屏障：在役民生设施(2) = 净水与供水站@北坡主基地[供电正常·满负荷滋养]、基础废物分拣站@北坡主基地[供电正常·满负荷滋养]｜月度民心滋养：+0.25/月',
+    );
+    // 板块二：民心修正
+    expect(prompt).toContain('｜民心修正：资金链收益 +10%[安居归心]');
+    // 板块三（里程碑）：净水与供水站刚竣工附加 🏡[民生基建落成·民心跃升契机]
+    expect(prompt).toContain(
+      '｜🏡[民生基建落成·民心跃升契机] 该设施为驻地民生主力基建，请在本轮正文描写向驻地/周边聚落通水/环卫/收购惠民的现场反响，并在 <态势> 输出对应的 民心变化（+0.3~+0.5）与 民心事件！',
+    );
+    // 板块五：情报渠道包含「民间眼线」
+    expect(prompt).toContain('可用渠道：前线目视、宏观广播、民间眼线');
+  });
+
+  it('2. 维度 8 组合战术诊断：P0 民生断供预警、P1 民心舆情抚恤（<4.2）与 P1 民生伪装屏障（暴露 >=4.0 且零民生设施）', () => {
+    const catalog = mergeEffectiveCatalog([], null);
+
+    // (a) 主电网赤字 + 净水站 + 低民心 (3.5) -> P0 民生断供预警 + P1 民心舆情抚恤
+    const outageState = zero();
+    outageState.exposure.value = 5.5;
+    outageState.morale.value = 3.5;
+    outageState.morale.engaged = true;
+    outageState.bases.push({
+      id: 'base-1',
+      name: '北坡主基地',
+      location: '北坡',
+      status: '运转中',
+      power: { gen: 50, use: 120 },
+      alerts: [],
+      buildings: [
+        { name: '盟军建造厂', layer: '地面', state: '运转', progress: 100, eta: '' },
+        { name: '盟军发电厂', layer: '地面', state: '运转', progress: 100, eta: '' },
+        { name: '净水与供水站', layer: '地面', state: '运转', progress: 100, eta: '' },
+      ],
+    });
+
+    const outageFindings = analyzeTacticalCombos(outageState, catalog, { maxFindings: 10 });
+    const p0Outage = outageFindings.find(f => f.focusTag === '民生断供预警');
+    expect(p0Outage).toBeDefined();
+    expect(p0Outage!.priority).toBe('P0');
+    expect(p0Outage!.title).toBe('主电网赤字导致驻地净水/排污设施停摆，面临民心崩盘风险');
+    expect(p0Outage!.recommendedAction).toBe(
+      '建议立即补建发电厂或拉闸关停高耗电武备，恢复社区供水与排污运转。',
+    );
+
+    const p1LowMorale = outageFindings.find(f => f.focusTag === '民心舆情抚恤');
+    expect(p1LowMorale).toBeDefined();
+    expect(p1LowMorale!.priority).toBe('P1');
+    expect(p1LowMorale!.title).toContain('战区民心偏低（3.5/10 · 人心惶惶），面临流言告密与资金链折损');
+
+    const outageFeed = deriveStrategicFeedforward(
+      { floorId: 9, schemaVersion: '2.0', data: outageState },
+      [],
+      null,
+    );
+    const outagePrompt = formatStrategicFeedforwardPrompt(outageFeed!);
+    expect(outagePrompt).toContain(
+      '｜⚠️[民生断供预警：主电网赤字致净水/污水设施降载停供，面临严重民心滑坡风险！]',
+    );
+
+    // (b) 暴露度 >= 4.0 且在役民生设施为 0 -> P1 民生伪装屏障
+    const zeroCivicState = zero();
+    zeroCivicState.exposure.value = 4.6;
+    zeroCivicState.morale.value = 5.0;
+    zeroCivicState.morale.engaged = true;
+    zeroCivicState.bases.push({
+      id: 'base-1',
+      name: '北坡主基地',
+      location: '北坡',
+      status: '运转中',
+      power: { gen: 150, use: 60 },
+      alerts: [],
+      buildings: [
+        { name: '盟军建造厂', layer: '地面', state: '运转', progress: 100, eta: '' },
+        { name: '盟军发电厂', layer: '地面', state: '运转', progress: 100, eta: '' },
+      ],
+    });
+    const zeroCivicFindings = analyzeTacticalCombos(zeroCivicState, catalog, { maxFindings: 10 });
+    const p1CivicShield = zeroCivicFindings.find(f => f.focusTag === '民生伪装屏障');
+    expect(p1CivicShield).toBeDefined();
+    expect(p1CivicShield!.priority).toBe('P1');
+    expect(p1CivicShield!.recommendedAction).toContain(
+      '净水与供水站 / 基础废物分拣站 / 生活污水处理站',
+    );
+  });
+});
+
 
 
 

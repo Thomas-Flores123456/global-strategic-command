@@ -47,6 +47,10 @@ const TAVERN_GLOBALS = [
   'getCharWorldbookNames',
   'getChatWorldbookName',
   'getOrCreateChatWorldbook',
+  'getWorldbookNames',
+  'getGlobalWorldbookNames',
+  'rebindGlobalWorldbooks',
+  'rebindChatWorldbook',
   'getWorldbook',
   'createOrReplaceWorldbook',
   'replaceWorldbook',
@@ -457,5 +461,174 @@ describe('FD-47 · W1 saveBackupService & importSave 全链路单测', () => {
     expect(clickedAnchors).toHaveLength(1);
     expect(oneClick.clonedWorldbooks).toEqual(['主设定书_v1.5.0备份']);
     expect(oneClick.floorId).toBe(2);
+  });
+
+  it('6. FD-53 · buildCurrentSavePack 导出 $promoted/$archive/promoted_worldbooks，且 restoreSavePackInPlace 在 #0 楼原位恢复私产书、自动锁定 $boot.confirmed=true 并清理 $timeline 旧楼层 opLog', async () => {
+    const g = globalThis as Record<string, unknown>;
+    const aiStat = makeSampleStatData(6400);
+
+    // 1) 验证 buildCurrentSavePack 扩充导出
+    g.getLastMessageId = () => 6;
+    g.getChatMessages = () => [{ role: 'assistant', is_hidden: false }];
+    g.getCurrentChatName = () => '旧战局_多世界书测试';
+    g.getChatWorldbookName = () => '红警档案·旧战局';
+    g.getVariables = (o: { type: string; message_id?: number }) => {
+      if (o.type === 'chat') {
+        return {
+          $parse: { lastParsedFloor: 6 },
+          $dlc: [{ id: 'dlc_01', books: ['DLC·极昼战线'] }],
+          $promoted: {
+            girl_bailing: {
+              entryName: '档案·白凌',
+              targetBook: '私产·专属机娘卷',
+              promotedAt: '2026-10-30T00:00:00.000Z',
+            },
+          },
+          $archive: {
+            lore_01: { entryName: '世界设定·荒坂塔', archivedAt: '2026-10-30T00:00:00.000Z' },
+          },
+          $timeline: {
+            version: 1,
+            originChatId: '旧战局_多世界书测试',
+            boundBookName: '红警档案·旧战局',
+            maxFloorWatermark: 6,
+            floors: {
+              '0': { floorId: 0, wbJournal: [], opLog: [] },
+              '2': {
+                floorId: 2,
+                wbJournal: [{ bookName: '红警档案·旧战局', entryName: '档案·白凌' }],
+                opLog: [{ op: 'build', target: '发电厂' }],
+              },
+              '6': {
+                floorId: 6,
+                wbJournal: [],
+                opLog: [{ op: 'produce', target: '犀牛坦克' }],
+              },
+            },
+          },
+        };
+      }
+      if (o.type === 'message' && o.message_id === 6) {
+        return { stat_data: aiStat };
+      }
+      return {};
+    };
+    g.getWorldbook = async (name: string) => {
+      if (name === '红警档案·旧战局') {
+        return [{ name: '摘要·001-020', content: '前情纪要', enabled: true }];
+      }
+      if (name === '私产·专属机娘卷') {
+        return [
+          {
+            name: '档案·白凌',
+            content: '白凌独立私产档案正文',
+            enabled: true,
+            keys: ['白凌'],
+          },
+        ];
+      }
+      return [];
+    };
+
+    const exportRes = await buildCurrentSavePack();
+    expect(exportRes.ok).toBe(true);
+    expect(exportRes.pack?.promoted_registry).toEqual({
+      girl_bailing: {
+        entryName: '档案·白凌',
+        targetBook: '私产·专属机娘卷',
+        promotedAt: '2026-10-30T00:00:00.000Z',
+      },
+    });
+    expect(exportRes.pack?.archive_registry).toEqual({
+      lore_01: { entryName: '世界设定·荒坂塔', archivedAt: '2026-10-30T00:00:00.000Z' },
+    });
+    expect(exportRes.pack?.promoted_worldbooks).toEqual({
+      '私产·专属机娘卷': [
+        {
+          name: '档案·白凌',
+          content: '白凌独立私产档案正文',
+          enabled: true,
+          keys: ['白凌'],
+        },
+      ],
+    });
+
+    // 2) 在全新未确认开局聊天（targetMid === 0）执行 restoreSavePackInPlace
+    clearTavernGlobals();
+    const newMsgVars: Record<number, Record<string, unknown>> = { 0: {} };
+    let newChatVars: Record<string, unknown> = {};
+    const writtenBooks: Record<string, unknown[]> = {};
+    let globalActiveBooks: string[] = ['全域战略指挥系统'];
+
+    g.getLastMessageId = () => 0;
+    g.getChatMessages = () => [{ role: 'assistant', is_hidden: false }];
+    g.getCurrentChatName = () => '新战局_首楼原位恢复';
+    g.getVariables = (o: { type: string; message_id?: number }) => {
+      if (o.type === 'chat') return newChatVars;
+      if (o.type === 'message' && typeof o.message_id === 'number') {
+        return newMsgVars[o.message_id] ?? {};
+      }
+      return {};
+    };
+    g.updateVariablesWith = async (
+      updater: (v: Record<string, unknown>) => Record<string, unknown>,
+      o: { type: string; message_id?: number },
+    ) => {
+      if (o.type === 'chat') {
+        newChatVars = updater(newChatVars);
+      } else if (o.type === 'message' && typeof o.message_id === 'number') {
+        newMsgVars[o.message_id] = updater(newMsgVars[o.message_id] ?? {});
+      }
+    };
+    g.getChatWorldbookName = () => '红警档案·新战局_首楼原位恢复';
+    g.getWorldbookNames = () => ['全域战略指挥系统', '红警档案·新战局_首楼原位恢复', '私产·专属机娘卷'];
+    g.getGlobalWorldbookNames = () => globalActiveBooks;
+    g.rebindGlobalWorldbooks = async (names: string[]) => {
+      globalActiveBooks = [...names];
+    };
+    g.createOrReplaceWorldbook = async (name: string, entries: unknown[]) => {
+      writtenBooks[name] = entries;
+    };
+
+    const restoreRes = await restoreSavePackInPlace(exportRes.jsonText!);
+    expect(restoreRes.ok).toBe(true);
+    expect(restoreRes.restoredFloorId).toBe(0);
+
+    // 验证 $promoted / $archive 与私产世界书已完整写回
+    expect(newChatVars.$promoted).toEqual(exportRes.pack?.promoted_registry);
+    expect(newChatVars.$archive).toEqual(exportRes.pack?.archive_registry);
+    expect(writtenBooks['私产·专属机娘卷']).toHaveLength(1);
+    expect(writtenBooks['私产·专属机娘卷'][0]).toMatchObject({
+      name: '档案·白凌',
+      content: '白凌独立私产档案正文',
+      enabled: true,
+    });
+
+    // 验证未确认开局聊天自动写入 $boot.confirmed = true 与 importedStatSnapshot
+    const restoredBoot = newChatVars.$boot as Record<string, unknown>;
+    expect(restoredBoot).toBeDefined();
+    expect(restoredBoot.confirmed).toBe(true);
+    expect(restoredBoot.importedFrom).toBe('旧战局_多世界书测试');
+    expect(
+      (restoredBoot.importedStatSnapshot as { economy: { credits: number } }).economy.credits,
+    ).toBe(6400);
+
+    // 验证 targetMid === 0 时 $timeline 旧楼层 (>0) 的 opLog 与 wbJournal 已清空，maxFloorWatermark 归零
+    const restoredTimeline = newChatVars.$timeline as {
+      originChatId: string;
+      boundBookName: string;
+      maxFloorWatermark: number;
+      floors: Record<string, { wbJournal: unknown[]; opLog: unknown[] }>;
+    };
+    expect(restoredTimeline.originChatId).toBe('新战局_首楼原位恢复');
+    expect(restoredTimeline.boundBookName).toBe('红警档案·新战局_首楼原位恢复');
+    expect(restoredTimeline.maxFloorWatermark).toBe(0);
+    expect(restoredTimeline.floors['2'].wbJournal).toEqual([]);
+    expect(restoredTimeline.floors['2'].opLog).toEqual([]);
+    expect(restoredTimeline.floors['6'].opLog).toEqual([]);
+
+    // 验证恢复后立即触发全局世界书启用同步（将当前聊天书与私产书并入全局启用列表）
+    expect(globalActiveBooks).toContain('红警档案·新战局_首楼原位恢复');
+    expect(globalActiveBooks).toContain('私产·专属机娘卷');
   });
 });

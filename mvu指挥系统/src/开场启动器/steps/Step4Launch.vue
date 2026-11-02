@@ -165,6 +165,28 @@
           </button>
         </div>
       </div>
+      <div
+        v-if="choices.importedStat"
+        class="step4-import-mode-switch"
+        data-testid="step4-import-mode-switch"
+      >
+        <div class="step4-import-mode-btns">
+          <button
+            v-for="mode in IMPORT_SAVE_MODES"
+            :key="mode.id"
+            type="button"
+            class="mini-btn"
+            :class="{ sel: (choices.importMode ?? 'continuation') === mode.id }"
+            :data-testid="mode.id === 'new_game_plus' ? 'step4-import-mode-new-game-plus' : 'step4-import-mode-continuation'"
+            :disabled="launching"
+            :aria-pressed="(choices.importMode ?? 'continuation') === mode.id"
+            @click="choices.importMode = mode.id"
+          >
+            {{ (choices.importMode ?? 'continuation') === mode.id ? '◆' : '◇' }} {{ mode.label }}
+          </button>
+        </div>
+        <div class="wb-info">{{ activeImportMode.summary }}</div>
+      </div>
       <div v-for="w in step4ImportWarnings" :key="w" class="import-warn">⚠ {{ w }}</div>
       <div v-if="step4ImportErr" class="import-err">✗ {{ step4ImportErr }}</div>
     </section>
@@ -217,8 +239,20 @@
             ? '正在执行五工序发射序列…'
             : failed
               ? '↻ 重试发射序列'
-              : '发射开局指令 · 启动战役（MCV 待命）'
+              : isContinuationWithBases
+                ? '发射战局接力简报 · 继续战役'
+                : '发射开局指令 · 启动战役（MCV 待命）'
         }}</span>
+      </button>
+      <button
+        v-if="choices.importedStat"
+        type="button"
+        class="mini-btn takeover-only-btn"
+        :disabled="launching || !manifest"
+        data-testid="step4-takeover-only-btn"
+        @click="launchTakeoverOnly"
+      >
+        ◆ 仅落盘接管首楼（不发送开局简报，自由输入开场）
       </button>
     </section>
 
@@ -240,6 +274,7 @@
 import { getSavePackForImportedStat, packToChoices, readSavePackFromFile } from '../importSave';
 import {
   composeLaunchMessage,
+  createImportTakeoverSteps,
   createLaunchSteps,
   getHostAdapter,
   runLaunchPipeline,
@@ -253,6 +288,7 @@ import {
   findMaidenIncubationMode,
   findSystemLinkMode,
   findTone,
+  IMPORT_SAVE_MODES,
   OPENING_ENTRY_MODES,
   OPENING_MAIDEN_INCUBATION_MODES,
   OPENING_SYSTEM_LINK_MODES,
@@ -307,6 +343,17 @@ const activeMaidenIncubationMode = computed(() =>
   findMaidenIncubationMode(resolveMaidenIncubationMode(choices)),
 );
 const activeTone = computed(() => findTone(choices.toneId));
+const activeImportMode = computed(
+  () =>
+    IMPORT_SAVE_MODES.find(m => m.id === (choices.importMode ?? 'continuation')) ??
+    IMPORT_SAVE_MODES[0],
+);
+const isContinuationWithBases = computed(
+  () =>
+    Boolean(choices.importedStat) &&
+    (choices.importMode ?? 'continuation') === 'continuation' &&
+    (choices.importedStat?.bases?.length ?? 0) > 0,
+);
 
 function selectEntryMode(modeId: OpeningEntryMode) {
   choices.entryMode = modeId;
@@ -407,6 +454,23 @@ async function launch() {
   try {
     const importedPack = choices.importedStat ? getSavePackForImportedStat(choices.importedStat) : undefined;
     await runLaunchPipeline(createLaunchSteps(), { adapter, choices, importedPack }, onProgress);
+    emit('launched');
+  } catch (e) {
+    failed.value = true;
+    errorMsg.value = e instanceof Error ? e.message : String(e);
+  } finally {
+    launching.value = false;
+  }
+}
+
+async function launchTakeoverOnly() {
+  launching.value = true;
+  failed.value = false;
+  errorMsg.value = '';
+  progress.value = [];
+  try {
+    const importedPack = choices.importedStat ? getSavePackForImportedStat(choices.importedStat) : undefined;
+    await runLaunchPipeline(createImportTakeoverSteps(), { adapter, choices, importedPack }, onProgress);
     emit('launched');
   } catch (e) {
     failed.value = true;
@@ -519,6 +583,29 @@ async function launch() {
   display: flex;
   align-items: center;
   gap: 6px;
+}
+
+.step4-import-mode-switch {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--rac-dim);
+}
+
+.step4-import-mode-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mini-btn.sel {
+  border-color: var(--rac-accent);
+  color: var(--rac-hi);
+}
+
+.takeover-only-btn {
+  width: 100%;
+  margin-top: 8px;
+  text-align: center;
 }
 
 .import-ok {

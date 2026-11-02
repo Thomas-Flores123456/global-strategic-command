@@ -763,12 +763,32 @@
       <!-- ── 已归档战史卷宗（savedRanges） ── -->
       <div class="rounded border border-[var(--rac-dim)] bg-[var(--rac-panel)] p-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <span class="font-semibold text-[var(--rac-hi)]">
-            已归档战史卷宗 ({{ savedRanges.length }})
-          </span>
-          <span class="text-[12px] text-[var(--rac-muted)]">
-            点击任意条目可展开查阅完整摘要正文
-          </span>
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-semibold text-[var(--rac-hi)]">
+              已归档战史卷宗 ({{ savedRanges.length }})
+            </span>
+            <span
+              v-if="(breakdown.coldArchivedCount ?? 0) > 0"
+              class="rounded border border-[var(--rac-dim)] bg-[var(--rac-bg)] px-2 py-0.5 font-mono text-[11px] text-[var(--rac-muted)]"
+            >
+              已冷存 {{ breakdown.coldArchivedCount }} 条 · 省流 ~{{ breakdown.coldArchivedTokens ?? 0 }} tok
+            </span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              v-if="savedRanges.length > 0"
+              type="button"
+              class="sum-btn sum-btn--primary px-2.5 py-1 text-[12px]"
+              :disabled="busy || !env.inTavern"
+              title="按当前预算滑窗自动冷存已被大摘要覆盖的远期阶段摘要，并剔除主角名/机娘名等高频常驻触发词"
+              @click="doSmartOptimizeWindow"
+            >
+              智能滑窗冷存与去泛词
+            </button>
+            <span class="text-[12px] text-[var(--rac-muted)]">
+              点击任意条目可展开查阅完整摘要正文
+            </span>
+          </div>
         </div>
 
         <div
@@ -781,7 +801,8 @@
         <div
           v-for="r in savedRanges"
           :key="(r.tier ?? 'meso') + '-' + r.from + '-' + r.to"
-          class="mt-2 rounded border border-[var(--rac-dim)] bg-[var(--rac-bg)] px-3 py-2"
+          class="mt-2 rounded border border-[var(--rac-dim)] bg-[var(--rac-bg)] px-3 py-2 transition-opacity"
+          :class="r.entry.enabled === false ? 'opacity-65' : ''"
         >
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div
@@ -804,7 +825,13 @@
               <span class="font-mono text-[11px] text-[var(--rac-accent)]">
                 ~{{ estimateTextTokens(r.entry.content ?? '') }} tok
               </span>
-              <span class="font-mono text-[12px] text-[var(--rac-text)]">
+              <span
+                v-if="r.entry.enabled === false"
+                class="rounded border border-[var(--rac-dim)] bg-[var(--rac-panel)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--rac-muted)]"
+              >
+                ○ 已冷存关闭（不占上下文）
+              </span>
+              <span v-else class="font-mono text-[12px] text-[var(--rac-text)]">
                 {{ r.entry.strategy?.type === 'selective' ? '● 按关键词触发' : '◆ 常驻注入' }} · 深度
                 {{ r.entry.position?.depth ?? DEFAULT_DEPTH }}
               </span>
@@ -826,6 +853,21 @@
             </div>
 
             <div class="flex flex-none items-center gap-2">
+              <button
+                type="button"
+                class="sum-btn px-2.5 py-1 text-[12px]"
+                :class="r.entry.enabled === false ? 'sum-btn--primary' : ''"
+                :disabled="busy || !env.inTavern"
+                :title="
+                  r.entry.enabled === false
+                    ? '将该条摘要重新启用（参与世界书注入）'
+                    : '将该条历史摘要冷存关闭（保留在世界书内但暂停注入，释放上下文预算）'
+                "
+                @click="doToggleSavedEnabled(r)"
+              >
+                {{ r.entry.enabled === false ? '唤醒启用' : '冷存关闭' }}
+              </button>
+
               <button
                 type="button"
                 class="sum-btn px-2.5 py-1 text-[12px]"
@@ -868,6 +910,167 @@
             </div>
             <div class="whitespace-pre-wrap leading-relaxed text-[var(--rac-text)]">
               {{ r.entry.content || '（无正文内容）' }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 旧档继承战史智能托管（legacyEntries） ── -->
+      <div
+        v-if="legacyEntries.length > 0"
+        class="rounded border border-[var(--rac-accent)]/40 bg-[var(--rac-panel)] p-3"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-semibold text-[var(--rac-hi)]">
+              旧档继承战史智能托管 ({{ legacyEntries.length }} 条)
+            </span>
+            <span class="rounded border border-[var(--rac-ok)]/40 bg-[var(--rac-ok)]/15 px-2 py-0.5 font-mono text-[11px] text-[var(--rac-ok)]">
+              当前开启 {{ breakdown.legacyActiveCount ?? 0 }} 条 (~{{ breakdown.legacyActiveTokens ?? 0 }} tok)
+            </span>
+            <span class="rounded border border-[var(--rac-dim)] bg-[var(--rac-bg)] px-2 py-0.5 font-mono text-[11px] text-[var(--rac-muted)]">
+              已冷存 {{ breakdown.legacyColdCount ?? 0 }} 条 (省流 ~{{ breakdown.legacyColdTokens ?? 0 }} tok)
+            </span>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              class="sum-btn px-2.5 py-1 text-[12px]"
+              :class="legacyAutoManage ? 'sum-btn--primary' : ''"
+              @click="toggleLegacyAutoManage"
+            >
+              {{ legacyAutoManage ? '● 随新战局推进自动退居：已开启' : '○ 随新战局推进自动退居：已关闭' }}
+            </button>
+            <button
+              type="button"
+              class="sum-btn px-2.5 py-1 text-[12px]"
+              @click="showLegacyList = !showLegacyList"
+            >
+              {{ showLegacyList ? '收起旧档条目 ▲' : `展开旧档条目 (${legacyEntries.length}) ▼` }}
+            </button>
+          </div>
+        </div>
+
+        <div class="mt-1.5 text-[12px] text-[var(--rac-muted)]">
+          自动退居规则：刚开局时保留「前情总纲常驻 + 旧档大摘要绿灯 + 末尾 3 段近场纪要开启」以衔接旧档终局；当新战局归档第 1 段新摘要后自动冷存旧档阶段纪要，满 2 段新摘要后将前情总纲转为按需绿灯，满 1 卷新大摘要后自动冷存旧档远期卷宗。
+        </div>
+
+        <!-- 快捷模式切换按钮组 -->
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            class="sum-btn sum-btn--primary px-2.5 py-1 text-[12px]"
+            :disabled="busy || !env.inTavern"
+            title="根据当前新聊天已归档的新摘要进度，立即校准旧档摘要的开启与冷存状态"
+            @click="doApplyLegacyPreset('auto_progress')"
+          >
+            按当前新战局进度智能校准
+          </button>
+          <button
+            type="button"
+            class="sum-btn px-2.5 py-1 text-[12px]"
+            :disabled="busy || !env.inTavern"
+            title="前情总纲常驻 + 10卷大摘要绿灯开启 + 末尾近场 3 段阶段纪要开启（其余 37 段冷存）"
+            @click="doApplyLegacyPreset('opening_handoff')"
+          >
+            恢复开局接力态
+          </button>
+          <button
+            type="button"
+            class="sum-btn px-2.5 py-1 text-[12px]"
+            :disabled="busy || !env.inTavern"
+            title="前情总纲转为按需绿灯 + 仅保留最后 1 卷旧档大摘要按需开启，其余全部冷存关闭"
+            @click="doApplyLegacyPreset('selective_minimal')"
+          >
+            省流按需态
+          </button>
+          <button
+            type="button"
+            class="sum-btn sum-btn--danger px-2.5 py-1 text-[12px]"
+            :disabled="busy || !env.inTavern"
+            title="将全部旧档继承摘要（含前情总纲、旧档大摘要、旧档阶段纪要）设为冷存关闭，0 Token 占用"
+            @click="doApplyLegacyPreset('cold_all')"
+          >
+            全部冷存关闭 (0 tok)
+          </button>
+        </div>
+
+        <!-- 展开的旧档继承摘要列表 -->
+        <div v-if="showLegacyList" class="mt-2 max-h-96 overflow-y-auto pr-1">
+          <div
+            v-for="leg in legacyEntries"
+            :key="leg.comment"
+            class="mt-1.5 rounded border border-[var(--rac-dim)] bg-[var(--rac-bg)] px-3 py-2 transition-opacity"
+            :class="leg.entry.enabled === false ? 'opacity-65' : ''"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div
+                class="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-2"
+                @click="toggleExpandLegacy(leg.comment)"
+              >
+                <span
+                  class="rounded border px-1.5 py-0.5 font-mono text-[11px] font-semibold"
+                  :class="
+                    leg.kind === 'overview'
+                      ? 'border-[var(--rac-ok)]/50 bg-[var(--rac-ok)]/20 text-[var(--rac-ok)]'
+                      : leg.kind === 'legacy_macro'
+                        ? 'border-[var(--rac-focus)]/50 bg-[var(--rac-focus)]/20 text-[var(--rac-hi)]'
+                        : 'border-[var(--rac-warn)]/50 bg-[var(--rac-warn)]/20 text-[var(--rac-warn)]'
+                  "
+                >
+                  {{ leg.kind === 'overview' ? '前情总纲' : leg.kind === 'legacy_macro' ? '旧档大摘要' : '旧档阶段纪要' }}
+                </span>
+                <span class="font-mono text-xs font-bold text-[var(--rac-hi)]">
+                  {{ leg.comment }}
+                </span>
+                <span class="font-mono text-[11px] text-[var(--rac-accent)]">
+                  ~{{ estimateTextTokens(leg.entry.content ?? '') }} tok
+                </span>
+                <span
+                  v-if="leg.entry.enabled === false"
+                  class="rounded border border-[var(--rac-dim)] bg-[var(--rac-panel)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--rac-muted)]"
+                >
+                  ○ 已冷存关闭
+                </span>
+                <span v-else class="font-mono text-[12px] text-[var(--rac-text)]">
+                  {{ leg.entry.strategy?.type === 'selective' ? '● 按关键词触发' : '◆ 常驻注入' }}
+                </span>
+                <span class="font-mono text-[12px] text-[var(--rac-accent)] hover:underline">
+                  {{ expandedLegacyKeys.has(leg.comment) ? '收起 ▲' : '查阅 ▼' }}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                class="sum-btn px-2.5 py-1 text-[12px]"
+                :class="leg.entry.enabled === false ? 'sum-btn--primary' : ''"
+                :disabled="busy || !env.inTavern"
+                @click="doToggleLegacySingle(leg)"
+              >
+                {{ leg.entry.enabled === false ? '唤醒启用' : '冷存关闭' }}
+              </button>
+            </div>
+
+            <div
+              v-if="expandedLegacyKeys.has(leg.comment)"
+              class="mt-2 border-t border-[var(--rac-dim)] pt-2"
+            >
+              <div
+                v-if="Array.isArray(leg.entry.strategy?.keys) && leg.entry.strategy.keys.length"
+                class="mb-2 flex flex-wrap gap-1.5"
+              >
+                <span
+                  v-for="k in leg.entry.strategy.keys"
+                  :key="k"
+                  class="rounded border border-[var(--rac-accent)]/30 bg-[var(--rac-accent)]/15 px-2 py-0.5 font-mono text-[11px] text-[var(--rac-accent)]"
+                >
+                  #{{ k }}
+                </span>
+              </div>
+              <div class="whitespace-pre-wrap leading-relaxed text-[var(--rac-text)]">
+                {{ leg.entry.content || '（无正文内容）' }}
+              </div>
             </div>
           </div>
         </div>
@@ -1349,9 +1552,11 @@ import {
   computeSummaryContextBreakdown,
   discardSummary,
   estimateTextTokens,
+  extractLegacySummaryEntries,
   extractSummaryRanges,
   formatFloor,
   formatMicroSummariesForPrompt,
+  getLegacySummaryAutoManage,
   getSummaryAutoConfirm,
   getSummaryBudgetConfig,
   getSummaryChannel,
@@ -1361,13 +1566,16 @@ import {
   getSummaryTrigger,
   hideRange,
   isHidingGateApproved,
+  manageLegacySummaryEntries,
   nextMacroSummaryCandidate,
   nextSummaryRange,
+  optimizeSummaryWorldbookEntries,
   probeHiddenFloorEffects,
   renderSummaryComment,
   requestMacroSummary,
   requestSummary,
   setHidingGateApproved,
+  setLegacySummaryAutoManage,
   setSummaryAutoConfirm,
   setSummaryBudgetConfig,
   setSummaryChannel,
@@ -1375,8 +1583,11 @@ import {
   setSummaryFloorHandling,
   setSummaryStrategy,
   setSummaryTrigger,
+  toggleSummarySavedEnabled,
   unhideRange,
   upsertMicroSummary,
+  type LegacySummaryEntryInfo,
+  type LegacySummaryPresetMode,
   type ProbeReport,
   type SummaryBudgetConfig,
   type SummaryBudgetPresetKey,
@@ -1440,6 +1651,10 @@ const busy = ref(false);
 const infoMsg = ref('');
 const errorMsg = ref('');
 const savedRanges = ref<SummaryRangeInfo[]>([]);
+const legacyEntries = ref<LegacySummaryEntryInfo[]>([]);
+const showLegacyList = ref(false);
+const expandedLegacyKeys = ref<Set<string>>(new Set());
+const legacyAutoManage = ref<boolean>(getLegacySummaryAutoManage());
 const rawChatMessages = ref<Array<{ message_id: number; message?: string; is_hidden?: boolean }>>([]);
 const expandedSavedKeys = ref<Set<string>>(new Set());
 const boundBookName = ref<string | null>(null);
@@ -1459,6 +1674,20 @@ function toggleExpandSaved(r: SummaryRangeInfo) {
   if (next.has(key)) next.delete(key);
   else next.add(key);
   expandedSavedKeys.value = next;
+}
+function toggleExpandLegacy(comment: string) {
+  const next = new Set(expandedLegacyKeys.value);
+  if (next.has(comment)) next.delete(comment);
+  else next.add(comment);
+  expandedLegacyKeys.value = next;
+}
+function toggleLegacyAutoManage() {
+  const next = !legacyAutoManage.value;
+  legacyAutoManage.value = next;
+  setLegacySummaryAutoManage(next);
+  infoMsg.value = next
+    ? '已开启「旧档继承战史随新战局推进自动退居/冷存」'
+    : '已关闭旧档战史自动退居（将保持当前手动启停状态）';
 }
 
 // 设置项与三档预算响应式
@@ -1564,6 +1793,22 @@ const pendingSummaries = computed(() => store.data.pending_summaries ?? []);
 const microSummaries = computed<MicroSummaryItem[]>(() => store.data.micro_summaries ?? []);
 const reversedMicroSummaries = computed(() => [...microSummaries.value].sort((a, b) => b.floor - a.floor));
 
+// 当前战局常驻高频专名（指挥官、主责副官、在役机娘、基地名称），用于净化 selective 摘要触发词防止每轮 100% 误触发
+const currentExcludeNames = computed<string[]>(() => {
+  const names = new Set<string>();
+  const cmd = store.data.meta?.commander?.trim();
+  const adj = store.data.meta?.adjutant_girl?.trim();
+  if (cmd) names.add(cmd);
+  if (adj) names.add(adj);
+  for (const g of store.data.forces?.girls ?? []) {
+    if (g?.name?.trim()) names.add(g.name.trim());
+  }
+  for (const b of store.data.bases ?? []) {
+    if (b?.name?.trim()) names.add(b.name.trim());
+  }
+  return [...names];
+});
+
 // 读取当前最新楼层号
 function readCurrentFloor(): number {
   const getLastId = tav<() => number>('getLastMessageId');
@@ -1603,6 +1848,7 @@ const unsummarizedCount = computed(() => {
 const breakdown = computed(() =>
   computeSummaryContextBreakdown({
     savedRanges: savedRanges.value,
+    legacyEntries: legacyEntries.value,
     microSummaries: microSummaries.value,
     rawMessages: rawChatMessages.value,
     hiddenRangeKeys: hiddenRangesSet.value,
@@ -1670,6 +1916,7 @@ async function refreshRanges() {
     }
     const entries = await getWb(book);
     savedRanges.value = extractSummaryRanges(entries);
+    legacyEntries.value = extractLegacySummaryEntries(entries);
     if (getMsgs) {
       const nextHidden = new Set<string>();
       for (const r of savedRanges.value) {
@@ -1744,6 +1991,7 @@ async function doAdopt(draft: SummaryDraft, index: number) {
       floorHandling: floorHandlingMode.value,
       currentFloor: currentFloor.value,
       tailReserve: budgetDraft.tailReserveFloors,
+      excludeNames: currentExcludeNames.value,
       onAdopted: () => {
         if (index >= 0 && index < store.data.pending_summaries.length) {
           store.data.pending_summaries.splice(index, 1);
@@ -1768,7 +2016,11 @@ async function doAdopt(draft: SummaryDraft, index: number) {
       receipt.demotedMesoComments && receipt.demotedMesoComments.length > 0
         ? `，已将 ${receipt.demotedMesoComments.length} 段旧阶段摘要转为按关键词触发`
         : '';
-    infoMsg.value = `已将 ${receipt.comment} 归档至《${receipt.book}》${receipt.hidden ? `并隐藏 ${receipt.hiddenFloors.length} 楼原文` : ''}${demotedNote}`;
+    const coldNote =
+      receipt.coldArchivedMesoComments && receipt.coldArchivedMesoComments.length > 0
+        ? `，并自动冷存 ${receipt.coldArchivedMesoComments.length} 段早期已归并阶段摘要`
+        : '';
+    infoMsg.value = `已将 ${receipt.comment} 归档至《${receipt.book}》${receipt.hidden ? `并隐藏 ${receipt.hiddenFloors.length} 楼原文` : ''}${demotedNote}${coldNote}`;
     await refreshRanges();
   } catch (e) {
     errorMsg.value = `归档失败: ${e instanceof Error ? e.message : String(e)}`;
@@ -1827,6 +2079,103 @@ async function doDiscardPending(index: number) {
     await syncPendingSummariesToFloor();
   } catch (e) {
     errorMsg.value = `舍弃草稿保存失败: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+/** 单条已归档摘要启停（唤醒启用 / 冷存关闭）切换 */
+async function doToggleSavedEnabled(r: SummaryRangeInfo) {
+  busy.value = true;
+  infoMsg.value = '';
+  errorMsg.value = '';
+  const targetEnabled = r.entry.enabled === false;
+  try {
+    const res = await toggleSummarySavedEnabled(r.from, r.to, targetEnabled, chatBookGateway, {
+      tier: r.tier === 'macro' ? 'macro' : 'meso',
+    });
+    infoMsg.value = targetEnabled
+      ? `已唤醒启用「${res.entryName}」（重新参与世界书注入）`
+      : `已冷存关闭「${res.entryName}」（保留在世界书中但暂停注入，释放上下文预算）`;
+    await refreshRanges();
+  } catch (e) {
+    errorMsg.value = `切换摘要启停状态失败: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** 一键按预算滑窗自动冷存远期已归并中摘要并净化触发词 */
+async function doSmartOptimizeWindow() {
+  busy.value = true;
+  infoMsg.value = '';
+  errorMsg.value = '';
+  try {
+    const res = await optimizeSummaryWorldbookEntries(chatBookGateway, {
+      budgetConfig: budgetDraft,
+      keepRecentCoveredMesoCount: 0,
+      excludeNames: currentExcludeNames.value,
+    });
+    const parts: string[] = [];
+    if (res.disabledComments.length > 0) parts.push(`自动冷存 ${res.disabledComments.length} 条远期摘要`);
+    if (res.enabledComments.length > 0) parts.push(`恢复启用 ${res.enabledComments.length} 条近场摘要`);
+    if (res.demotedMacroComments.length > 0) parts.push(`将 ${res.demotedMacroComments.length} 卷超预算早期大摘要转为按需触发`);
+    if (res.sanitizedKeyEntryCount > 0) parts.push(`净化 ${res.sanitizedKeyEntryCount} 条摘要的高频泛触发词`);
+    infoMsg.value =
+      parts.length > 0
+        ? `智能滑窗优化完成（${parts.join('，')}）`
+        : '当前世界书摘要条目已处于最优滑窗与去泛词状态';
+    await refreshRanges();
+  } catch (e) {
+    errorMsg.value = `智能滑窗优化失败: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** 切换旧档继承战史预设模式（按新战局进度校准 / 开局接力态 / 省流按需态 / 全部冷存） */
+async function doApplyLegacyPreset(mode: LegacySummaryPresetMode) {
+  busy.value = true;
+  infoMsg.value = '';
+  errorMsg.value = '';
+  try {
+    const res = await manageLegacySummaryEntries(
+      { mode },
+      chatBookGateway,
+      { excludeNames: currentExcludeNames.value },
+    );
+    const labelMap: Record<LegacySummaryPresetMode, string> = {
+      auto_progress: `已按新战局进度智能校准旧档战史（阶段=${res.phase}，新冷存 ${res.disabledComments.length} 条，唤醒 ${res.enabledComments.length} 条）`,
+      opening_handoff: '已恢复旧档战史为「开局接力态」（前情总纲常驻 + 大摘要绿灯 + 近场 3 段阶段纪要开启）',
+      selective_minimal: '已切换旧档战史为「省流按需态」（前情总纲与收官大摘要按需绿灯，其余全部冷存）',
+      cold_all: `已将全部旧档继承战史设为冷存关闭（共冷存 ${res.disabledComments.length} 条，当前 0 Token 占用）`,
+    };
+    infoMsg.value = labelMap[mode];
+    await refreshRanges();
+  } catch (e) {
+    errorMsg.value = `切换旧档战史模式失败: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** 单独切换某一条旧档继承摘要的启用/冷存状态 */
+async function doToggleLegacySingle(item: LegacySummaryEntryInfo) {
+  busy.value = true;
+  infoMsg.value = '';
+  errorMsg.value = '';
+  const targetEnabled = item.entry.enabled === false;
+  try {
+    await manageLegacySummaryEntries(
+      { mode: 'toggle_single', comment: item.comment, enabled: targetEnabled },
+      chatBookGateway,
+    );
+    infoMsg.value = targetEnabled
+      ? `已唤醒启用旧档条目「${item.comment}」`
+      : `已冷存关闭旧档条目「${item.comment}」`;
+    await refreshRanges();
+  } catch (e) {
+    errorMsg.value = `切换旧档条目失败: ${e instanceof Error ? e.message : String(e)}`;
+  } finally {
+    busy.value = false;
   }
 }
 

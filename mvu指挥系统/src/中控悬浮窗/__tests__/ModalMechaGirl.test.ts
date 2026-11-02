@@ -188,8 +188,8 @@ describe('ModalMechaGirl · 四维「军备管理」模态框组件测试 (ARM-0
     // 标题与作用域按钮
     expect(html).toContain('军备管理 · ARMAMENT');
     expect(html).toContain('战区全局 ALL');
-    expect(html).toContain('📍 一号基地');
-    expect(html).toContain('📍 二号基地');
+    expect(html).toContain('◆ 一号基地');
+    expect(html).toContain('◆ 二号基地');
 
     // 四维 Tab 导航
     expect(html).toContain('机娘编成');
@@ -295,7 +295,7 @@ describe('ModalMechaGirl · 四维「军备管理」模态框组件测试 (ARM-0
     });
 
     expect(html).toContain('data-test="girl-unchristened-badge"');
-    expect(html).toContain('✨ 待指挥官赐名');
+    expect(html).toContain('★ 待指挥官赐名');
     expect(html).toContain('data-test="girl-serial-chip"');
     expect(html).toContain('编号: 犀牛-02');
     expect(html).toContain('data-test="girl-seq-chip"');
@@ -304,7 +304,7 @@ describe('ModalMechaGirl · 四维「军备管理」模态框组件测试 (ARM-0
     expect(html).toContain('机体与外貌特征');
     expect(html).toContain('158cm娇小紧致型纳米躯体');
     expect(html).toContain('data-test="girl-shell-deferred"');
-    expect(html).toContain('🔒 基地内勤 · 尚未安排对外伪装身份');
+    expect(html).toContain('◆ 基地内勤 · 尚未安排对外伪装身份');
   });
 
   it('指挥官赐名并从聊天世界书回读 [出厂编号] / [躯体特征] / <数据> 块：合并 forces.girls 与 pending_lore 并完整展示代号、编号、序列与躯体特征 (MAIDEN-UI-01)', async () => {
@@ -394,7 +394,7 @@ describe('ModalMechaGirl · 四维「军备管理」模态框组件测试 (ARM-0
     expect(html).toContain('编号: 犀牛-02');
     expect(html).toContain('次生二号机');
     expect(html).toContain('158cm娇小紧致型纳米躯体，锁骨浮现暗红散热微流道');
-    expect(html).toContain('🔒 基地内勤 · 尚未安排对外伪装身份');
+    expect(html).toContain('◆ 基地内勤 · 尚未安排对外伪装身份');
   });
 
   it('修复 <数据> 块内暴露分档为空时误捕获 </数据> 的 Bug，剥离世界书原始 <数据> 标签并在人员兵力 Tab 展示在编军官', async () => {
@@ -466,7 +466,7 @@ describe('ModalMechaGirl · 四维「军备管理」模态框组件测试 (ARM-0
     // 绝不渲染 </数据> 或 <数据>
     expect(girlsHtml).not.toContain('&lt;/数据&gt;');
     expect(girlsHtml).not.toContain('</数据>');
-    expect(girlsHtml).toContain('🟢 常规伪装（基地内勤）');
+    expect(girlsHtml).toContain('● 常规伪装（基地内勤）');
     expect(girlsHtml).toContain('冷色调作训服外搭工程外骨骼轻挂件');
     expect(girlsHtml).toContain('严谨克制，注重工程规程与时效');
     expect(girlsHtml).toContain('默契协作');
@@ -593,7 +593,7 @@ describe('ModalMechaGirl · 四维「军备管理」模态框组件测试 (ARM-0
     expect(base1VehiclesHtml).toContain('data-testid="vehicle-girl-badge-犀牛坦克-赤星"');
     expect(base1VehiclesHtml).toContain('★ 赤星专属座驾');
 
-    // 3. 北坡主基地人员页签：展示「■ 在册参谋与重要人物」紧凑名录条
+    // 3. 北坡主基地人员页签：展示「◆ 在册参谋与重要人物」紧凑名录条
     const base1PersonnelHtml = await renderArmoryModal({
       snapshot: snap,
       initialScope: '北坡主基地',
@@ -605,5 +605,55 @@ describe('ModalMechaGirl · 四维「军备管理」模态框组件测试 (ARM-0
     expect(base1PersonnelHtml).toContain('北坡镇镇长');
     expect(base1PersonnelHtml).toContain('友善');
     expect(base1PersonnelHtml).toContain('85');
+  });
+
+  it('FD-54 W2：当机娘 status 为 50 字叙事长句且 base 为 base_1 时，自动解析正式基地名、右上角渲染简短「执勤中」徽章，并渲染搜索框、子视图切换器与窗口尺寸按钮', async () => {
+    const longStatus =
+      '坐镇暗河地下主基地主控室，逆向拆解圣诞夜缴获的荒坂车载卫星通讯终端，并持续监控北坡电磁静默帷幕';
+    const html = await renderArmoryModal({
+      snapshot: {
+        bases: [
+          {
+            id: 'base_1',
+            name: '暗河地下主基地',
+          },
+        ],
+        girls: [
+          {
+            name: '白凌',
+            callsign: 'Zero',
+            serial: 'MCV-A01',
+            seq: '1号原型机',
+            model: '盟军机动建设车',
+            faction: '盟军',
+            affection: 95,
+            obedience: 99,
+            status: longStatus,
+            duty: '主基地总控与纳米建造中枢',
+            base: 'base_1',
+            exposure:
+              'EL-0 (无痕：微距扫描与日用品静默细织) / EL-2 (局部交战：大件整夜满负荷纳米织造) / EL-3 (高烈度展开：MCV本体展开落桩)',
+          },
+        ],
+      },
+      initialScope: 'ALL',
+      initialTab: 'girls',
+    });
+
+    // base_1 已自动解析为正式名称「暗河地下主基地」
+    expect(html).toContain('◆ 暗河地下主基地');
+    // 右上角状态徽章为简短「执勤中」
+    expect(html).toContain('data-hp="执勤中"');
+    expect(html).toContain('执勤中');
+    // 50 字叙事长句完整呈现在动态摘要中
+    expect(html).toContain(longStatus);
+    // 多档暴露分档结构化呈现
+    expect(html).toContain('EL-0');
+    expect(html).toContain('EL-2');
+    expect(html).toContain('EL-3');
+    // 新增交互控件 testid 完整存在
+    expect(html).toContain('data-testid="armory-search-input"');
+    expect(html).toContain('data-testid="girl-detail-view-switch"');
+    expect(html).toContain('data-testid="armory-modal-size-btn"');
   });
 });

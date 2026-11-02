@@ -299,6 +299,8 @@ export interface WorldbookDataBase {
   tags: string[];
   faction?: string;
   scope?: string;
+  /** 是否可通过我方红警系统建造/生产/研发（缺省 true；战利品孤品、敌方专属制式、外部世界造物或情报道具设为 false） */
+  buildable?: boolean;
   requirements?: PrerequisiteCondition;
 }
 
@@ -351,6 +353,7 @@ export const WorldbookBuildingDataSchema = z
     icon: z.string().optional(),
     faction: z.string().optional(),
     scope: z.string().optional(),
+    buildable: z.boolean().optional(),
     system: z.enum(['military', 'defense', 'agro', 'industry', 'research_space']).optional(),
     system_group: z.string().optional(),
     standalone: z.boolean().optional(),
@@ -421,6 +424,7 @@ export const WorldbookResearchDataSchema = z
     aliases: z.array(z.string()).optional(),
     scope: z.string().optional(),
     faction: z.string().optional(),
+    buildable: z.boolean().optional(),
     pack: z.string().optional(),
     status: z.string().optional(),
     replaced_by: z.string().optional(),
@@ -490,6 +494,7 @@ export const WorldbookProductionDataSchema = z
     category: WorldbookProductionCategorySchema.optional(),
     faction: z.string().optional(),
     scope: z.string().optional(),
+    buildable: z.boolean().optional(),
     aliases: z.array(z.string()).optional(),
     max_count: z.number().int().positive().optional(),
     eta: z.string().optional(),

@@ -42,6 +42,7 @@
 
 import type { ChatBookGatewayLike, WriteTxn } from './chatBookBinding';
 import { chatBookGateway } from './chatBookBinding';
+import { FORBIDDEN_GENERIC_TRIGGER_KEYS } from './expansionFiler';
 import { recordFlightLog } from '../debug/dataFlowTracer';
 import type { ThEntry } from './girlFiler';
 import type { MicroSummaryItem, SummaryDraft, SummaryTier } from '../core/schema';
@@ -52,6 +53,9 @@ import { tav } from '../parse/systemCheck';
 export const SUMMARY_PREFIX = '摘要·';
 export const MACRO_SUMMARY_PREFIX = '摘要·大·';
 export const MESO_SUMMARY_ALT_PREFIX = '摘要·中·';
+export const LEGACY_OVERVIEW_COMMENT = '00·前情战史总纲（继承自旧档）';
+export const LEGACY_MACRO_PREFIX = '前情卷宗·大·';
+export const LEGACY_MESO_PREFIX = '旧档阶段纪要·';
 export const DEFAULT_SUMMARY_N = 20; // 提案值：每 N=20 楼触发提醒 / 预生成
 export const DEFAULT_MACRO_MESO_COUNT = 4; // 提案值：每 K=4 段中摘要可归并生成 1 条大摘要
 export const DEFAULT_TAIL_RESERVE = 10; // 提案值：尾部保留带 M=10 楼保持近场原文精度
@@ -69,6 +73,7 @@ export const SUMMARY_CHANNEL_KEY = 'redalert_summary_channel';
 export const SUMMARY_ENDPOINT_KEY = 'redalert_summary_endpoint_config';
 export const SUMMARY_BUDGET_CONFIG_KEY = 'redalert_summary_budget_config';
 export const SUMMARY_AUTO_CONFIRM_KEY = 'redalert_summary_auto_confirm';
+export const SUMMARY_LEGACY_AUTO_MANAGE_KEY = 'redalert_summary_legacy_auto_manage';
 
 export type SummaryStrategy = 'constant' | 'selective';
 export type SummaryTrigger = 'manual' | 'auto';
@@ -182,6 +187,38 @@ export interface SummaryContextBreakdown {
   mesoBudgetUsagePct: number;
   microBudgetUsagePct: number;
   summaryBudgetUsagePct: number;
+  /** 已冷存关闭（enabled === false）的历史摘要条数与未注入 Token 总量 */
+  coldArchivedCount?: number;
+  coldArchivedTokens?: number;
+  /** 旧档继承摘要统计（活跃开启数、已冷存数、活跃 Token、冷存省流 Token） */
+  legacyActiveCount?: number;
+  legacyColdCount?: number;
+  legacyActiveTokens?: number;
+  legacyColdTokens?: number;
+}
+
+export type LegacySummaryKind = 'overview' | 'legacy_macro' | 'legacy_meso';
+
+export interface LegacySummaryEntryInfo {
+  comment: string;
+  kind: LegacySummaryKind;
+  from: number;
+  to: number;
+  entry: ThEntry;
+}
+
+export type LegacySummaryPresetMode = 'auto_progress' | 'opening_handoff' | 'selective_minimal' | 'cold_all';
+
+export type LegacySummaryControlAction =
+  | { mode: LegacySummaryPresetMode }
+  | { mode: 'toggle_single'; comment: string; enabled: boolean };
+
+export interface LegacySummaryReconcileResult {
+  entries: ThEntry[];
+  phase: 'opening_handoff' | 'early_progress' | 'mature_progress' | 'manual_preset';
+  disabledComments: string[];
+  enabledComments: string[];
+  demotedOverviewComments: string[];
 }
 
 export interface SummaryEndpointConfig {
@@ -217,6 +254,7 @@ export interface SummaryUpsertResult {
   action: 'created' | 'updated';
   entryName: string;
   demotedMesoComments?: string[];
+  coldArchivedMesoComments?: string[];
 }
 
 export interface FileSummaryReceipt {
@@ -227,6 +265,7 @@ export interface FileSummaryReceipt {
   action: 'created' | 'updated';
   tier?: SummaryTier;
   demotedMesoComments?: string[];
+  coldArchivedMesoComments?: string[];
 }
 
 export interface DiscardSummaryReceipt {
@@ -246,6 +285,7 @@ export interface AdoptSummaryReceipt {
   hiddenFloors: number[];
   tier?: SummaryTier;
   demotedMesoComments?: string[];
+  coldArchivedMesoComments?: string[];
 }
 
 export interface ProbeReport {
@@ -322,6 +362,19 @@ export function getSummaryAutoConfirm(storage?: Storage): boolean {
 export function setSummaryAutoConfirm(val: boolean, storage?: Storage): void {
   const s = resolveStorage(storage);
   s?.setItem(SUMMARY_AUTO_CONFIRM_KEY, val ? 'true' : 'false');
+}
+
+/** 是否开启「旧档继承摘要随新战局推进自动退居/冷存」智能开关（默认 true 开启） */
+export function getLegacySummaryAutoManage(storage?: Storage): boolean {
+  const s = resolveStorage(storage);
+  const val = s?.getItem(SUMMARY_LEGACY_AUTO_MANAGE_KEY);
+  if (val === 'false' || val === 'manual') return false;
+  return true;
+}
+
+export function setLegacySummaryAutoManage(val: boolean, storage?: Storage): void {
+  const s = resolveStorage(storage);
+  s?.setItem(SUMMARY_LEGACY_AUTO_MANAGE_KEY, val ? 'true' : 'false');
 }
 
 export function getSummaryChannel(storage?: Storage): SummaryChannel {
@@ -484,6 +537,7 @@ export function estimateTextTokens(text: string | null | undefined): number {
  */
 export function computeSummaryContextBreakdown(params: {
   savedRanges: SummaryRangeInfo[];
+  legacyEntries?: LegacySummaryEntryInfo[];
   microSummaries: MicroSummaryItem[];
   rawMessages?: Array<{ message_id: number; message?: string; is_hidden?: boolean }>;
   hiddenRangeKeys?: Set<string> | string[];
@@ -503,11 +557,26 @@ export function computeSummaryContextBreakdown(params: {
   let mesoConstantTokens = 0;
   let mesoSelectiveTokens = 0;
   let mesoCount = 0;
+  let coldArchivedCount = 0;
+  let coldArchivedTokens = 0;
+  let legacyActiveCount = 0;
+  let legacyColdCount = 0;
+  let legacyActiveTokens = 0;
+  let legacyColdTokens = 0;
   let maxSummarizedFloor = 0;
 
   for (const r of params.savedRanges ?? []) {
     const tok = estimateTextTokens(r.entry?.content ?? '');
     const tier = r.tier ?? parseSummaryCommentWithTier(r.entry?.comment ?? r.entry?.name ?? '')?.tier ?? 'meso';
+    if (tier !== 'macro' && r.to > maxSummarizedFloor) {
+      maxSummarizedFloor = r.to;
+    }
+    // 已冷存关闭（enabled === false）的摘要条目不会进入酒馆上下文注入，不计入活跃 Token 占用
+    if (r.entry?.enabled === false) {
+      coldArchivedCount++;
+      coldArchivedTokens += tok;
+      continue;
+    }
     if (tier === 'macro') {
       macroTokens += tok;
       macroCount++;
@@ -519,7 +588,31 @@ export function computeSummaryContextBreakdown(params: {
       } else {
         mesoConstantTokens += tok;
       }
-      if (r.to > maxSummarizedFloor) maxSummarizedFloor = r.to;
+    }
+  }
+
+  for (const leg of params.legacyEntries ?? []) {
+    const tok = estimateTextTokens(leg.entry?.content ?? '');
+    if (leg.entry?.enabled === false) {
+      legacyColdCount++;
+      legacyColdTokens += tok;
+      coldArchivedCount++;
+      coldArchivedTokens += tok;
+      continue;
+    }
+    legacyActiveCount++;
+    legacyActiveTokens += tok;
+    if (leg.kind === 'overview' || leg.kind === 'legacy_macro') {
+      macroTokens += tok;
+      macroCount++;
+    } else {
+      mesoTokens += tok;
+      mesoCount++;
+      if (leg.entry?.strategy?.type === 'selective') {
+        mesoSelectiveTokens += tok;
+      } else {
+        mesoConstantTokens += tok;
+      }
     }
   }
 
@@ -608,6 +701,12 @@ export function computeSummaryContextBreakdown(params: {
     mesoBudgetUsagePct: pct(mesoTokens, cfg.mesoBudgetTokens),
     microBudgetUsagePct: pct(microTokens, cfg.microBudgetTokens),
     summaryBudgetUsagePct: pct(summaryTotalTokens, summaryBudgetTotal),
+    coldArchivedCount,
+    coldArchivedTokens,
+    legacyActiveCount,
+    legacyColdCount,
+    legacyActiveTokens,
+    legacyColdTokens,
   };
 }
 
@@ -816,14 +915,14 @@ export function parseSummaryCommentWithTier(
   comment: string,
 ): { from: number; to: number; tier: 'meso' | 'macro' } | null {
   const trimmed = comment.trim();
-  const macroMatch = /^摘要·大·(\d+)-(\d+)$/.exec(trimmed);
+  const macroMatch = /^摘要·大·(\d+)-(\d+)(?:$|·|\s)/.exec(trimmed);
   if (macroMatch) {
     const from = Number(macroMatch[1]);
     const to = Number(macroMatch[2]);
     if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return null;
     return { from, to, tier: 'macro' };
   }
-  const mesoMatch = /^摘要·(?:中·)?(\d+)-(\d+)$/.exec(trimmed);
+  const mesoMatch = /^摘要·(?:中·)?(\d+)-(\d+)(?:$|·|\s)/.exec(trimmed);
   if (mesoMatch) {
     const from = Number(mesoMatch[1]);
     const to = Number(mesoMatch[2]);
@@ -854,7 +953,7 @@ export function resolveSummaryEntryTier(entry: ThEntry): 'meso' | 'macro' {
 }
 
 /**
- * 提取世界书中的全部摘要条目区间信息：
+ * 提取世界书中的全部当前聊天摘要条目区间信息（严格仅匹配 `摘要·` 前缀，与 `extractLegacySummaryEntries` 物理隔离）：
  * 条目 extra 为区间唯一真源（机读 {from, to} 优先；缺失时 fallback 解析 comment）。
  * 可选 filterTier 过滤 'meso' | 'macro' | 'all'（默认 'all'）。
  */
@@ -921,6 +1020,19 @@ export function pruneSummariesAboveFloor(
     const comment = String(e.comment || '');
     const parsed = parseSummaryCommentWithTier(name) || parseSummaryCommentWithTier(comment);
     const extra = e.extra as Record<string, unknown> | undefined;
+    if (
+      extra?.legacy === true ||
+      typeof extra?.legacyMacroFrom === 'number' ||
+      typeof extra?.legacyMesoFrom === 'number' ||
+      name.startsWith('前情卷宗·') ||
+      comment.startsWith('前情卷宗·') ||
+      name.startsWith('旧档阶段纪要·') ||
+      comment.startsWith('旧档阶段纪要·')
+    ) {
+      // 跨战局继承的旧档历史摘要不随新聊天初期低楼层号被当作越界未来摘要误删
+      keptEntries.push(e);
+      continue;
+    }
     const extraFrom = typeof extra?.from === 'number' && Number.isFinite(extra.from) ? extra.from : undefined;
     const extraTo = typeof extra?.to === 'number' && Number.isFinite(extra.to) ? extra.to : undefined;
     const isSummaryPrefix = name.startsWith(SUMMARY_PREFIX) || comment.startsWith(SUMMARY_PREFIX);
@@ -968,7 +1080,18 @@ export function nextSummaryRange(
   tailReserve: number = DEFAULT_TAIL_RESERVE,
   opts?: { maxSpan?: number },
 ): SummaryRange | null {
-  const ranges = extractSummaryRanges(entries);
+  const ranges = extractSummaryRanges(entries).filter(r => {
+    const ex = r.entry.extra as Record<string, unknown> | undefined;
+    const cmt = String(r.entry.comment || r.entry.name || '');
+    const isLegacy =
+      ex?.legacy === true ||
+      typeof ex?.legacyMacroFrom === 'number' ||
+      typeof ex?.legacyMesoFrom === 'number' ||
+      cmt.startsWith('前情卷宗·') ||
+      cmt.startsWith('旧档阶段纪要·');
+    // 若在新聊天接力续写（currentFloor 远小于旧档终局楼层），旧档继承摘要不阻塞新聊天 1~currentFloor 的摘要指针
+    return !(isLegacy && r.to > currentFloor);
+  });
   const maxTo = ranges.length ? Math.max(...ranges.map(r => r.to)) : 0;
   const from = maxTo > 0 ? maxTo + 1 : 1;
   const rawTo = currentFloor - tailReserve;
@@ -1013,10 +1136,88 @@ export function nextMacroSummaryCandidate(
  * - recursion: prevent_incoming: true；
  * - extra 记机读元数据 {from, to, generatedAt, model}，作为唯一真源。
  */
+export interface SanitizeSummaryTriggerKeysOptions {
+  /** 需要剔除的常驻角色/基地名称（如当前指挥官姓名、在役机娘姓名、基地名称），防止 selective 绿灯词条每轮 100% 误触发 */
+  excludeNames?: readonly string[];
+  /** 当所有候选词均被过滤为空时，使用区间锚点 `#001-020` 作为保底触发词 */
+  fallbackRange?: { from: number; to: number };
+  /** 最大保留触发词数量，默认 8 */
+  maxKeys?: number;
+}
+
+/**
+ * 净化摘要条目的绿灯（selective）触发关键词：
+ * 1. 过滤 `FORBIDDEN_GENERIC_TRIGGER_KEYS` 中的高频泛词（指挥官、基地、机娘、盟军、兵营、矿场等）；
+ * 2. 过滤传入的 `excludeNames`（如当前指挥官姓名、在役机娘姓名、主基地名；若含中点如“安娜·科瓦尔斯基”则同步过滤首段“安娜”）；
+ * 3. 过滤单字、纯数字与纯档位号（T1/T2/V1）；
+ * 4. 若全部过滤后为空且提供了 `fallbackRange`，自动以 `#001-020` 区间锚点保底，杜绝泛词污染导致的假休眠。
+ */
+export function sanitizeSummaryTriggerKeys(
+  rawKeys: readonly string[],
+  options?: SanitizeSummaryTriggerKeysOptions,
+): string[] {
+  const limit =
+    typeof options?.maxKeys === 'number' && Number.isFinite(options.maxKeys) && options.maxKeys > 0
+      ? Math.floor(options.maxKeys)
+      : 8;
+  const dynamicExcluded = new Set<string>();
+  for (const name of options?.excludeNames ?? []) {
+    const trimmed = String(name ?? '').trim();
+    if (!trimmed) continue;
+    dynamicExcluded.add(trimmed);
+    dynamicExcluded.add(trimmed.toLowerCase());
+    if (trimmed.includes('·')) {
+      const firstPart = trimmed.split('·')[0]?.trim();
+      if (firstPart && firstPart.length >= 2) {
+        dynamicExcluded.add(firstPart);
+        dynamicExcluded.add(firstPart.toLowerCase());
+      }
+    }
+  }
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawKeys ?? []) {
+    if (out.length >= limit) break;
+    const s = String(raw ?? '').trim();
+    if (!s || s.length < 2) continue;
+    if (/^\d+$/.test(s) || /^([tTvV]\d+)$/.test(s)) continue;
+    const lower = s.toLowerCase();
+    if (FORBIDDEN_GENERIC_TRIGGER_KEYS.has(s) || FORBIDDEN_GENERIC_TRIGGER_KEYS.has(lower)) continue;
+    if (dynamicExcluded.has(s) || dynamicExcluded.has(lower)) continue;
+    if (seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
+  }
+
+  if (out.length === 0 && options?.fallbackRange) {
+    const { from, to } = options.fallbackRange;
+    if (Number.isFinite(from) && Number.isFinite(to) && from > 0 && to >= from) {
+      out.push(`#${formatFloor(from)}-${formatFloor(to)}`);
+    }
+  }
+  return out;
+}
+
+export interface UpsertSummaryEntryOptions {
+  strategyType?: SummaryStrategy;
+  depth?: number;
+  demoteCoveredMeso?: boolean;
+  /**
+   * 采纳大摘要（Macro）时，对已被大摘要覆盖的阶段中摘要（Meso）的自动冷存关停策略：
+   * - 'older_macros'（默认）：保留最新一卷大摘要所覆盖的中摘要为绿灯开启（selective），将更早期大摘要覆盖的旧中摘要自动设为 enabled: false（冷存归档）；
+   * - 'all_covered'：将所有已被大摘要覆盖的中摘要立即设为 enabled: false（冷存归档）；
+   * - 'none'：仅降级为 selective 绿灯，不修改 enabled。
+   */
+  coldArchiveCoveredMeso?: 'older_macros' | 'all_covered' | 'none';
+  /** 常驻主角/机娘/基地名排除列表，用于净化 selective 触发词 */
+  excludeNames?: readonly string[];
+}
+
 export function upsertSummaryEntry(
   entries: ThEntry[],
   draft: SummaryDraft,
-  options?: { strategyType?: SummaryStrategy; depth?: number; demoteCoveredMeso?: boolean },
+  options?: UpsertSummaryEntryOptions,
 ): SummaryUpsertResult {
   const tier: 'meso' | 'macro' = draft.tier === 'macro' ? 'macro' : 'meso';
   const comment = renderSummaryComment(draft.from, draft.to, tier);
@@ -1031,8 +1232,15 @@ export function upsertSummaryEntry(
     return entryTier === tier && ex?.from === draft.from && ex?.to === draft.to;
   });
 
-  const keys = draft.keys && draft.keys.length > 0 ? [...new Set(draft.keys.map(k => k.trim()).filter(Boolean))] : [];
-  const selectiveKeys = keys.length > 0 ? keys : ['剧情摘要', '历史'];
+  const rawKeys = draft.keys && draft.keys.length > 0 ? [...new Set(draft.keys.map(k => k.trim()).filter(Boolean))] : [];
+  const keys =
+    options?.excludeNames && options.excludeNames.length > 0
+      ? sanitizeSummaryTriggerKeys(rawKeys, {
+          excludeNames: options.excludeNames,
+          fallbackRange: { from: draft.from, to: draft.to },
+        })
+      : rawKeys;
+  const selectiveKeys = keys.length > 0 ? keys : [`#${formatFloor(draft.from)}-${formatFloor(draft.to)}`];
 
   const strategy =
     strategyType === 'selective'
@@ -1050,8 +1258,10 @@ export function upsertSummaryEntry(
   };
 
   // 若当前写入的是【大摘要（Macro）】，自动将其所覆盖区间 [draft.from, draft.to] 内的【中摘要（Meso）】
-  // 从 constant（蓝灯常驻）降级为 selective（绿灯关键词触发），实现「大摘要常驻总纲 + 旧中摘要按需唤醒」
+  // 从 constant（蓝灯常驻）降级为 selective（绿灯关键词触发）并净化触发词，同时按冷存策略自动关停更早期的已覆盖中摘要
   const demotedMesoComments: string[] = [];
+  const coldArchivedMesoComments: string[] = [];
+  const coldPolicy = options?.coldArchiveCoveredMeso ?? 'older_macros';
   if (tier === 'macro' && options?.demoteCoveredMeso !== false) {
     for (const e of entries) {
       if (resolveSummaryEntryTier(e) !== 'meso') continue;
@@ -1061,13 +1271,22 @@ export function upsertSummaryEntry(
           ? { from: ex.from, to: ex.to }
           : parseSummaryComment(String(e.comment || e.name || ''));
       if (!parsed) continue;
+      const entryLabel = String(e.comment || e.name || renderSummaryComment(parsed.from, parsed.to));
       if (parsed.from >= draft.from && parsed.to <= draft.to) {
         const existingKeys = Array.isArray(e.strategy?.keys)
           ? (e.strategy.keys as string[]).filter(Boolean)
           : Array.isArray(ex.keys)
             ? (ex.keys as string[]).filter(Boolean)
             : [];
-        const mesoKeys = existingKeys.length > 0 ? existingKeys : selectiveKeys;
+        const mesoKeys = sanitizeSummaryTriggerKeys(existingKeys.length > 0 ? existingKeys : selectiveKeys, {
+          excludeNames: options?.excludeNames,
+          fallbackRange: parsed,
+        });
+        const shouldColdArchiveNow = coldPolicy === 'all_covered';
+        if (shouldColdArchiveNow) {
+          e.enabled = false;
+          coldArchivedMesoComments.push(entryLabel);
+        }
         e.strategy = {
           ...(e.strategy ?? {}),
           type: 'selective',
@@ -1076,9 +1295,21 @@ export function upsertSummaryEntry(
         };
         e.extra = {
           ...ex,
+          keys: mesoKeys,
           coveredByMacro: comment,
+          ...(shouldColdArchiveNow ? { coldArchived: true } : {}),
         };
-        demotedMesoComments.push(String(e.comment || e.name || renderSummaryComment(parsed.from, parsed.to)));
+        demotedMesoComments.push(entryLabel);
+      } else if (coldPolicy === 'older_macros' && parsed.to < draft.from && Boolean(ex.coveredByMacro)) {
+        // 当新一卷大摘要入档时，此前已被更早大摘要覆盖的远期中摘要自动转为冷存关闭（enabled = false）
+        if (e.enabled !== false) {
+          e.enabled = false;
+          e.extra = {
+            ...ex,
+            coldArchived: true,
+          };
+          coldArchivedMesoComments.push(entryLabel);
+        }
       }
     }
   }
@@ -1098,7 +1329,13 @@ export function upsertSummaryEntry(
     existing.recursion = { prevent_incoming: true, prevent_outgoing: true, delay_until: null };
     existing.extra = extra;
     return tier === 'macro'
-      ? { entries, action: 'updated', entryName: comment, demotedMesoComments }
+      ? {
+          entries,
+          action: 'updated',
+          entryName: comment,
+          demotedMesoComments,
+          ...(coldArchivedMesoComments.length > 0 ? { coldArchivedMesoComments } : {}),
+        }
       : { entries, action: 'updated', entryName: comment };
   }
 
@@ -1119,9 +1356,632 @@ export function upsertSummaryEntry(
     extra,
   });
 
+  // 当新聊天写入新摘要时，若开启了「旧档继承摘要智能托管」，自动根据新战局进度对旧档摘要执行阶梯退居/冷存
+  if (getLegacySummaryAutoManage()) {
+    const legRes = reconcileLegacySummariesWithProgress(entries, {
+      excludeNames: options?.excludeNames,
+    });
+    for (const c of legRes.disabledComments) {
+      if (!coldArchivedMesoComments.includes(c)) coldArchivedMesoComments.push(c);
+    }
+  }
+
   return tier === 'macro'
-    ? { entries, action: 'created', entryName: comment, demotedMesoComments }
-    : { entries, action: 'created', entryName: comment };
+    ? {
+        entries,
+        action: 'created',
+        entryName: comment,
+        demotedMesoComments,
+        ...(coldArchivedMesoComments.length > 0 ? { coldArchivedMesoComments } : {}),
+      }
+    : {
+        entries,
+        action: 'created',
+        entryName: comment,
+        ...(coldArchivedMesoComments.length > 0 ? { coldArchivedMesoComments } : {}),
+      };
+}
+
+/**
+ * 识别并提取世界书中的「旧档继承战史摘要」条目：
+ * - `overview`：`00·前情战史总纲（继承自旧档）`（或 `extra.tier === 'overview'`）；
+ * - `legacy_macro`：`前情卷宗·大·*`（或 `extra.legacyMacroFrom`）；
+ * - `legacy_meso`：`旧档阶段纪要·*`（或 `extra.legacyMesoFrom`）。
+ */
+export function extractLegacySummaryEntries(entries: ThEntry[]): LegacySummaryEntryInfo[] {
+  const out: LegacySummaryEntryInfo[] = [];
+  for (const e of entries ?? []) {
+    const label = String(e.comment || e.name || '').trim();
+    const ex = (e.extra ?? {}) as Record<string, unknown>;
+    if (
+      label === LEGACY_OVERVIEW_COMMENT ||
+      label.startsWith('00·前情战史总纲') ||
+      ex.tier === 'overview'
+    ) {
+      out.push({ comment: label || LEGACY_OVERVIEW_COMMENT, kind: 'overview', from: 0, to: 0, entry: e });
+      continue;
+    }
+    if (label.startsWith(LEGACY_MACRO_PREFIX) || typeof ex.legacyMacroFrom === 'number') {
+      const m = /(\d{1,4})\s*-\s*(\d{1,4})/.exec(label);
+      const from = typeof ex.legacyMacroFrom === 'number' ? ex.legacyMacroFrom : m ? Number(m[1]) : 1;
+      const to = typeof ex.legacyMacroTo === 'number' ? ex.legacyMacroTo : m ? Number(m[2]) : from;
+      out.push({ comment: label, kind: 'legacy_macro', from, to, entry: e });
+      continue;
+    }
+    if (label.startsWith(LEGACY_MESO_PREFIX) || typeof ex.legacyMesoFrom === 'number') {
+      const m = /(\d{1,4})\s*-\s*(\d{1,4})/.exec(label);
+      const from = typeof ex.legacyMesoFrom === 'number' ? ex.legacyMesoFrom : m ? Number(m[1]) : 1;
+      const to = typeof ex.legacyMesoTo === 'number' ? ex.legacyMesoTo : m ? Number(m[2]) : from;
+      out.push({ comment: label, kind: 'legacy_meso', from, to, entry: e });
+      continue;
+    }
+  }
+  return out.sort((a, b) => {
+    const orderRank = (k: LegacySummaryKind) => (k === 'overview' ? 0 : k === 'legacy_macro' ? 1 : 2);
+    const rk = orderRank(a.kind) - orderRank(b.kind);
+    if (rk !== 0) return rk;
+    return a.from - b.from || a.to - b.to;
+  });
+}
+
+/**
+ * 纯函数：根据当前新战局的已归档新摘要进度，全自动阶梯式管理「旧档继承战史摘要」的启停与常驻/按需状态：
+ * - 阶段 1 `opening_handoff`（新聊天尚无已归档新摘要：`newMesoCount === 0 && newMacroCount === 0`）：
+ *   · `00·前情战史总纲` 保持 `enabled: true` + `constant` 蓝灯常驻；
+ *   · `前情卷宗·大·*` 保持 `enabled: true` + `selective` 绿灯按专有词唤醒；
+ *   · `旧档阶段纪要·*` 仅保留末尾近场 `keepOpeningMesoCount`（默认 3 段）开启，其余远期段全部 `enabled: false` 冷存关闭！
+ * - 阶段 2 `early_progress`（新聊天已归档至少 1 段新中摘要 `newMesoCount >= 1`，即新战局已跑过 20+ 楼并有了自己的阶段摘要）：
+ *   · 开局交接期结束：**全部 `旧档阶段纪要·*`（含末尾近场 3 段）自动设为 `enabled: false` 冷存关闭**！
+ *   · 若 `newMesoCount >= 2`（新战局已过 40+ 楼）：**`00·前情战史总纲` 自动从 `constant` 降级为 `selective`（绿灯按关键词唤醒）**，释放每轮 ~900 tok 常驻占用！
+ * - 阶段 3 `mature_progress`（新聊天已生成自己的第 1 卷 80 楼大摘要 `newMacroCount >= 1`）：
+ *   · `00·前情战史总纲` 转为 `selective` 绿灯按需；
+ *   · 旧档前 N-1 卷远期 `前情卷宗·大·*` **自动设为 `enabled: false` 冷存关闭**，仅保留旧档最后 1 卷收官总纲按需备查！
+ */
+export function reconcileLegacySummariesWithProgress(
+  entries: ThEntry[],
+  options?: {
+    keepOpeningMesoCount?: number;
+    excludeNames?: readonly string[];
+  },
+): LegacySummaryReconcileResult {
+  const legacyList = extractLegacySummaryEntries(entries);
+  if (legacyList.length === 0) {
+    return {
+      entries,
+      phase: 'opening_handoff',
+      disabledComments: [],
+      enabledComments: [],
+      demotedOverviewComments: [],
+    };
+  }
+
+  const newRanges = extractSummaryRanges(entries);
+  const newMacroCount = newRanges.filter(r => r.tier === 'macro').length;
+  const newMesoCount = newRanges.filter(r => (r.tier ?? 'meso') === 'meso').length;
+  const keepOpeningMeso = Math.max(0, Math.floor(options?.keepOpeningMesoCount ?? 3));
+
+  const phase: LegacySummaryReconcileResult['phase'] =
+    newMacroCount >= 1
+      ? 'mature_progress'
+      : newMesoCount >= 1
+        ? 'early_progress'
+        : 'opening_handoff';
+
+  const disabledComments: string[] = [];
+  const enabledComments: string[] = [];
+  const demotedOverviewComments: string[] = [];
+
+  const overviews = legacyList.filter(x => x.kind === 'overview');
+  const legacyMacros = legacyList.filter(x => x.kind === 'legacy_macro').sort((a, b) => a.to - b.to);
+  const legacyMesos = legacyList.filter(x => x.kind === 'legacy_meso').sort((a, b) => a.to - b.to);
+
+  // 1. 处理 00·前情战史总纲
+  const shouldDemoteOverview = newMesoCount >= 2 || newMacroCount >= 1;
+  for (const ov of overviews) {
+    const ex = (ov.entry.extra ?? {}) as Record<string, unknown>;
+    if (shouldDemoteOverview) {
+      if (ov.entry.strategy?.type !== 'selective') {
+        ov.entry.strategy = {
+          ...(ov.entry.strategy ?? {}),
+          type: 'selective',
+          keys: ['前情战史', '旧档纪要', '过往战役'],
+          scan_depth: 'same_as_global',
+        };
+        demotedOverviewComments.push(ov.comment);
+      }
+      ov.entry.extra = { ...ex, autoDemotedByNewProgress: true };
+    } else if (phase === 'opening_handoff' && ov.entry.enabled === false) {
+      ov.entry.enabled = true;
+      const nextEx = { ...ex };
+      delete nextEx.coldArchived;
+      ov.entry.extra = nextEx;
+      enabledComments.push(ov.comment);
+    }
+  }
+
+  // 2. 处理旧档大摘要（前情卷宗·大·*）
+  for (let i = 0; i < legacyMacros.length; i++) {
+    const mac = legacyMacros[i];
+    const ex = (mac.entry.extra ?? {}) as Record<string, unknown>;
+    const rawKeys = [
+      ...(Array.isArray(mac.entry.strategy?.keys) ? (mac.entry.strategy.keys as string[]) : []),
+      ...(Array.isArray(ex.keys) ? (ex.keys as string[]) : []),
+    ];
+    const cleanedKeys = sanitizeSummaryTriggerKeys(rawKeys, {
+      excludeNames: options?.excludeNames,
+      fallbackRange: { from: mac.from, to: mac.to },
+    });
+    mac.entry.strategy = {
+      ...(mac.entry.strategy ?? {}),
+      type: 'selective',
+      keys: cleanedKeys,
+      scan_depth: 'same_as_global',
+    };
+    const isLastLegacyMacro = i === legacyMacros.length - 1;
+    // 当新战局已有自己的 80 楼大摘要（mature_progress）时，仅保留旧档最后 1 卷大摘要按需开启，其余早期旧档大摘要自动冷存关闭
+    const shouldDisableMacro = phase === 'mature_progress' && !isLastLegacyMacro;
+    if (shouldDisableMacro) {
+      if (mac.entry.enabled !== false) {
+        mac.entry.enabled = false;
+        disabledComments.push(mac.comment);
+      }
+      mac.entry.extra = { ...ex, keys: cleanedKeys, coldArchived: true };
+    } else {
+      mac.entry.extra = { ...ex, keys: cleanedKeys };
+    }
+  }
+
+  // 3. 处理旧档阶段纪要（旧档阶段纪要·*）
+  // 刚开局（newMesoCount === 0）仅保留末尾 keepOpeningMeso 段开启；一旦新聊天有了第 1 段新中摘要（newMesoCount >= 1），全部旧档阶段纪要自动冷存关闭！
+  const allowedActiveMesoCount = phase === 'opening_handoff' ? keepOpeningMeso : 0;
+  const activeStartIdx = Math.max(0, legacyMesos.length - allowedActiveMesoCount);
+
+  for (let i = 0; i < legacyMesos.length; i++) {
+    const meso = legacyMesos[i];
+    const ex = (meso.entry.extra ?? {}) as Record<string, unknown>;
+    const rawKeys = [
+      ...(Array.isArray(meso.entry.strategy?.keys) ? (meso.entry.strategy.keys as string[]) : []),
+      ...(Array.isArray(ex.keys) ? (ex.keys as string[]) : []),
+    ];
+    const cleanedKeys = sanitizeSummaryTriggerKeys(rawKeys, {
+      excludeNames: options?.excludeNames,
+      fallbackRange: { from: meso.from, to: meso.to },
+    });
+    meso.entry.strategy = {
+      ...(meso.entry.strategy ?? {}),
+      type: 'selective',
+      keys: cleanedKeys,
+      scan_depth: 'same_as_global',
+    };
+    if (i < activeStartIdx) {
+      if (meso.entry.enabled !== false) {
+        meso.entry.enabled = false;
+        disabledComments.push(meso.comment);
+      }
+      meso.entry.extra = { ...ex, keys: cleanedKeys, coldArchived: true };
+    } else {
+      if (meso.entry.enabled === false) {
+        meso.entry.enabled = true;
+        enabledComments.push(meso.comment);
+      }
+      const nextEx = { ...ex, keys: cleanedKeys };
+      delete nextEx.coldArchived;
+      meso.entry.extra = nextEx;
+    }
+  }
+
+  return {
+    entries,
+    phase,
+    disabledComments,
+    enabledComments,
+    demotedOverviewComments,
+  };
+}
+
+/**
+ * 纯函数：手动或按预设模式批量控制「旧档继承战史摘要」条目：
+ * - `auto_progress`：按当前新战局摘要进度智能退居/冷存；
+ * - `opening_handoff`：恢复开局接力态（总纲常驻 + 旧档大摘要按需开启 + 末尾近场 3 段阶段纪要开启，其余 37 段冷存）；
+ * - `selective_minimal`：省流按需态（总纲降为绿灯按需 + 仅最后 1 卷旧档大摘要按需开启，其余全部冷存关闭）；
+ * - `cold_all`：全部冷存关闭（包括总纲、全部旧档大摘要与阶段纪要均设为 `enabled: false`，0 Token 占用）；
+ * - `toggle_single`：单独切换某一条旧档摘要的 `enabled` 状态。
+ */
+export function setLegacySummaryEntriesMode(
+  entries: ThEntry[],
+  action: LegacySummaryControlAction,
+  options?: { keepOpeningMesoCount?: number; excludeNames?: readonly string[] },
+): LegacySummaryReconcileResult {
+  if (action.mode === 'auto_progress') {
+    return reconcileLegacySummariesWithProgress(entries, options);
+  }
+
+  const legacyList = extractLegacySummaryEntries(entries);
+  const disabledComments: string[] = [];
+  const enabledComments: string[] = [];
+  const demotedOverviewComments: string[] = [];
+
+  if (action.mode === 'toggle_single') {
+    const target = legacyList.find(
+      x => x.comment === action.comment || x.entry.comment === action.comment || x.entry.name === action.comment,
+    );
+    if (target) {
+      target.entry.enabled = action.enabled;
+      const ex = { ...((target.entry.extra ?? {}) as Record<string, unknown>) };
+      if (action.enabled) {
+        delete ex.coldArchived;
+        enabledComments.push(target.comment);
+      } else {
+        ex.coldArchived = true;
+        disabledComments.push(target.comment);
+      }
+      target.entry.extra = ex;
+    }
+    return { entries, phase: 'manual_preset', disabledComments, enabledComments, demotedOverviewComments };
+  }
+
+  const overviews = legacyList.filter(x => x.kind === 'overview');
+  const legacyMacros = legacyList.filter(x => x.kind === 'legacy_macro').sort((a, b) => a.to - b.to);
+  const legacyMesos = legacyList.filter(x => x.kind === 'legacy_meso').sort((a, b) => a.to - b.to);
+  const keepOpeningMeso = Math.max(0, Math.floor(options?.keepOpeningMesoCount ?? 3));
+
+  if (action.mode === 'cold_all') {
+    for (const item of legacyList) {
+      if (item.entry.enabled !== false) {
+        item.entry.enabled = false;
+        disabledComments.push(item.comment);
+      }
+      item.entry.extra = { ...((item.entry.extra ?? {}) as Record<string, unknown>), coldArchived: true };
+    }
+    return { entries, phase: 'manual_preset', disabledComments, enabledComments, demotedOverviewComments };
+  }
+
+  if (action.mode === 'selective_minimal') {
+    for (const ov of overviews) {
+      ov.entry.enabled = true;
+      ov.entry.strategy = {
+        ...(ov.entry.strategy ?? {}),
+        type: 'selective',
+        keys: ['前情战史', '旧档纪要', '过往战役'],
+        scan_depth: 'same_as_global',
+      };
+      const ex = { ...((ov.entry.extra ?? {}) as Record<string, unknown>) };
+      delete ex.coldArchived;
+      ov.entry.extra = ex;
+      demotedOverviewComments.push(ov.comment);
+    }
+    for (let i = 0; i < legacyMacros.length; i++) {
+      const mac = legacyMacros[i];
+      const isLast = i === legacyMacros.length - 1;
+      const ex = { ...((mac.entry.extra ?? {}) as Record<string, unknown>) };
+      if (isLast) {
+        if (mac.entry.enabled === false) enabledComments.push(mac.comment);
+        mac.entry.enabled = true;
+        delete ex.coldArchived;
+      } else {
+        if (mac.entry.enabled !== false) disabledComments.push(mac.comment);
+        mac.entry.enabled = false;
+        ex.coldArchived = true;
+      }
+      mac.entry.extra = ex;
+    }
+    for (const meso of legacyMesos) {
+      if (meso.entry.enabled !== false) disabledComments.push(meso.comment);
+      meso.entry.enabled = false;
+      meso.entry.extra = { ...((meso.entry.extra ?? {}) as Record<string, unknown>), coldArchived: true };
+    }
+    return { entries, phase: 'manual_preset', disabledComments, enabledComments, demotedOverviewComments };
+  }
+
+  // opening_handoff：恢复开局接力态（总纲常驻 + 大摘要绿灯开启 + 末尾 keepOpeningMeso 段开启）
+  for (const ov of overviews) {
+    if (ov.entry.enabled === false) enabledComments.push(ov.comment);
+    ov.entry.enabled = true;
+    ov.entry.strategy = { type: 'constant', keys: [] };
+    const ex = { ...((ov.entry.extra ?? {}) as Record<string, unknown>) };
+    delete ex.coldArchived;
+    delete ex.autoDemotedByNewProgress;
+    ov.entry.extra = ex;
+  }
+  for (const mac of legacyMacros) {
+    if (mac.entry.enabled === false) enabledComments.push(mac.comment);
+    mac.entry.enabled = true;
+    const ex = { ...((mac.entry.extra ?? {}) as Record<string, unknown>) };
+    delete ex.coldArchived;
+    mac.entry.extra = ex;
+  }
+  const activeStartIdx = Math.max(0, legacyMesos.length - keepOpeningMeso);
+  for (let i = 0; i < legacyMesos.length; i++) {
+    const meso = legacyMesos[i];
+    const ex = { ...((meso.entry.extra ?? {}) as Record<string, unknown>) };
+    if (i < activeStartIdx) {
+      if (meso.entry.enabled !== false) disabledComments.push(meso.comment);
+      meso.entry.enabled = false;
+      ex.coldArchived = true;
+    } else {
+      if (meso.entry.enabled === false) enabledComments.push(meso.comment);
+      meso.entry.enabled = true;
+      delete ex.coldArchived;
+    }
+    meso.entry.extra = ex;
+  }
+
+  return { entries, phase: 'opening_handoff', disabledComments, enabledComments, demotedOverviewComments };
+}
+
+/**
+ * 宿主级旧档继承战史摘要批量/单条智能管控封装：
+ * 经 chatBookGateway 三重守卫后调用 setLegacySummaryEntriesMode。
+ */
+export async function manageLegacySummaryEntries(
+  action: LegacySummaryControlAction,
+  gateway: ChatBookGatewayLike = chatBookGateway,
+  options?: {
+    keepOpeningMesoCount?: number;
+    excludeNames?: readonly string[];
+    updateWorldbookWithFn?: UpdateWorldbookWith;
+  },
+): Promise<LegacySummaryReconcileResult & { book: string }> {
+  const updateWb = options?.updateWorldbookWithFn ?? tav<UpdateWorldbookWith>('updateWorldbookWith');
+  if (!updateWb) {
+    throw new Error('酒馆 API updateWorldbookWith 不可用');
+  }
+  const txn = gateway.begin();
+  const book = await gateway.guardedBook(txn, { createIfMissing: false });
+
+  let res: LegacySummaryReconcileResult = {
+    entries: [],
+    phase: 'opening_handoff',
+    disabledComments: [],
+    enabledComments: [],
+    demotedOverviewComments: [],
+  };
+
+  await updateWb(book, entries => {
+    res = setLegacySummaryEntriesMode(entries, action, options);
+    return res.entries;
+  });
+
+  return { ...res, book };
+}
+
+/**
+ * 纯函数：单条已归档摘要的启停（enabled: true / false）切换。
+ * 关闭时标记 `extra.coldArchived = true`，开启时清除 `extra.coldArchived`。
+ */
+export function setSummaryEntryEnabled(
+  entries: ThEntry[],
+  target: { from: number; to: number; tier?: 'meso' | 'macro' },
+  enabled: boolean,
+): { entries: ThEntry[]; updated: boolean; entryName: string } {
+  const tier: 'meso' | 'macro' = target.tier === 'macro' ? 'macro' : 'meso';
+  const expectedComment = renderSummaryComment(target.from, target.to, tier);
+  let updated = false;
+  let matchedName = expectedComment;
+
+  for (const e of entries) {
+    const ex = (e.extra ?? {}) as Record<string, unknown>;
+    const entryTier = resolveSummaryEntryTier(e);
+    const parsed =
+      typeof ex.from === 'number' && typeof ex.to === 'number'
+        ? { from: ex.from, to: ex.to }
+        : parseSummaryCommentWithTier(String(e.comment || e.name || ''));
+    const isMatch =
+      e.comment === expectedComment ||
+      e.name === expectedComment ||
+      (entryTier === tier && parsed?.from === target.from && parsed?.to === target.to);
+    if (!isMatch) continue;
+
+    e.enabled = enabled;
+    const nextExtra: Record<string, unknown> = { ...ex };
+    if (enabled) {
+      delete nextExtra.coldArchived;
+    } else {
+      nextExtra.coldArchived = true;
+    }
+    e.extra = nextExtra;
+    matchedName = String(e.comment || e.name || expectedComment);
+    updated = true;
+  }
+
+  return { entries, updated, entryName: matchedName };
+}
+
+export interface SmartSummaryWindowOptions {
+  budgetConfig?: Partial<SummaryBudgetConfig>;
+  /**
+   * 最多保留多少段「已被大摘要覆盖」的近期中摘要处于开启（selective）状态；
+   * 其余更早期的已覆盖中摘要自动设为 `enabled: false`（冷存归档）。默认 0（所有已被大摘要覆盖的中摘要全部冷存关闭）。
+   */
+  keepRecentCoveredMesoCount?: number;
+  /** 需要从 selective 触发词中剔除的主角名、在役机娘名、基地名列表 */
+  excludeNames?: readonly string[];
+}
+
+export interface SmartSummaryWindowResult {
+  entries: ThEntry[];
+  disabledComments: string[];
+  enabledComments: string[];
+  demotedMacroComments: string[];
+  sanitizedKeyEntryCount: number;
+}
+
+/**
+ * 纯函数：按三层摘要远近场滑窗与 Token 预算，智能开启/冷存档案世界书摘要条目并净化触发词：
+ * 1. 对所有 `selective` 摘要条目执行 `sanitizeSummaryTriggerKeys`，剔除指挥官/在役机娘/基地等每轮必现泛词；
+ * 2. 将已被大摘要（Macro）覆盖的旧中摘要（超出 `keepRecentCoveredMesoCount` 的远期段）自动设为 `enabled: false` 冷存；
+ * 3. 对未覆盖的近场中摘要按从近到远累加 Token，超出 `mesoBudgetTokens` 的远期段自动冷存（至少保留最新 1 段开启）；
+ * 4. 对大摘要（Macro）按从近到远累加 Token，超出 `macroBudgetTokens` 的早期大摘要自动从 `constant` 转为 `selective` 按专有词唤醒（至少保留最新 1 卷常驻）。
+ */
+export function applySummarySmartWindow(
+  entries: ThEntry[],
+  options?: SmartSummaryWindowOptions,
+): SmartSummaryWindowResult {
+  const cfg = normalizeSummaryBudgetConfig(options?.budgetConfig);
+  const keepCovered = Math.max(0, Math.floor(options?.keepRecentCoveredMesoCount ?? 0));
+  const disabledComments: string[] = [];
+  const enabledComments: string[] = [];
+  const demotedMacroComments: string[] = [];
+  let sanitizedKeyEntryCount = 0;
+
+  const ranges = extractSummaryRanges(entries);
+  const macros = ranges.filter(r => r.tier === 'macro').sort((a, b) => a.to - b.to);
+  const mesos = ranges.filter(r => (r.tier ?? 'meso') === 'meso').sort((a, b) => a.to - b.to);
+
+  // 1. 标记并归类所有被大摘要覆盖的中摘要 vs 未被大摘要覆盖的近场中摘要
+  const coveredMesos: SummaryRangeInfo[] = [];
+  const uncoveredMesos: SummaryRangeInfo[] = [];
+
+  for (const m of mesos) {
+    const ex = (m.entry.extra ?? {}) as Record<string, unknown>;
+    const coveringMacro = macros.find(mac => m.from >= mac.from && m.to <= mac.to);
+    if (coveringMacro || ex.coveredByMacro) {
+      const macroName =
+        typeof ex.coveredByMacro === 'string' && ex.coveredByMacro
+          ? ex.coveredByMacro
+          : renderSummaryComment(coveringMacro!.from, coveringMacro!.to, 'macro');
+      ex.coveredByMacro = macroName;
+      m.entry.extra = ex;
+      coveredMesos.push(m);
+    } else {
+      uncoveredMesos.push(m);
+    }
+  }
+
+  // 2. 净化所有摘要条目的触发词（selective 或带 keys 的条目）
+  for (const r of ranges) {
+    const ex = (r.entry.extra ?? {}) as Record<string, unknown>;
+    const rawKeys = [
+      ...(Array.isArray(r.entry.strategy?.keys) ? (r.entry.strategy.keys as string[]) : []),
+      ...(Array.isArray(ex.keys) ? (ex.keys as string[]) : []),
+    ];
+    if (rawKeys.length > 0 || r.entry.strategy?.type === 'selective') {
+      const cleaned = sanitizeSummaryTriggerKeys(rawKeys, {
+        excludeNames: options?.excludeNames,
+        fallbackRange: { from: r.from, to: r.to },
+      });
+      const prevKeys = Array.isArray(r.entry.strategy?.keys) ? (r.entry.strategy.keys as string[]) : [];
+      if (JSON.stringify(prevKeys) !== JSON.stringify(cleaned)) {
+        sanitizedKeyEntryCount++;
+      }
+      ex.keys = cleaned;
+      r.entry.extra = ex;
+      if (r.entry.strategy?.type === 'selective') {
+        r.entry.strategy = {
+          ...r.entry.strategy,
+          keys: cleaned,
+        };
+      }
+    }
+  }
+
+  // 3. 已覆盖中摘要滑窗：仅保留最近 keepCovered 段开启（selective），其余全部冷存关闭（enabled = false）
+  const activeCoveredStartIdx = Math.max(0, coveredMesos.length - keepCovered);
+  for (let i = 0; i < coveredMesos.length; i++) {
+    const item = coveredMesos[i];
+    const ex = (item.entry.extra ?? {}) as Record<string, unknown>;
+    const label = String(item.entry.comment || item.entry.name || renderSummaryComment(item.from, item.to));
+    const cleanedKeys = sanitizeSummaryTriggerKeys(
+      Array.isArray(ex.keys) ? (ex.keys as string[]) : [],
+      { excludeNames: options?.excludeNames, fallbackRange: { from: item.from, to: item.to } },
+    );
+    item.entry.strategy = {
+      ...(item.entry.strategy ?? {}),
+      type: 'selective',
+      keys: cleanedKeys,
+      scan_depth: 'same_as_global',
+    };
+    if (i < activeCoveredStartIdx) {
+      if (item.entry.enabled !== false) {
+        item.entry.enabled = false;
+        disabledComments.push(label);
+      }
+      item.entry.extra = { ...ex, keys: cleanedKeys, coldArchived: true };
+    } else {
+      if (item.entry.enabled === false) {
+        item.entry.enabled = true;
+        enabledComments.push(label);
+      }
+      const nextExtra = { ...ex, keys: cleanedKeys };
+      delete nextExtra.coldArchived;
+      item.entry.extra = nextExtra;
+    }
+  }
+
+  // 4. 未被覆盖的近场中摘要按 mesoBudgetTokens 从近到远滑窗控制（至少保留最新 1 段开启）
+  let runningMesoTokens = 0;
+  for (let i = uncoveredMesos.length - 1; i >= 0; i--) {
+    const item = uncoveredMesos[i];
+    const tok = estimateTextTokens(item.entry.content ?? '');
+    const isNewest = i === uncoveredMesos.length - 1;
+    const label = String(item.entry.comment || item.entry.name || renderSummaryComment(item.from, item.to));
+    const ex = (item.entry.extra ?? {}) as Record<string, unknown>;
+    if (isNewest || runningMesoTokens + tok <= cfg.mesoBudgetTokens) {
+      runningMesoTokens += tok;
+      if (item.entry.enabled === false) {
+        item.entry.enabled = true;
+        enabledComments.push(label);
+      }
+      const nextExtra = { ...ex };
+      delete nextExtra.coldArchived;
+      item.entry.extra = nextExtra;
+    } else {
+      if (item.entry.enabled !== false) {
+        item.entry.enabled = false;
+        disabledComments.push(label);
+      }
+      item.entry.extra = { ...ex, coldArchived: true };
+    }
+  }
+
+  // 5. 大摘要（Macro）按 macroBudgetTokens 从近到远控制常驻体积（超出预算的早期大摘要自动转为 selective 按专有词唤醒）
+  let runningMacroTokens = 0;
+  for (let i = macros.length - 1; i >= 0; i--) {
+    const item = macros[i];
+    const tok = estimateTextTokens(item.entry.content ?? '');
+    const isNewest = i === macros.length - 1;
+    const label = String(item.entry.comment || item.entry.name || renderSummaryComment(item.from, item.to, 'macro'));
+    const ex = (item.entry.extra ?? {}) as Record<string, unknown>;
+    if (item.entry.enabled === false) continue;
+    if (isNewest || runningMacroTokens + tok <= cfg.macroBudgetTokens) {
+      runningMacroTokens += tok;
+    } else if (item.entry.strategy?.type !== 'selective') {
+      const cleanedKeys = sanitizeSummaryTriggerKeys(
+        Array.isArray(ex.keys) ? (ex.keys as string[]) : [],
+        { excludeNames: options?.excludeNames, fallbackRange: { from: item.from, to: item.to } },
+      );
+      item.entry.strategy = {
+        ...(item.entry.strategy ?? {}),
+        type: 'selective',
+        keys: cleanedKeys,
+        scan_depth: 'same_as_global',
+      };
+      item.entry.extra = { ...ex, keys: cleanedKeys };
+      demotedMacroComments.push(label);
+    }
+  }
+
+  // 6. 同步对世界书内的「旧档继承战史摘要」执行智能退居与去泛词
+  const legRes = reconcileLegacySummariesWithProgress(entries, {
+    excludeNames: options?.excludeNames,
+  });
+  for (const c of legRes.disabledComments) {
+    if (!disabledComments.includes(c)) disabledComments.push(c);
+  }
+  for (const c of legRes.enabledComments) {
+    if (!enabledComments.includes(c)) enabledComments.push(c);
+  }
+  for (const c of legRes.demotedOverviewComments) {
+    if (!demotedMacroComments.includes(c)) demotedMacroComments.push(c);
+  }
+
+  return {
+    entries,
+    disabledComments,
+    enabledComments,
+    demotedMacroComments,
+    sanitizedKeyEntryCount,
+  };
 }
 
 /* ═══════════════ 档案落地与弃置副作用层（经三重守卫） ═══════════════ */
@@ -1131,6 +1991,8 @@ export interface FileSummaryOptions {
   strategyType?: SummaryStrategy;
   depth?: number;
   demoteCoveredMeso?: boolean;
+  coldArchiveCoveredMeso?: 'older_macros' | 'all_covered' | 'none';
+  excludeNames?: readonly string[];
   updateWorldbookWithFn?: UpdateWorldbookWith;
 }
 
@@ -1164,6 +2026,8 @@ export async function fileSummary(
       strategyType: options?.strategyType,
       depth: options?.depth,
       demoteCoveredMeso: options?.demoteCoveredMeso,
+      coldArchiveCoveredMeso: options?.coldArchiveCoveredMeso,
+      excludeNames: options?.excludeNames,
     });
     return upsertRes.entries;
   });
@@ -1178,6 +2042,72 @@ export async function fileSummary(
     action: resObj?.action ?? 'created',
     ...(plainDraft.tier ? { tier: plainDraft.tier } : {}),
     ...(resObj?.demotedMesoComments ? { demotedMesoComments: resObj.demotedMesoComments } : {}),
+    ...(resObj?.coldArchivedMesoComments ? { coldArchivedMesoComments: resObj.coldArchivedMesoComments } : {}),
+  };
+}
+
+/**
+ * 宿主级单条已归档摘要启停切换（enabled: true / false）：
+ * 经 chatBookGateway 三重守卫后调用 setSummaryEntryEnabled 原位更新世界书。
+ */
+export async function toggleSummarySavedEnabled(
+  from: number,
+  to: number,
+  enabled: boolean,
+  gateway: ChatBookGatewayLike = chatBookGateway,
+  options?: { tier?: 'meso' | 'macro'; updateWorldbookWithFn?: UpdateWorldbookWith },
+): Promise<{ book: string; entryName: string; enabled: boolean; updated: boolean }> {
+  const updateWb = options?.updateWorldbookWithFn ?? tav<UpdateWorldbookWith>('updateWorldbookWith');
+  if (!updateWb) {
+    throw new Error('酒馆 API updateWorldbookWith 不可用');
+  }
+  const txn = gateway.begin();
+  const book = await gateway.guardedBook(txn, { createIfMissing: false });
+  const tier: 'meso' | 'macro' = options?.tier === 'macro' ? 'macro' : 'meso';
+  let entryName = renderSummaryComment(from, to, tier);
+  let updated = false;
+
+  await updateWb(book, entries => {
+    const res = setSummaryEntryEnabled(entries, { from, to, tier }, enabled);
+    entryName = res.entryName;
+    updated = res.updated;
+    return res.entries;
+  });
+
+  return { book, entryName, enabled, updated };
+}
+
+/**
+ * 宿主级摘要世界书智能滑窗优化与触发词去泛词：
+ * 一键对当前聊天绑定世界书执行 applySummarySmartWindow。
+ */
+export async function optimizeSummaryWorldbookEntries(
+  gateway: ChatBookGatewayLike = chatBookGateway,
+  options?: SmartSummaryWindowOptions & { updateWorldbookWithFn?: UpdateWorldbookWith },
+): Promise<SmartSummaryWindowResult & { book: string }> {
+  const updateWb = options?.updateWorldbookWithFn ?? tav<UpdateWorldbookWith>('updateWorldbookWith');
+  if (!updateWb) {
+    throw new Error('酒馆 API updateWorldbookWith 不可用');
+  }
+  const txn = gateway.begin();
+  const book = await gateway.guardedBook(txn, { createIfMissing: false });
+
+  let winRes: SmartSummaryWindowResult = {
+    entries: [],
+    disabledComments: [],
+    enabledComments: [],
+    demotedMacroComments: [],
+    sanitizedKeyEntryCount: 0,
+  };
+
+  await updateWb(book, entries => {
+    winRes = applySummarySmartWindow(entries, options);
+    return winRes.entries;
+  });
+
+  return {
+    ...winRes,
+    book,
   };
 }
 
@@ -1253,7 +2183,9 @@ export async function discardSummary(
 
     const nextExtra = { ...ex };
     delete nextExtra.coveredByMacro;
+    delete nextExtra.coldArchived;
     e.extra = nextExtra;
+    e.enabled = true;
     e.strategy = {
       ...(e.strategy ?? {}),
       type: 'constant',
@@ -1521,6 +2453,8 @@ export interface AdoptSummaryOptions {
   currentFloor?: number;
   tailReserve?: number;
   storage?: Storage;
+  coldArchiveCoveredMeso?: 'older_macros' | 'all_covered' | 'none';
+  excludeNames?: readonly string[];
   updateWorldbookWithFn?: UpdateWorldbookWith;
   setChatMessagesFn?: SetChatMessagesLike;
   onAdopted?: (draft: SummaryDraft) => void;
@@ -1622,6 +2556,8 @@ export async function adoptSummary(draft: SummaryDraft, opts?: AdoptSummaryOptio
     txn,
     strategyType,
     depth: draft.tier === 'macro' ? DEFAULT_MACRO_DEPTH : DEFAULT_DEPTH,
+    coldArchiveCoveredMeso: opts?.coldArchiveCoveredMeso,
+    excludeNames: opts?.excludeNames,
     updateWorldbookWithFn: opts?.updateWorldbookWithFn,
   });
 
@@ -1662,6 +2598,7 @@ export async function adoptSummary(draft: SummaryDraft, opts?: AdoptSummaryOptio
     hiddenFloors,
     ...(receipt.tier ? { tier: receipt.tier } : {}),
     ...(receipt.demotedMesoComments ? { demotedMesoComments: receipt.demotedMesoComments } : {}),
+    ...(receipt.coldArchivedMesoComments ? { coldArchivedMesoComments: receipt.coldArchivedMesoComments } : {}),
   };
 }
 

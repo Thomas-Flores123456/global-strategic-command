@@ -326,6 +326,46 @@ const BUILDING_NAME_HINT_RE =
   /(?:厂|营|部|所|室|院|站|场|坞|塔|井|炉|库|中心|核心|平台|车间|阵列|基地|要塞|船厂|机坪|雷达|反应堆|电站|实验室|指挥所)$/;
 const TECH_NAME_HINT_RE = /(?:学|理论|工程|协议|技术|算法|机制|研究|大纲|操典|体系|工艺|方程)$/;
 
+const BUILDABLE_PARAM_KEYS = ['可建造', '可制造', '可生产', '可研发', '系统可造', 'buildable'] as const;
+const ORIGIN_NATURE_PARAM_KEYS = ['来源性质', '来源', '性质', '出处', 'origin'] as const;
+const NON_BUILDABLE_VALUE_RE =
+  /^(?:否|false|no|0|不可建造|不可制造|不可生产|不可研发|仅情报|孤品|战利品|敌方专属|本土造物)$/i;
+const BUILDABLE_TRUE_VALUE_RE = /^(?:是|true|yes|1|可建造|可制造|可生产|可研发|系统可造)$/i;
+const NON_BUILDABLE_ORIGIN_HINT_RE =
+  /(?:缴获|战利品|孤品|敌方专属|本土采购|外部采购|不可建造|不可制造|不可生产|不可研发|仅情报|遗迹孤品|跨卡旧物)/;
+
+/**
+ * 判断某条扩展档案/图鉴条目是否可通过我方红警系统建造/制造/研发：
+ * - 若 `<数据>` 块显式声明 `buildable === false`，返回 `false`；
+ * - 若 `params` 中 `可建造/可制造/可生产/可研发/系统可造/buildable` 为 `否/false/不可建造/仅情报/孤品`（或含 `否/不可/仅情报/孤品`），返回 `false`；
+ * - 若 `params` 中未显式声明 `可建造: 是`，但 `来源性质/来源/性质` 明确属于 `缴获/战利品/孤品/不可制造/仅情报`，返回 `false`；
+ * - 其余默认返回 `true`。
+ */
+export function isExpansionBuildableBySystem(
+  params?: Record<string, string> | null,
+  data?: Record<string, unknown> | null,
+): boolean {
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    if (data.buildable === false) return false;
+    if (typeof data.buildable === 'string' && NON_BUILDABLE_VALUE_RE.test(data.buildable.trim())) {
+      return false;
+    }
+  }
+  if (!params) return true;
+  const rawBuildable = pickExpansionParam(params, BUILDABLE_PARAM_KEYS);
+  if (rawBuildable) {
+    if (NON_BUILDABLE_VALUE_RE.test(rawBuildable)) return false;
+    if (BUILDABLE_TRUE_VALUE_RE.test(rawBuildable)) return true;
+    if (/(?:^否|不可|不能|禁止|仅情报|孤品|战利品|敌方专属)/.test(rawBuildable)) return false;
+    if (/(?:^是|可建造|可制造|可生产|可研发|系统可造)/.test(rawBuildable)) return true;
+  }
+  const rawOrigin = pickExpansionParam(params, ORIGIN_NATURE_PARAM_KEYS);
+  if (rawOrigin && NON_BUILDABLE_ORIGIN_HINT_RE.test(rawOrigin)) {
+    return false;
+  }
+  return true;
+}
+
 function pickExpansionParam(params: Record<string, string> | undefined, keys: readonly string[]): string {
   if (!params) return '';
   for (const k of keys) {
@@ -453,6 +493,9 @@ export function buildStructuredExpansionDataObject(
   }
   const kindStr = String(d.kind ?? '').trim();
   if (!STRUCTURED_DATA_EXPANSION_KINDS.has(kindStr)) {
+    return undefined;
+  }
+  if (!isExpansionBuildableBySystem(d.params, d.data)) {
     return undefined;
   }
   const name = String(d.name ?? '').trim();

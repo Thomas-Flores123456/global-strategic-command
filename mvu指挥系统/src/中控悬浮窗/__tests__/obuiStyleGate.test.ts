@@ -59,6 +59,8 @@ const FIRST_PLAYABLE_FILES = [
   // 工务日程战术网格块面甘特图与调度辅助模块
   '中控悬浮窗/modals/ModalSchedule.vue',
   '中控悬浮窗/modals/modalScheduleHelpers.ts',
+  // FD-54 · 军备管理与机娘指挥中心 Oblivion 金属战术重构
+  '中控悬浮窗/modals/ModalMechaGirl.vue',
 ] as const;
 
 const HEX_COLOR_RE = /#[0-9a-fA-F]{3,8}\b/g;

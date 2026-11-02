@@ -342,7 +342,11 @@ export interface BaseLike {
   weather?: string;
   site_type?: string;
   power?: { gen?: number; use?: number };
-  buildings?: { name: string; state?: string }[];
+  buildings?: { name: string; state?: string; mode?: string }[];
+  forces?: {
+    vehicles?: ReadonlyArray<string | { name?: string; type?: string }> | Record<string, number>;
+    [key: string]: unknown;
+  };
 }
 
 export function readBases(data: unknown): BaseLike[] {

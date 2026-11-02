@@ -49,6 +49,10 @@ export interface SavePack {
   dlc_registry?: unknown[];
   timeline_ledger?: Record<string, unknown>;
   chat_worldbook_entries?: SavePackWorldbookEntry[];
+  /** FD-53 扩展载荷：已提升独立私产书注册表、已归档表与私产书词条快照 */
+  promoted_registry?: Record<string, unknown>;
+  archive_registry?: Record<string, unknown>;
+  promoted_worldbooks?: Record<string, SavePackWorldbookEntry[]>;
   /** 存档结构代数（FD-47，默认 2） */
   save_schema?: number;
   /** 导出时的角色卡元数据快照（FD-47） */
@@ -151,24 +155,42 @@ export function parseSavePack(text: string): ParseSaveResult {
       : undefined;
   const isPlainObj = (v: unknown): v is Record<string, unknown> =>
     typeof v === 'object' && v !== null && !Array.isArray(v);
+  const mapWbEntries = (entries: unknown[]): SavePackWorldbookEntry[] =>
+    entries
+      .filter(
+        (e): e is Record<string, unknown> =>
+          isPlainObj(e) && typeof (e as { name?: unknown }).name === 'string',
+      )
+      .map((e): SavePackWorldbookEntry => ({
+        name: String(e.name),
+        content: typeof e.content === 'string' ? e.content : '',
+        ...(typeof e.enabled === 'boolean' ? { enabled: e.enabled } : {}),
+        ...(typeof e.comment === 'string' && e.comment ? { comment: e.comment } : {}),
+        ...(Array.isArray(e.keys) ? { keys: e.keys.map(k => String(k)) } : {}),
+        ...(isPlainObj(e.position) ? { position: JSON.parse(JSON.stringify(e.position)) } : {}),
+        ...(isPlainObj(e.strategy) ? { strategy: JSON.parse(JSON.stringify(e.strategy)) } : {}),
+        ...(isPlainObj(e.recursion) ? { recursion: JSON.parse(JSON.stringify(e.recursion)) } : {}),
+        ...(isPlainObj(e.extra) ? { extra: JSON.parse(JSON.stringify(e.extra)) } : {}),
+      }));
   const chat_worldbook_entries = Array.isArray(r.chat_worldbook_entries)
-    ? r.chat_worldbook_entries
-        .filter(
-          (e): e is Record<string, unknown> =>
-            isPlainObj(e) && typeof (e as { name?: unknown }).name === 'string',
-        )
-        .map((e): SavePackWorldbookEntry => ({
-          name: String(e.name),
-          content: typeof e.content === 'string' ? e.content : '',
-          ...(typeof e.enabled === 'boolean' ? { enabled: e.enabled } : {}),
-          ...(typeof e.comment === 'string' && e.comment ? { comment: e.comment } : {}),
-          ...(Array.isArray(e.keys) ? { keys: e.keys.map(k => String(k)) } : {}),
-          ...(isPlainObj(e.position) ? { position: JSON.parse(JSON.stringify(e.position)) } : {}),
-          ...(isPlainObj(e.strategy) ? { strategy: JSON.parse(JSON.stringify(e.strategy)) } : {}),
-          ...(isPlainObj(e.recursion) ? { recursion: JSON.parse(JSON.stringify(e.recursion)) } : {}),
-          ...(isPlainObj(e.extra) ? { extra: JSON.parse(JSON.stringify(e.extra)) } : {}),
-        }))
+    ? mapWbEntries(r.chat_worldbook_entries)
     : undefined;
+  const promoted_registry = isPlainObj(r.promoted_registry)
+    ? (JSON.parse(JSON.stringify(r.promoted_registry)) as Record<string, unknown>)
+    : undefined;
+  const archive_registry = isPlainObj(r.archive_registry)
+    ? (JSON.parse(JSON.stringify(r.archive_registry)) as Record<string, unknown>)
+    : undefined;
+  let promoted_worldbooks: Record<string, SavePackWorldbookEntry[]> | undefined;
+  if (isPlainObj(r.promoted_worldbooks)) {
+    const mappedBooks: Record<string, SavePackWorldbookEntry[]> = {};
+    for (const [bookName, bookEntries] of Object.entries(r.promoted_worldbooks)) {
+      const trimmedName = bookName.trim();
+      if (!trimmedName || !Array.isArray(bookEntries)) continue;
+      mappedBooks[trimmedName] = mapWbEntries(bookEntries);
+    }
+    promoted_worldbooks = mappedBooks;
+  }
 
   const save_schema =
     typeof r.save_schema === 'number' && Number.isInteger(r.save_schema) && r.save_schema > 0
@@ -204,6 +226,9 @@ export function parseSavePack(text: string): ParseSaveResult {
     ...(dlc_registry !== undefined ? { dlc_registry } : {}),
     ...(timeline_ledger !== undefined ? { timeline_ledger } : {}),
     ...(chat_worldbook_entries !== undefined ? { chat_worldbook_entries } : {}),
+    ...(promoted_registry !== undefined ? { promoted_registry } : {}),
+    ...(archive_registry !== undefined ? { archive_registry } : {}),
+    ...(promoted_worldbooks !== undefined ? { promoted_worldbooks } : {}),
     ...(card_meta !== undefined ? { card_meta } : {}),
   };
   importedStatPackRegistry.set(stat, pack);
@@ -275,6 +300,7 @@ export function packToChoices(pack: SavePack, current: LaunchChoices): ImportCho
     importedFrom: pack.source.chat,
     // G2 修正：全量变量树随 choices 透传，buildStatData 以此为基线无缝继承机娘/建筑/图鉴/队列等进度
     importedStat: sd,
+    importMode: current.importMode ?? 'continuation',
   };
   const rawSd = unwrapRawObject(sd);
   if (rawSd) importedStatPackRegistry.set(rawSd, pack);

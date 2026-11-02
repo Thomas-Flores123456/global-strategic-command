@@ -169,6 +169,7 @@ describe('FloatingApp 红警经典建造控制台契约', () => {
       'ModalArchive',
       'ModalSchedule',
       'ModalResources',
+      'ModalSituation',
       'ModalEngineering',
       'ModalBuildings',
       'PanelDataPatches',

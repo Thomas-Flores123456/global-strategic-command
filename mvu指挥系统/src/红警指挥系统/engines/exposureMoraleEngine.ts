@@ -51,6 +51,202 @@ export interface MoraleStageInfo {
   effectSummary: string;
 }
 
+export interface CivicFacilityDef {
+  id: string;
+  canonicalName: string;
+  categoryLabel: string;
+  firstBuildBonus: number;
+  monthlyMoraleBonus: number;
+  dailyMoraleBonus: number;
+  powerOutageImpactText: string;
+  powerOutageDailyPenalty: number;
+  isCriticalWaterOrSewage: boolean;
+  unlocksInformantChannel: boolean;
+  summary: string;
+}
+
+export interface InstalledCivicFacilityItem {
+  defId: string;
+  canonicalName: string;
+  buildingName: string;
+  baseId: string;
+  baseName: string;
+  buildingState: string;
+  isOperational: boolean;
+  basePowerDeficit: boolean;
+  effectiveMonthlyBonus: number;
+  effectiveDailyBonus: number;
+  outagePenaltyDaily: number;
+  statusText: string;
+}
+
+export interface CivicFacilitiesEvaluation {
+  installedFacilities: InstalledCivicFacilityItem[];
+  missingRecommendations: CivicFacilityDef[];
+  totalMonthlyBonus: number;
+  rawDailyBonus: number;
+  effectiveDailyBonus: number;
+  powerOutagePenaltyDaily: number;
+  hasWaterOrSewageOutage: boolean;
+  unlocksCivilInformantChannel: boolean;
+}
+
+export interface BaseExposureFloorBreakdown {
+  baseId: string;
+  baseName: string;
+  siteType: string;
+  siteTypeLabel: string;
+  factionsInBase: string[];
+  factionMixPenalty: number;
+  heavyBeacons: string[];
+  heavyBeaconPenalty: number;
+  stealthShields: string[];
+  stealthShieldOffset: number;
+  siteModifier: number;
+  netBaseFloor: number;
+}
+
+export interface ExposureFloorExplanation {
+  totalFloor: number;
+  irreversibleLocked: boolean;
+  baseBreakdowns: BaseExposureFloorBreakdown[];
+  compactSummary: string;
+}
+
+interface CivicFacilityCatalogEntry extends CivicFacilityDef {
+  matchRe: RegExp;
+}
+
+const CIVIC_FACILITY_ENTRIES: readonly CivicFacilityCatalogEntry[] = [
+  {
+    id: 'water_supply',
+    canonicalName: '净水与供水站',
+    categoryLabel: '市政供水主力',
+    firstBuildBonus: 0.5,
+    monthlyMoraleBonus: 0.15,
+    dailyMoraleBonus: 0.005,
+    powerOutageImpactText: '高危断供：加压泵降载，水塔耗尽后社区停水，触发断水反噬预警（-0.05/日）',
+    powerOutageDailyPenalty: 0.05,
+    isCriticalWaterOrSewage: true,
+    unlocksInformantChannel: false,
+    summary: '饮用水四级净化与管网配送（民生头号主力）',
+    matchRe: /净水与供水|净水站|自来水厂|供水站/i,
+  },
+  {
+    id: 'eco_park',
+    canonicalName: '生态公园与绿化设施',
+    categoryLabel: '生态休憩与伪装',
+    firstBuildBonus: 0.5,
+    monthlyMoraleBonus: 0.12,
+    dailyMoraleBonus: 0.004,
+    powerOutageImpactText: '低敏韧性：仅关闭景观照明，退回人工浇灌，核心民心滋养保留 80%',
+    powerOutageDailyPenalty: 0,
+    isCriticalWaterOrSewage: false,
+    unlocksInformantChannel: false,
+    summary: '公共绿地休憩、微气候调节与地表伪装',
+    matchRe: /生态公园|绿化设施|公共绿地/i,
+  },
+  {
+    id: 'public_sanitation',
+    canonicalName: '社区环卫服务站',
+    categoryLabel: '公共防疫与环卫',
+    firstBuildBonus: 0.35,
+    monthlyMoraleBonus: 0.12,
+    dailyMoraleBonus: 0.004,
+    powerOutageImpactText: '防疫降载：机械清运停摆退回人工，防疫效率折半',
+    powerOutageDailyPenalty: 0,
+    isCriticalWaterOrSewage: false,
+    unlocksInformantChannel: true,
+    summary: '垃圾密闭清运、公共消杀与烈性疫病防疫',
+    matchRe: /社区环卫|环卫服务站|环卫站/i,
+  },
+  {
+    id: 'waste_sorting',
+    canonicalName: '基础废物分拣站',
+    categoryLabel: '惠民回收与眼线',
+    firstBuildBonus: 0.25,
+    monthlyMoraleBonus: 0.1,
+    dailyMoraleBonus: 0.0033,
+    powerOutageImpactText: '收购降速：分选线停机退回人工称重，情报与民心效能折半',
+    powerOutageDailyPenalty: 0,
+    isCriticalWaterOrSewage: false,
+    unlocksInformantChannel: true,
+    summary: '平价废品收购惠民窗口 +「民间眼线」社区情报源',
+    matchRe: /基础废物分拣|废物分拣站|废品分拣站|废品收购站/i,
+  },
+  {
+    id: 'domestic_wastewater',
+    canonicalName: '生活污水处理站',
+    categoryLabel: '污水净化与隐蔽',
+    firstBuildBonus: 0.3,
+    monthlyMoraleBonus: 0.09,
+    dailyMoraleBonus: 0.003,
+    powerOutageImpactText: '污水外溢风险：曝气池停机致出水水质恶化，触发臭气/污染告警（-0.03/日）',
+    powerOutageDailyPenalty: 0.03,
+    isCriticalWaterOrSewage: true,
+    unlocksInformantChannel: false,
+    summary: '生活黑水/灰水生化处理与中水回用，消除排污暴露',
+    matchRe: /生活污水处理|污水处理站|污水处理厂/i,
+  },
+  {
+    id: 'deep_well_pump',
+    canonicalName: '深井泵站与水文净化设施',
+    categoryLabel: '深层水源共生',
+    firstBuildBonus: 0.3,
+    monthlyMoraleBonus: 0.09,
+    dailyMoraleBonus: 0.003,
+    powerOutageImpactText: '供水降压：外接共生水网停泵，暂停民心正滋养',
+    powerOutageDailyPenalty: 0,
+    isCriticalWaterOrSewage: false,
+    unlocksInformantChannel: false,
+    summary: '承压水开采与周边缺水聚落民用共生供水',
+    matchRe: /深井泵站|水文净化设施/i,
+  },
+  {
+    id: 'site_remediation',
+    canonicalName: '生态修复站',
+    categoryLabel: '污染毒地修复',
+    firstBuildBonus: 0.6,
+    monthlyMoraleBonus: 0.15,
+    dailyMoraleBonus: 0.005,
+    powerOutageImpactText: '修复停滞：淋洗泵停机致修复周期顺延',
+    powerOutageDailyPenalty: 0,
+    isCriticalWaterOrSewage: false,
+    unlocksInformantChannel: false,
+    summary: '污染毒地淋洗与微生物降解修复（长周期高回报）',
+    matchRe: /生态修复站|污染场地修复/i,
+  },
+  {
+    id: 'env_monitoring',
+    canonicalName: '环境监测站',
+    categoryLabel: '水源与大气哨戒',
+    firstBuildBonus: 0.15,
+    monthlyMoraleBonus: 0.06,
+    dailyMoraleBonus: 0.002,
+    powerOutageImpactText: '盲区风险：传感器降采样，丧失水质事故实时预警能力',
+    powerOutageDailyPenalty: 0,
+    isCriticalWaterOrSewage: false,
+    unlocksInformantChannel: false,
+    summary: '水源/大气全天候传感监测，防范水源投毒与排污泄露',
+    matchRe: /环境监测站/i,
+  },
+];
+
+export const CIVIC_FACILITY_CATALOG: readonly CivicFacilityDef[] = CIVIC_FACILITY_ENTRIES.map(
+  ({ matchRe: _matchRe, ...def }) => def,
+);
+
+const MISSING_RECOMMENDATION_PRIORITY: readonly string[] = [
+  'water_supply',
+  'public_sanitation',
+  'waste_sorting',
+  'domestic_wastewater',
+  'eco_park',
+  'deep_well_pump',
+  'site_remediation',
+  'env_monitoring',
+];
+
 const SUPERWEAPON_OR_HEAVY_BEACON_RE =
   /天气控制|核弹发射井|基因突变|心灵控制塔|心灵信标|铁幕装置|巨炮|要塞巨炮|航天发射|质量投射/i;
 const STEALTH_SHIELD_BUILDING_RE = /裂缝产生器|超维暗网|暗网中继|伪装网|电磁欺骗/i;
@@ -238,6 +434,286 @@ export function getMoraleChainMultiplier(
   return resolveMoraleStage(moraleValue ?? 5.0, opts).chainMultiplier;
 }
 
+export function round4(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 10000) / 10000;
+}
+
+/**
+ * 匹配建筑名称是否属于 §1.2 定义的 8 类驻地民生与环保公共设施
+ */
+export function matchCivicFacilityDef(buildingName: string): CivicFacilityDef | undefined {
+  const raw = String(buildingName ?? '').trim();
+  if (!raw) return undefined;
+  for (let i = 0; i < CIVIC_FACILITY_ENTRIES.length; i++) {
+    if (CIVIC_FACILITY_ENTRIES[i].matchRe.test(raw)) {
+      return CIVIC_FACILITY_CATALOG[i];
+    }
+  }
+  return undefined;
+}
+
+/**
+ * 扫描各在役基地建筑，盘点驻地民生与环保公共设施的运转状态、月度/日均民心滋养与主网赤字断供风险
+ */
+export function evaluateCivicFacilities(
+  bases?: ReadonlyArray<{
+    id?: string;
+    name?: string;
+    status?: string;
+    power?: { gen?: number; use?: number };
+    buildings?: ReadonlyArray<{ name?: string; layer?: string; state?: string }>;
+  }> | null,
+  opts?: { moraleEngaged?: boolean; moraleValue?: number },
+): CivicFacilitiesEvaluation {
+  const installedFacilities: InstalledCivicFacilityItem[] = [];
+  const installedDefIds = new Set<string>();
+  let hasWaterOrSewageOutage = false;
+
+  for (const base of bases ?? []) {
+    if (!base || base.status === '废弃' || base.status === '失守') continue;
+    const baseId = String(base.id ?? base.name ?? '主基地');
+    const baseName = String(base.name ?? base.id ?? '主基地');
+    const basePowerDeficit = Number(base.power?.use ?? 0) > Number(base.power?.gen ?? 0);
+
+    for (const bld of base.buildings ?? []) {
+      if (!bld) continue;
+      const buildingName = String(bld.name ?? '').trim();
+      const def = matchCivicFacilityDef(buildingName);
+      if (!def) continue;
+
+      installedDefIds.add(def.id);
+      const buildingState = String(bld.state ?? '运转').trim() || '运转';
+      const isOperational = !/受损|重损|轻损|停机|离线|被毁|建造中/.test(buildingState);
+
+      let effectiveMonthlyBonus = 0;
+      let effectiveDailyBonus = 0;
+      let outagePenaltyDaily = 0;
+      let statusText = `${buildingState}（暂停滋养）`;
+
+      if (isOperational && !basePowerDeficit) {
+        effectiveMonthlyBonus = def.monthlyMoraleBonus;
+        effectiveDailyBonus = def.dailyMoraleBonus;
+        outagePenaltyDaily = 0;
+        statusText = '供电正常·满负荷滋养';
+      } else if (isOperational && basePowerDeficit) {
+        if (def.id === 'eco_park') {
+          effectiveMonthlyBonus = round4(def.monthlyMoraleBonus * 0.8);
+          effectiveDailyBonus = round4(def.dailyMoraleBonus * 0.8);
+          statusText = '主网缺电·低敏韧性（保留80%滋养）';
+        } else if (def.id === 'public_sanitation' || def.id === 'waste_sorting') {
+          effectiveMonthlyBonus = round4(def.monthlyMoraleBonus * 0.5);
+          effectiveDailyBonus = round4(def.dailyMoraleBonus * 0.5);
+          statusText = '主网缺电·人工降载（保留50%滋养）';
+        } else if (def.isCriticalWaterOrSewage) {
+          effectiveMonthlyBonus = 0;
+          effectiveDailyBonus = 0;
+          outagePenaltyDaily = def.powerOutageDailyPenalty;
+          hasWaterOrSewageOutage = true;
+          statusText = `⚠️ 主网缺电断供（-${def.powerOutageDailyPenalty}/日）`;
+        } else {
+          effectiveMonthlyBonus = 0;
+          effectiveDailyBonus = 0;
+          statusText = '主网缺电·停泵待机（暂停滋养）';
+        }
+      }
+
+      installedFacilities.push({
+        defId: def.id,
+        canonicalName: def.canonicalName,
+        buildingName,
+        baseId,
+        baseName,
+        buildingState,
+        isOperational,
+        basePowerDeficit,
+        effectiveMonthlyBonus,
+        effectiveDailyBonus,
+        outagePenaltyDaily,
+        statusText,
+      });
+    }
+  }
+
+  const missingRecommendations: CivicFacilityDef[] = [];
+  for (const id of MISSING_RECOMMENDATION_PRIORITY) {
+    if (installedDefIds.has(id)) continue;
+    const def = CIVIC_FACILITY_CATALOG.find(d => d.id === id);
+    if (def) missingRecommendations.push(def);
+  }
+
+  const totalMonthlyBonus = round2(
+    installedFacilities.reduce((sum, item) => sum + item.effectiveMonthlyBonus, 0),
+  );
+  const rawDailyBonus = round4(
+    installedFacilities.reduce((sum, item) => sum + item.effectiveDailyBonus, 0),
+  );
+  const effectiveDailyBonus = Math.min(0.025, rawDailyBonus);
+  const powerOutagePenaltyDaily = round4(
+    installedFacilities.reduce((sum, item) => sum + item.outagePenaltyDaily, 0),
+  );
+  const unlocksCivilInformantChannel =
+    installedFacilities.some(
+      f => f.isOperational && (f.defId === 'waste_sorting' || f.defId === 'public_sanitation'),
+    ) || Boolean(opts?.moraleEngaged && Number(opts?.moraleValue ?? 5) >= 6.5);
+
+  return {
+    installedFacilities,
+    missingRecommendations,
+    totalMonthlyBonus,
+    rawDailyBonus,
+    effectiveDailyBonus,
+    powerOutagePenaltyDaily,
+    hasWaterOrSewageOutage,
+    unlocksCivilInformantChannel,
+  };
+}
+
+function resolveSiteTypeLabel(siteType: string): string {
+  switch (siteType) {
+    case 'inland_canyon':
+      return '内陆山谷/峡谷';
+    case 'high_latitude':
+      return '高纬冻土/极地';
+    case 'sea_platform':
+      return '远海钻井/海上平台';
+    case 'equatorial_coastal':
+      return '赤道/低纬海岸';
+    case 'orbital_dock':
+      return '近地轨道船坞（地面零暴露）';
+    case 'lunar_surface':
+      return '月面基地（地面零暴露）';
+    default:
+      return '常规陆地防区';
+  }
+}
+
+/**
+ * 推导并拆解当前战区常驻暴露底线（exposure.floor）的分基地物理来源（FD-55 · §1.3）
+ */
+export function explainExposureFloor(state: {
+  exposure?: { value?: number; floor?: number };
+  bases?: ReadonlyArray<{
+    id?: string;
+    name?: string;
+    status?: string;
+    site_type?: string;
+    buildings?: ReadonlyArray<{ name?: string; layer?: string; state?: string }>;
+  }>;
+}): ExposureFloorExplanation {
+  const prevValue = Number(state.exposure?.value ?? 0);
+  const prevFloor = Number(state.exposure?.floor ?? 0);
+  const irreversibleLocked = prevValue >= 9.0 || prevFloor >= 9.0;
+
+  const baseBreakdowns: BaseExposureFloorBreakdown[] = [];
+  let rawFloor = 0;
+
+  for (const base of state.bases ?? []) {
+    if (!base || base.status === '废弃' || base.status === '失守') continue;
+    const baseId = String(base.id ?? base.name ?? '主基地');
+    const baseName = String(base.name ?? base.id ?? '主基地');
+    const siteType = String(base.site_type ?? '');
+    const siteTypeLabel = resolveSiteTypeLabel(siteType);
+
+    if (siteType === 'orbital_dock' || siteType === 'lunar_surface') {
+      baseBreakdowns.push({
+        baseId,
+        baseName,
+        siteType,
+        siteTypeLabel,
+        factionsInBase: [],
+        factionMixPenalty: 0,
+        heavyBeacons: [],
+        heavyBeaconPenalty: 0,
+        stealthShields: [],
+        stealthShieldOffset: 0,
+        siteModifier: 0,
+        netBaseFloor: 0,
+      });
+      continue;
+    }
+
+    const factionsInBaseSet = new Set<string>();
+    const heavyBeacons: string[] = [];
+    const stealthShields: string[] = [];
+
+    for (const bld of base.buildings ?? []) {
+      if (!bld || bld.state === '停机') continue;
+      const bName = String(bld.name ?? '').trim();
+      const bLayer = String(bld.layer ?? '');
+      const isUnderground = /地下|空腔|掩体/.test(bLayer);
+
+      if (!isUnderground) {
+        if (ALLIED_BUILDING_RE.test(bName)) factionsInBaseSet.add('盟军');
+        if (SOVIET_BUILDING_RE.test(bName)) factionsInBaseSet.add('苏联');
+        if (YURI_BUILDING_RE.test(bName)) factionsInBaseSet.add('尤里');
+        if (SUPERWEAPON_OR_HEAVY_BEACON_RE.test(bName)) {
+          heavyBeacons.push(bName);
+        }
+      }
+      if (STEALTH_SHIELD_BUILDING_RE.test(bName)) {
+        stealthShields.push(bName);
+      }
+    }
+
+    const factionsInBase = Array.from(factionsInBaseSet);
+    const factionMixPenalty =
+      factionsInBase.length === 2 ? 0.4 : factionsInBase.length >= 3 ? 0.9 : 0;
+    const heavyBeaconPenalty = round2(heavyBeacons.length * 0.6);
+    const stealthShieldOffset = stealthShields.length > 0 ? round2(-stealthShields.length * 0.35) : 0;
+    const siteModifier =
+      siteType === 'inland_canyon' || siteType === 'high_latitude'
+        ? -0.15
+        : siteType === 'sea_platform'
+          ? -0.25
+          : 0;
+
+    const netBaseFloor = round2(
+      Math.max(0, factionMixPenalty + heavyBeaconPenalty + stealthShieldOffset + siteModifier),
+    );
+    rawFloor += netBaseFloor;
+
+    baseBreakdowns.push({
+      baseId,
+      baseName,
+      siteType,
+      siteTypeLabel,
+      factionsInBase,
+      factionMixPenalty,
+      heavyBeacons,
+      heavyBeaconPenalty,
+      stealthShields,
+      stealthShieldOffset,
+      siteModifier,
+      netBaseFloor,
+    });
+  }
+
+  const totalFloor = irreversibleLocked ? 9.0 : clampRange(rawFloor, 0, 8.5);
+  let compactSummary = '';
+  if (irreversibleLocked) {
+    compactSummary = 'EL-4永久出圈锁定(>=9.0)';
+  } else if (totalFloor > 0) {
+    const totalMix = round2(baseBreakdowns.reduce((s, b) => s + b.factionMixPenalty, 0));
+    const totalHeavy = round2(baseBreakdowns.reduce((s, b) => s + b.heavyBeaconPenalty, 0));
+    const totalStealth = round2(baseBreakdowns.reduce((s, b) => s + b.stealthShieldOffset, 0));
+    const totalSite = round2(baseBreakdowns.reduce((s, b) => s + b.siteModifier, 0));
+    const parts: string[] = [];
+    if (totalMix > 0) parts.push(`混建+${totalMix}`);
+    if (totalHeavy > 0) parts.push(`超武+${totalHeavy}`);
+    if (totalStealth < 0) parts.push(`伪装${totalStealth}`);
+    if (totalSite < 0) parts.push(`选址${totalSite}`);
+    compactSummary = parts.join('｜');
+  }
+
+  return {
+    totalFloor,
+    irreversibleLocked,
+    baseBreakdowns,
+    compactSummary,
+  };
+}
+
 /**
  * 推导当前战区常驻暴露底线（exposure.floor）：
  * - 若已达到 EL-4（>= 9.0 或现有 floor >= 9.0），不可逆锁定底线 >= 9.0；
@@ -248,62 +724,14 @@ export function getMoraleChainMultiplier(
 export function computeExposureFloor(state: {
   exposure?: { value?: number; floor?: number };
   bases?: ReadonlyArray<{
+    id?: string;
+    name?: string;
     status?: string;
     site_type?: string;
     buildings?: ReadonlyArray<{ name?: string; layer?: string; state?: string }>;
   }>;
 }): number {
-  const prevValue = Number(state.exposure?.value ?? 0);
-  const prevFloor = Number(state.exposure?.floor ?? 0);
-  if (prevValue >= 9.0 || prevFloor >= 9.0) {
-    return 9.0;
-  }
-
-  let rawFloor = 0;
-  for (const base of state.bases ?? []) {
-    if (!base || base.status === '废弃' || base.status === '失守') continue;
-    const siteType = String(base.site_type ?? '');
-    if (siteType === 'orbital_dock' || siteType === 'lunar_surface') continue;
-
-    const factionsInBase = new Set<'allied' | 'soviet' | 'yuri'>();
-    let heavySources = 0;
-    let stealthShields = 0;
-
-    for (const bld of base.buildings ?? []) {
-      if (!bld || bld.state === '停机') continue;
-      const bName = String(bld.name ?? '');
-      const bLayer = String(bld.layer ?? '');
-      const isUnderground = /地下|空腔|掩体/.test(bLayer);
-
-      if (!isUnderground) {
-        if (ALLIED_BUILDING_RE.test(bName)) factionsInBase.add('allied');
-        if (SOVIET_BUILDING_RE.test(bName)) factionsInBase.add('soviet');
-        if (YURI_BUILDING_RE.test(bName)) factionsInBase.add('yuri');
-        if (SUPERWEAPON_OR_HEAVY_BEACON_RE.test(bName)) {
-          heavySources++;
-        }
-      }
-      if (STEALTH_SHIELD_BUILDING_RE.test(bName)) {
-        stealthShields++;
-      }
-    }
-
-    let baseFloor = 0;
-    if (factionsInBase.size === 2) baseFloor += 0.4;
-    if (factionsInBase.size >= 3) baseFloor += 0.9;
-    baseFloor += heavySources * 0.6;
-    baseFloor -= stealthShields * 0.35;
-
-    if (siteType === 'inland_canyon' || siteType === 'high_latitude') {
-      baseFloor -= 0.15;
-    } else if (siteType === 'sea_platform') {
-      baseFloor -= 0.25;
-    }
-
-    rawFloor += Math.max(0, baseFloor);
-  }
-
-  return clampRange(rawFloor, 0, 8.5);
+  return explainExposureFloor(state).totalFloor;
 }
 
 export interface ExposureMoraleSettleInput {
@@ -321,6 +749,8 @@ export interface ExposureMoraleSettleInput {
   moraleLastChange?: string | null;
   /** 是否启用无冲击轮次的自然冷却衰减与民心联动漂移（默认 true） */
   enableNaturalDrift?: boolean;
+  /** 时钟推进分钟数（Δt > 0 时触发在役民生设施自动滋养或断供反噬） */
+  deltaMinutes?: number | null;
 }
 
 export interface ExposureMoraleSettleResult {
@@ -355,8 +785,11 @@ export function settleExposureAndMorale(
     exposure?: { value?: number; floor?: number; level?: string; trend?: string; last_change?: string };
     morale?: { value?: number; level?: string; engaged?: boolean; trend?: string; last_change?: string };
     bases?: ReadonlyArray<{
+      id?: string;
+      name?: string;
       status?: string;
       site_type?: string;
+      power?: { gen?: number; use?: number };
       buildings?: ReadonlyArray<{ name?: string; layer?: string; state?: string }>;
     }>;
   },
@@ -418,6 +851,32 @@ export function settleExposureAndMorale(
     hasDeltaMorale ||
     hasMoraleMeta ||
     prelimExpVal >= 4.5;
+
+  // FD-55 · 当已破冰且本轮无显式民心输入、时钟推进 Δt > 0 时，执行民生与环保公共设施确定性滋养或断供反噬
+  const deltaMinutes = Number(input.deltaMinutes ?? 0);
+  if (
+    nextEngaged &&
+    !hasDeltaMorale &&
+    !hasExplicitMorale &&
+    Number.isFinite(deltaMinutes) &&
+    deltaMinutes > 0
+  ) {
+    const civicEval = evaluateCivicFacilities(currentState.bases, {
+      moraleEngaged: nextEngaged,
+      moraleValue: nextMoraleVal,
+    });
+    if (civicEval.hasWaterOrSewageOutage && civicEval.powerOutagePenaltyDaily > 0) {
+      const rawPenalty = civicEval.powerOutagePenaltyDaily * (deltaMinutes / 1440);
+      const effectivePenalty =
+        deltaMinutes >= 360 ? Math.max(0.01, round2(rawPenalty)) : round2(rawPenalty);
+      nextMoraleVal = clampRange(nextMoraleVal - effectivePenalty, 0, 10);
+    } else if (civicEval.effectiveDailyBonus > 0 && nextMoraleVal < 8.5) {
+      const rawBonus = civicEval.effectiveDailyBonus * (deltaMinutes / 1440);
+      const effectiveBonus =
+        deltaMinutes >= 360 ? Math.max(0.01, round2(rawBonus)) : round2(rawBonus);
+      nextMoraleVal = Math.min(8.5, clampRange(nextMoraleVal + effectiveBonus, 0, 8.5));
+    }
+  }
 
   const moraleStageInfo = resolveMoraleStage(nextMoraleVal, {
     engaged: nextEngaged,

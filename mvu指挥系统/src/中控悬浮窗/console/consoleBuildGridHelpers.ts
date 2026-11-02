@@ -1,4 +1,19 @@
 import { normalizeFactionId } from '../../红警指挥系统/core/commandPresets';
+import {
+  buildDeployFcvOrderText,
+  buildDeployOutpostNodeOrderText,
+  checkBuildingAllowedByAuthority,
+  evaluateBaseBuildAuthority,
+  isFcvSiteBuildingName,
+  isFcvVehicleName,
+  isMainConyardBuildingName,
+  isMainMcvVehicleName,
+  isOutpostNodeBuildingName,
+  isOutpostNodeVehicleName,
+  type BaseBuildAuthorityEvaluation,
+  type BaseBuildAuthorityTier,
+  type FcvGirlEmpowerment,
+} from '../../红警指挥系统/core/buildAuthority';
 import { setHasEquivalentBuilding } from '../../红警指挥系统/core/prerequisites';
 import type { Base, CodexEntry, QueueItem, Schema } from '../../红警指挥系统/core/schema';
 import { canon } from '../../红警指挥系统/parse/parsePipeline';
@@ -61,7 +76,27 @@ export interface ConsoleBuildItem {
   dynamic?: boolean;
   isFavorite?: boolean;
   title?: string;
+  grantedByGirlSkill?: boolean;
+  grantLabel?: string;
+  authorityLocked?: boolean;
+  authorityLockReason?: string;
 }
+
+export {
+  buildDeployFcvOrderText,
+  buildDeployOutpostNodeOrderText,
+  checkBuildingAllowedByAuthority,
+  evaluateBaseBuildAuthority,
+  isFcvSiteBuildingName,
+  isFcvVehicleName,
+  isMainConyardBuildingName,
+  isMainMcvVehicleName,
+  isOutpostNodeBuildingName,
+  isOutpostNodeVehicleName,
+  type BaseBuildAuthorityEvaluation,
+  type BaseBuildAuthorityTier,
+  type FcvGirlEmpowerment,
+};
 
 export const FACTION_LABELS: Readonly<Record<string, string>> = {
   all: '全部',
@@ -71,7 +106,7 @@ export const FACTION_LABELS: Readonly<Record<string, string>> = {
   common: '通用',
 };
 
-/** 建造厂核心建筑名称集合（必须存在且处于运转态才可解锁基地建筑建造序列） */
+/** 建造厂核心与前哨工地建筑名称集合（存在且处于运转态即可激活基地建造面板） */
 export const CONYARD_BUILDING_NAMES = new Set([
   '建造厂',
   '建造厂核心',
@@ -81,6 +116,9 @@ export const CONYARD_BUILDING_NAMES = new Set([
   '尤里建造厂核心',
   '前沿工地',
   '作战前哨站',
+  '一次展开前沿节点',
+  'Sputnik一次展开前沿节点',
+  '前哨基地节点',
 ]);
 
 export const CONSTRUCTION_YARDS = CONYARD_BUILDING_NAMES;
@@ -508,14 +546,36 @@ export function buildActiveQueueCountMap(
 
 export const buildQueueCountMap = buildActiveQueueCountMap;
 
-/** 运行时前置条件求值上下文（联动当前选定基地、已完成科技、兵力与已启封战略协议；兼容阵营前缀建筑名同义映射） */
+/** 运行时前置条件求值上下文（联动当前选定基地、已完成科技、兵力与已启封战略协议；兼容阵营前缀建筑名同义映射与 FCV/前哨节点后方产线支撑） */
 export function buildPrerequisiteContext(
   snapshot: Schema | null | undefined,
   activeBaseIndex: number,
   catalogProtocols: unknown,
+  authority?: BaseBuildAuthorityEvaluation | null,
 ) {
   const rawBases = snapshot?.bases ?? [];
-  const bases = rawBases.map(base => {
+  const effectiveAuthority =
+    authority ??
+    evaluateBaseBuildAuthority({
+      base: rawBases[activeBaseIndex] ?? rawBases[0] ?? null,
+      snapshot,
+    });
+
+  // 收集战区后方基地已运转的建筑名称（供 FCV 前沿工地 / 前哨节点依托后方产线满足兵营/车厂/矿场等母体前置）
+  const rearOperationalBuildingNames = new Set<string>();
+  for (const b of rawBases) {
+    for (const bld of b.buildings ?? []) {
+      if ((bld.state ?? '运转') === '运转' && bld.name?.trim()) {
+        const trimmed = bld.name.trim();
+        rearOperationalBuildingNames.add(trimmed);
+        const stripped = stripFactionBuildingPrefix(trimmed);
+        if (stripped && stripped.length >= 2) rearOperationalBuildingNames.add(stripped);
+      }
+    }
+  }
+
+  const targetIdx = rawBases[activeBaseIndex] ? activeBaseIndex : 0;
+  const bases = rawBases.map((base, idx) => {
     const existingNames = new Set((base.buildings ?? []).map(b => b.name.trim()));
     const expandedBuildings = [...(base.buildings ?? [])];
     for (const b of base.buildings ?? []) {
@@ -524,6 +584,28 @@ export function buildPrerequisiteContext(
       if (stripped && stripped.length >= 2 && !existingNames.has(stripped)) {
         existingNames.add(stripped);
         expandedBuildings.push({ ...b, name: stripped });
+      }
+    }
+    // 当目标据点处于 FCV 现地筑城或前哨节点权限（含 FCV 机娘驻地/专责赋能）时：
+    // 1. 注入虚拟「前沿工地」以满足根建造核心门槛；
+    // 2. 注入车载「发电厂」（独立柴油微网接口）与后方基地已运转母体建筑（兵营/车厂/矿场），具体越权建筑由 checkBuildingAllowedByAuthority 严格过滤。
+    if (
+      idx === targetIdx &&
+      (effectiveAuthority.tier === 'fcv_whitelist' || effectiveAuthority.tier === 'outpost_node')
+    ) {
+      if (!existingNames.has('前沿工地')) {
+        existingNames.add('前沿工地');
+        expandedBuildings.push({ name: '前沿工地', layer: '', state: '运转' });
+      }
+      if (!existingNames.has('发电厂')) {
+        existingNames.add('发电厂');
+        expandedBuildings.push({ name: '发电厂', layer: '', state: '运转' });
+      }
+      for (const rearName of rearOperationalBuildingNames) {
+        if (!existingNames.has(rearName)) {
+          existingNames.add(rearName);
+          expandedBuildings.push({ name: rearName, layer: '', state: '运转' });
+        }
       }
     }
     return {
@@ -551,7 +633,11 @@ export function resolveCurrentBase(snapshot: Schema | null | undefined, activeBa
   return bases[activeBaseIndex] ?? bases[0] ?? null;
 }
 
-export function checkHasOperationalConyard(base: Base | null | undefined): boolean {
+export function checkHasOperationalConyard(
+  base: Base | null | undefined,
+  authority?: BaseBuildAuthorityEvaluation | null,
+): boolean {
+  if (authority?.canBuild) return true;
   const buildings = base?.buildings ?? [];
   return buildings.some(b => b.state === '运转' && CONYARD_BUILDING_NAMES.has(b.name.trim()));
 }
@@ -559,6 +645,7 @@ export function checkHasOperationalConyard(base: Base | null | undefined): boole
 export function resolveBaseConyardFactions(
   base: Base | null | undefined,
   fallbackFaction = 'allied',
+  authority?: BaseBuildAuthorityEvaluation | null,
 ): Set<string> {
   const factions = new Set<string>();
   for (const b of base?.buildings ?? []) {
@@ -568,6 +655,9 @@ export function resolveBaseConyardFactions(
     else if (/^尤里/.test(name)) factions.add('yuri');
     else if (/^盟军/.test(name)) factions.add('allied');
     else factions.add(fallbackFaction);
+  }
+  if (factions.size === 0 && authority?.canBuild) {
+    factions.add(fallbackFaction);
   }
   return factions;
 }
@@ -653,7 +743,7 @@ export function checkBaseHasFactionMotherBuilding(
 }
 
 export function isMcvVehicleName(name: string): boolean {
-  return /MCV|移动基地车|基地车/i.test(name);
+  return isMainMcvVehicleName(name);
 }
 
 export function inferBuildEntryFaction(entry: {
@@ -1374,4 +1464,65 @@ export function checkIsZeroBaseStandby(
     (snapshot.pending_deployments?.length ?? 0) > 0
   );
 }
+
+const CODEX_BUILDABLE_KEYS = ['可建造', '可制造', '可生产', '可研发', '系统可造', 'buildable'] as const;
+const CODEX_ORIGIN_KEYS = ['来源性质', '来源', '性质', '出处', 'origin'] as const;
+const CODEX_PRODUCTION_HINT_KEYS = [
+  '造价',
+  '费用',
+  '研发费用',
+  '生产造价',
+  '建造费用',
+  '工期',
+  '耗电',
+  '前置',
+  '前置科技',
+  '生产建筑',
+  '所需建筑',
+  'cost',
+] as const;
+
+/**
+ * 判断动态图鉴（codex）中的建筑/载具/人员/装备条目是否可由我方红警系统建造/生产：
+ * 1. 若 params 中显式标注 `可建造: 否 | false | 不可建造 | 仅情报 | 孤品 | 战利品`，一律返回 false；
+ * 2. 若 params 中 `来源性质` 属于 `缴获 | 战利品 | 孤品 | 不可制造 | 仅情报` 且未标 `可建造: 是`，返回 false；
+ * 3. 若 params 中既未标 `可建造: 是`，又完全没有任何造价/工期/耗电/前置/生产建筑字段，且携带有其他非产线情报字段（如仅含「保密等级/存放点/吨位/所属」的旧档孤品或情报道具），返回 false。
+ */
+export function isCodexEntryBuildableBySystem(entry: {
+  kind?: string;
+  name?: string;
+  desc?: string;
+  params?: Record<string, string>;
+}): boolean {
+  const params = entry.params;
+  if (!params || typeof params !== 'object') return true;
+  for (const k of CODEX_BUILDABLE_KEYS) {
+    const raw = String(params[k] ?? '').trim();
+    if (!raw) continue;
+    if (/^(?:否|false|no|0|不可建造|不可制造|不可生产|不可研发|仅情报|孤品|战利品|敌方专属|本土造物)$/i.test(raw)) {
+      return false;
+    }
+    if (/(?:^否|不可|不能|禁止|仅情报|孤品|战利品|敌方专属)/.test(raw)) {
+      return false;
+    }
+    if (/^(?:是|true|yes|1|可建造|可制造|可生产|可研发|系统可造)$/i.test(raw)) {
+      return true;
+    }
+  }
+  for (const k of CODEX_ORIGIN_KEYS) {
+    const raw = String(params[k] ?? '').trim();
+    if (raw && /(?:缴获|战利品|孤品|敌方专属|本土采购|外部采购|不可建造|不可制造|不可生产|不可研发|仅情报|遗迹孤品|跨卡旧物)/.test(raw)) {
+      return false;
+    }
+  }
+  const paramKeys = Object.keys(params).filter(k => String(params[k] ?? '').trim() !== '');
+  if (paramKeys.length > 0) {
+    const hasAnyProdHint = CODEX_PRODUCTION_HINT_KEYS.some(k => String(params[k] ?? '').trim() !== '');
+    if (!hasAnyProdHint) {
+      return false;
+    }
+  }
+  return true;
+}
+
 

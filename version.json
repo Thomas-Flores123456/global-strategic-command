@@ -1,10 +1,18 @@
 {
   "project": "SillyTavern-世界观构建",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "save_schema": 2,
   "updated_at": "2026-10-29",
   "manifest_url": "https://raw.githubusercontent.com/Thomas-Flores123456/global-strategic-command/main/version.json",
   "releases": [
+    {
+      "version": "2.5.0",
+      "date": "2026-10-29",
+      "breaking_save": false,
+      "save_schema": 2,
+      "summary": "战区舆情与暴露态势中枢、基地三级建造权限与 FCV 机娘扩权、跨基地兵力调防协议、日程台甘特泳道升级与跨局战史摘要冷存闭环",
+      "save_migration_note": "完全兼容 SavePack V2 战局档案，支持旧档战史摘要智能冷存与跨聊天无损恢复。"
+    },
     {
       "version": "2.4.0",
       "date": "2026-10-28",

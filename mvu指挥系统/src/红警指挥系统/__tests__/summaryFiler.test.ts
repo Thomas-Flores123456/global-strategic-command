@@ -15,15 +15,18 @@ import {
   SUMMARY_TOKEN_BUDGET_SINGLE,
   SUMMARY_TOKEN_BUDGET_TOTAL,
   adoptSummary,
+  applySummarySmartWindow,
   buildCustomApiFromEndpointConfig,
   computeSummaryContextBreakdown,
   discardSummary,
   estimateTextTokens,
+  extractLegacySummaryEntries,
   extractSummaryRanges,
   fileSummary,
   filterExemptFloors,
   formatFloor,
   formatMicroSummariesForPrompt,
+  getLegacySummaryAutoManage,
   getSummaryAutoConfirm,
   getSummaryBudgetConfig,
   getSummaryChannel,
@@ -33,26 +36,34 @@ import {
   getSummaryTrigger,
   hideRange,
   isHidingGateApproved,
+  manageLegacySummaryEntries,
   nextMacroSummaryCandidate,
   nextSummaryOrder,
   nextSummaryRange,
+  optimizeSummaryWorldbookEntries,
   parseSummaryComment,
   parseSummaryCommentWithTier,
   parseSummaryResponse,
   probeHiddenFloorEffects,
   pruneSummariesAboveFloor,
   reconcileChatSummariesAboveFloor,
+  reconcileLegacySummariesWithProgress,
   renderSummaryComment,
   requestMacroSummary,
   requestSummary,
+  sanitizeSummaryTriggerKeys,
   setHidingGateApproved,
+  setLegacySummaryAutoManage,
+  setLegacySummaryEntriesMode,
   setSummaryAutoConfirm,
   setSummaryBudgetConfig,
   setSummaryChannel,
   setSummaryEndpointConfig,
+  setSummaryEntryEnabled,
   setSummaryFloorHandling,
   setSummaryStrategy,
   setSummaryTrigger,
+  toggleSummarySavedEnabled,
   unhideRange,
   upsertMicroSummary,
   upsertSummaryEntry,
@@ -1482,6 +1493,231 @@ describe('summaryFiler · 10. 78000 摘要专属频段与越界摘要自动裁�
       storage,
     });
     expect(afterAutoArchive).toBeNull();
+  });
+
+  it('智能启停、触发词净化（sanitizeSummaryTriggerKeys）与远近场滑窗冷存（applySummarySmartWindow / toggleSummarySavedEnabled）', async () => {
+    // 1. 触发词净化：剔除主角名、机娘名（含中点全名首段）、泛词，全部剔除时回退到 #001-020
+    const cleaned = sanitizeSummaryTriggerKeys(
+      ['洛凝霜', '白凌', '安娜', '指挥官', '基地', '兵营', '谷仓夜战', '清道夫教官', 'T1', '01'],
+      {
+        excludeNames: ['洛凝霜', '白凌', '安娜·科瓦尔斯基', '暗河地下主基地'],
+        fallbackRange: { from: 321, to: 340 },
+      },
+    );
+    expect(cleaned).toEqual(['谷仓夜战', '清道夫教官']);
+
+    const fallbackOnly = sanitizeSummaryTriggerKeys(['洛凝霜', '白凌', '指挥官', '基地'], {
+      excludeNames: ['洛凝霜', '白凌'],
+      fallbackRange: { from: 1, to: 20 },
+    });
+    expect(fallbackOnly).toEqual(['#001-020']);
+
+    // 2. 采纳第二卷大摘要时，第一卷大摘要所覆盖的旧中摘要自动冷存（coldArchiveCoveredMeso = 'older_macros'）
+    const entries: ThEntry[] = [];
+    upsertSummaryEntry(entries, makeMockDraft({ from: 1, to: 20, keys: ['洛凝霜', '地下泵房'] }));
+    upsertSummaryEntry(entries, makeMockDraft({ from: 21, to: 40, keys: ['白凌', '信号塔'] }));
+    upsertSummaryEntry(
+      entries,
+      makeMockDraft({ from: 1, to: 40, tier: 'macro', text: '第一卷总纲', keys: ['地下泵房'] }),
+      { excludeNames: ['洛凝霜', '白凌'] },
+    );
+    // 此时 001-020 与 021-040 属于最新第一卷大摘要覆盖，保持 enabled: true + selective 且触发词已剥离洛凝霜/白凌
+    const meso1 = entries.find(e => e.comment === '摘要·001-020')!;
+    expect(meso1.enabled).toBe(true);
+    expect(meso1.strategy?.type).toBe('selective');
+    expect(meso1.strategy?.keys).toEqual(['地下泵房']);
+
+    // 接着写入 041-060、061-080 与第二卷大摘要 041-080
+    upsertSummaryEntry(entries, makeMockDraft({ from: 41, to: 60, keys: ['洛凝霜', '水塔会晤'] }));
+    upsertSummaryEntry(entries, makeMockDraft({ from: 61, to: 80, keys: ['白凌', '风车阵'] }));
+    const macro2Res = upsertSummaryEntry(
+      entries,
+      makeMockDraft({ from: 41, to: 80, tier: 'macro', text: '第二卷总纲', keys: ['水塔会晤'] }),
+      { excludeNames: ['洛凝霜', '白凌'] },
+    );
+    // 第一卷覆盖的 001-020、021-040 自动被转为 enabled: false（冷存归档）！
+    expect(macro2Res.coldArchivedMesoComments).toEqual(['摘要·001-020', '摘要·021-040']);
+    expect(entries.find(e => e.comment === '摘要·001-020')?.enabled).toBe(false);
+    expect(entries.find(e => e.comment === '摘要·021-040')?.enabled).toBe(false);
+    expect(entries.find(e => e.comment === '摘要·041-060')?.enabled).toBe(true);
+
+    // 3. computeSummaryContextBreakdown：已冷存（enabled: false）条目不计入活跃 mesoTokens，但计入 coldArchivedCount / coldArchivedTokens
+    const bd = computeSummaryContextBreakdown({
+      savedRanges: extractSummaryRanges(entries),
+      microSummaries: [],
+      currentFloor: 85,
+    });
+    expect(bd.coldArchivedCount).toBe(2);
+    expect(bd.coldArchivedTokens).toBeGreaterThan(0);
+    expect(bd.mesoCount).toBe(2); // 仅统计仍开启的 041-060 与 061-080
+
+    // 4. applySummarySmartWindow & optimizeSummaryWorldbookEntries 一键滑窗冷存与单条手动唤醒切换
+    const gateway: ChatBookGatewayLike = {
+      begin: () => ({ chatId: 'chat_smart_window' }),
+      guardedBook: vi.fn().mockResolvedValue('红警档案·智能滑窗测试'),
+    };
+    const updateWbFn = vi.fn(async (_book: string, updater: (list: ThEntry[]) => ThEntry[]) => {
+      const next = updater(entries);
+      entries.splice(0, entries.length, ...next);
+      return entries;
+    });
+
+    const optRes = await optimizeSummaryWorldbookEntries(gateway, {
+      keepRecentCoveredMesoCount: 0,
+      excludeNames: ['洛凝霜', '白凌'],
+      updateWorldbookWithFn: updateWbFn,
+    });
+    // keepRecentCoveredMesoCount=0 时，连第二卷覆盖的 041-060、061-080 也一并冷存关闭
+    expect(optRes.disabledComments).toEqual(['摘要·041-060', '摘要·061-080']);
+    expect(entries.find(e => e.comment === '摘要·041-060')?.enabled).toBe(false);
+
+    // 手动唤醒单条摘要 041-060
+    const toggleRes = await toggleSummarySavedEnabled(41, 60, true, gateway, {
+      tier: 'meso',
+      updateWorldbookWithFn: updateWbFn,
+    });
+    expect(toggleRes.updated).toBe(true);
+    expect(entries.find(e => e.comment === '摘要·041-060')?.enabled).toBe(true);
+    expect((entries.find(e => e.comment === '摘要·041-060')?.extra as any)?.coldArchived).toBeUndefined();
+  });
+
+  it('旧档继承战史智能托管：随新战局推进自动阶梯退居/冷存（reconcileLegacySummariesWithProgress）与四档模式切换（manageLegacySummaryEntries）', async () => {
+    const storage = createMockStorage();
+    expect(getLegacySummaryAutoManage(storage)).toBe(true);
+    setLegacySummaryAutoManage(false, storage);
+    expect(getLegacySummaryAutoManage(storage)).toBe(false);
+    setLegacySummaryAutoManage(true, storage);
+    expect(getLegacySummaryAutoManage(storage)).toBe(true);
+
+    // 构造含 1 条前情总纲 + 2 卷旧档大摘要 + 4 段旧档阶段纪要的世界书
+    const entries: ThEntry[] = [
+      {
+        name: '00·前情战史总纲（继承自旧档）',
+        comment: '00·前情战史总纲（继承自旧档）',
+        enabled: true,
+        strategy: { type: 'constant', keys: [] },
+        content: '旧档 792 楼总纲正文',
+        extra: { tier: 'overview' },
+      },
+      {
+        name: '前情卷宗·大·001-080·首卷',
+        comment: '前情卷宗·大·001-080·首卷',
+        enabled: true,
+        strategy: { type: 'selective', keys: ['洛凝霜', '地下泵房首展'] },
+        content: '旧档首卷大摘要',
+        extra: { legacyMacroFrom: 1, legacyMacroTo: 80 },
+      },
+      {
+        name: '前情卷宗·大·721-792·终卷',
+        comment: '前情卷宗·大·721-792·终卷',
+        enabled: true,
+        strategy: { type: 'selective', keys: ['白凌', 'PDC变电站奇袭'] },
+        content: '旧档终卷大摘要',
+        extra: { legacyMacroFrom: 721, legacyMacroTo: 792 },
+      },
+      {
+        name: '旧档阶段纪要·001-020·初醒',
+        comment: '旧档阶段纪要·001-020·初醒',
+        enabled: true,
+        strategy: { type: 'selective', keys: ['洛凝霜', '地下管网入口A'] },
+        content: '旧档阶段 1',
+        extra: { legacyMesoFrom: 1, legacyMesoTo: 20 },
+      },
+      {
+        name: '旧档阶段纪要·741-760·侦察',
+        comment: '旧档阶段纪要·741-760·侦察',
+        enabled: true,
+        strategy: { type: 'selective', keys: ['旧变电站'] },
+        content: '旧档阶段 38',
+        extra: { legacyMesoFrom: 741, legacyMesoTo: 760 },
+      },
+      {
+        name: '旧档阶段纪要·761-780·奇袭',
+        comment: '旧档阶段纪要·761-780·奇袭',
+        enabled: true,
+        strategy: { type: 'selective', keys: ['银灰色长箱'] },
+        content: '旧档阶段 39',
+        extra: { legacyMesoFrom: 761, legacyMesoTo: 780 },
+      },
+      {
+        name: '旧档阶段纪要·781-792·移交',
+        comment: '旧档阶段纪要·781-792·移交',
+        enabled: true,
+        strategy: { type: 'selective', keys: ['兰利实验室'] },
+        content: '旧档阶段 40',
+        extra: { legacyMesoFrom: 781, legacyMesoTo: 792 },
+      },
+    ];
+
+    const extracted = extractLegacySummaryEntries(entries);
+    expect(extracted).toHaveLength(7);
+    expect(extracted[0].kind).toBe('overview');
+    expect(extracted.filter(x => x.kind === 'legacy_macro')).toHaveLength(2);
+    expect(extracted.filter(x => x.kind === 'legacy_meso')).toHaveLength(4);
+
+    // 阶段 1（刚开局，新聊天 0 段新摘要）：仅保留末尾 3 段旧档阶段纪要开启，001-020 自动冷存关闭
+    const r0 = reconcileLegacySummariesWithProgress(entries, {
+      keepOpeningMesoCount: 3,
+      excludeNames: ['洛凝霜', '白凌'],
+    });
+    expect(r0.phase).toBe('opening_handoff');
+    expect(entries.find(e => e.comment === '旧档阶段纪要·001-020·初醒')?.enabled).toBe(false);
+    expect(entries.find(e => e.comment === '旧档阶段纪要·741-760·侦察')?.enabled).toBe(true);
+    expect(entries.find(e => e.comment === '00·前情战史总纲（继承自旧档）')?.strategy?.type).toBe('constant');
+    // 触发词中的洛凝霜/白凌已被自动剥离
+    expect(entries.find(e => e.comment === '前情卷宗·大·001-080·首卷')?.strategy?.keys).toEqual(['地下泵房首展']);
+
+    // 阶段 2（新聊天入档第 1 段新中摘要 摘要·001-020）：末尾 3 段旧档阶段纪要使命完成，自动全部冷存关闭！
+    upsertSummaryEntry(entries, makeMockDraft({ from: 1, to: 20, text: '新战局第一阶段摘要' }), {
+      excludeNames: ['洛凝霜', '白凌'],
+    });
+    expect(entries.find(e => e.comment === '旧档阶段纪要·741-760·侦察')?.enabled).toBe(false);
+    expect(entries.find(e => e.comment === '旧档阶段纪要·761-780·奇袭')?.enabled).toBe(false);
+    expect(entries.find(e => e.comment === '旧档阶段纪要·781-792·移交')?.enabled).toBe(false);
+
+    // 新聊天入档第 2 段新中摘要 摘要·021-040：00·前情战史总纲 自动从 constant 降级为 selective 按需绿灯！
+    upsertSummaryEntry(entries, makeMockDraft({ from: 21, to: 40, text: '新战局第二阶段摘要' }), {
+      excludeNames: ['洛凝霜', '白凌'],
+    });
+    expect(entries.find(e => e.comment === '00·前情战史总纲（继承自旧档）')?.strategy?.type).toBe('selective');
+
+    // 阶段 3（新聊天入档第 1 卷新大摘要 摘要·大·001-040）：旧档早期大摘要（001-080）自动冷存关闭，仅留终卷（721-792）按需开启！
+    upsertSummaryEntry(entries, makeMockDraft({ from: 1, to: 40, tier: 'macro', text: '新战局首卷大摘要' }), {
+      excludeNames: ['洛凝霜', '白凌'],
+    });
+    expect(entries.find(e => e.comment === '前情卷宗·大·001-080·首卷')?.enabled).toBe(false);
+    expect(entries.find(e => e.comment === '前情卷宗·大·721-792·终卷')?.enabled).toBe(true);
+
+    // 验证四档手动模式切换（manageLegacySummaryEntries）：cold_all -> opening_handoff -> selective_minimal -> toggle_single
+    const gateway: ChatBookGatewayLike = {
+      begin: () => ({ chatId: 'chat_legacy_manage' }),
+      guardedBook: vi.fn().mockResolvedValue('红警档案·旧档托管测试'),
+    };
+    const updateWbFn = vi.fn(async (_book: string, updater: (list: ThEntry[]) => ThEntry[]) => {
+      const next = updater(entries);
+      entries.splice(0, entries.length, ...next);
+      return entries;
+    });
+
+    await manageLegacySummaryEntries({ mode: 'cold_all' }, gateway, { updateWorldbookWithFn: updateWbFn });
+    expect(extractLegacySummaryEntries(entries).every(x => x.entry.enabled === false)).toBe(true);
+
+    const bdAllCold = computeSummaryContextBreakdown({
+      savedRanges: extractSummaryRanges(entries),
+      legacyEntries: extractLegacySummaryEntries(entries),
+      microSummaries: [],
+      currentFloor: 45,
+    });
+    expect(bdAllCold.legacyActiveCount).toBe(0);
+    expect(bdAllCold.legacyColdCount).toBe(7);
+    expect(bdAllCold.legacyActiveTokens).toBe(0);
+    expect(bdAllCold.legacyColdTokens).toBeGreaterThan(0);
+
+    await manageLegacySummaryEntries({ mode: 'opening_handoff' }, gateway, { updateWorldbookWithFn: updateWbFn });
+    expect(entries.find(e => e.comment === '00·前情战史总纲（继承自旧档）')?.enabled).toBe(true);
+    expect(entries.find(e => e.comment === '00·前情战史总纲（继承自旧档）')?.strategy?.type).toBe('constant');
+    expect(entries.find(e => e.comment === '旧档阶段纪要·781-792·移交')?.enabled).toBe(true);
+    expect(entries.find(e => e.comment === '旧档阶段纪要·001-020·初醒')?.enabled).toBe(false);
   });
 });
 

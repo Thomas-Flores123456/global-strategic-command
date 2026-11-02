@@ -113,6 +113,29 @@ describe('CTRL-RECONCILE-01 · ① parseProductionDeclarations', () => {
     expect(parseProductionDeclarations(undefined)).toEqual({ found: false, declarations: [], rejected: [] });
     expect(parseProductionDeclarations(42)).toEqual({ found: false, declarations: [], rejected: [] });
   });
+
+  it('兼容多行 YAML 字典式 <生产> 块（第 #8 楼真机复现：不把「数量: 1」误判为项目名「数量」）', () => {
+    const raw = `<生产>
+- 类别: 建筑
+  名称: 生态副食与水循环保障站
+  基地: 三十八号矿坑前哨（道班客栈）
+  数量: 1
+  状态: 已完成
+  理由: 白芷与量产工兵班完成最后25%管路联调与2400株菜苗定植，斜井立体气雾水培车间正式通水投产
+</生产>`;
+    const r = parseProductionDeclarations(raw);
+    expect(r.found).toBe(true);
+    expect(r.rejected).toEqual([]);
+    expect(r.declarations).toEqual([
+      {
+        item: '生态副食与水循环保障站',
+        qty: 1,
+        base: '三十八号矿坑前哨（道班客栈）',
+        type: '建造',
+        raw: '- 类别: 建筑',
+      },
+    ]);
+  });
 });
 
 /* ═══════════════ ② 前馈工程日程生成 → 已随 buildScheduleText 迁至 scheduleText.test.ts ═══════════════

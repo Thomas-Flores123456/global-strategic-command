@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { Schema } from '../core/schema';
 import {
   parseProductionDeclarations,
   reconcileProduction,
@@ -6,6 +7,12 @@ import {
 } from '../engines/productionReconciliation';
 import { syncProjects, type ProjectStateView } from '../engines/projectEngine';
 import type { TransactionItem } from '../engines/transactionEngine';
+import { requestUnitTransfer } from '../engines/unitTransferEngine';
+import {
+  stripUnitSquadDesignation,
+  syncGlobalForcesFloorFromBases,
+} from '../parse/parseDomainAppliers';
+import { parseMessageText } from '../parse/parsePipeline';
 
 function makeTxn(overrides: Partial<TransactionItem> & Pick<TransactionItem, 'type' | 'item' | 'base'>): TransactionItem {
   return {
@@ -368,5 +375,160 @@ describe('FD-37 PKG-C: 分基地产线入驻、母体扩建挂载与现代化改
         '赤星天锤常规战略载荷(6枚扩仓型)': 2,
       },
     });
+  });
+
+  it('4. 暖石防务 #792 真实样例：syncGlobalForcesFloorFromBases 按主兵种对齐且绝不把分基地番号键塞入全局 forces.troops', () => {
+    expect(stripUnitSquadDesignation('美国大兵（量产战斗步兵·含徐磊/穆勒/宋蕊/周锐/铁楔子）')).toBe('美国大兵');
+    expect(stripUnitSquadDesignation('战斗工兵（白芷筑城班）')).toBe('战斗工兵');
+    expect(stripUnitSquadDesignation('赤星天锤常规战略载荷(6枚扩仓型)')).toBe('赤星天锤常规战略载荷(6枚扩仓型)');
+    expect(stripUnitSquadDesignation('美国大兵(2名)')).toBe('美国大兵(2名)');
+
+    const data = Schema.parse({
+      forces: {
+        troops: {
+          '美国大兵（量产战斗步兵·含徐磊/穆勒/宋蕊/周锐/铁楔子）': 20,
+          '战斗工兵（量产工兵班）': 6,
+          '盟军侦察兵（量产侦察班）': 6,
+        },
+      },
+      bases: [
+        {
+          id: 'base_dark_river',
+          name: '暗河地下主基地',
+          forces: {
+            troops: {
+              '美国大兵（突击一班）': 10,
+              '盟军侦察兵（外勤侦察班）': 4,
+              '战斗工兵（主基地维保组）': 2,
+            },
+          },
+        },
+        {
+          id: 'base_pit_38',
+          name: '三十八号矿坑前哨（道班客栈）',
+          forces: {
+            troops: {
+              '美国大兵（矿坑驻防分队·穆勒领衔）': 5,
+              '战斗工兵（白芷筑城班）': 4,
+              '盟军侦察兵（外围哨组）': 1,
+            },
+          },
+        },
+        {
+          id: 'base_rockyridge',
+          name: '罗基里奇水泥厂总部（Corp-Bud）',
+          forces: {
+            troops: {
+              '美国大兵（突击二班·徐磊领衔）': 5,
+              '盟军侦察兵（公路警戒组）': 1,
+            },
+          },
+        },
+      ],
+    });
+
+    syncGlobalForcesFloorFromBases(data);
+
+    // 全局总账与分基地之和相等（20 / 6 / 6），不得把分基地带番号的键塞入全局 forces.troops
+    expect(data.forces.troops).toEqual({
+      '美国大兵（量产战斗步兵·含徐磊/穆勒/宋蕊/周锐/铁楔子）': 20,
+      '战斗工兵（量产工兵班）': 6,
+      '盟军侦察兵（量产侦察班）': 6,
+    });
+
+    // 若全局为空而分基地带括号编制，向上兜底时写入剥离括号后的干净主兵种键
+    const dataEmptyGlobal = Schema.parse({
+      forces: { troops: {} },
+      bases: data.bases,
+    });
+    syncGlobalForcesFloorFromBases(dataEmptyGlobal);
+    expect(dataEmptyGlobal.forces.troops).toEqual({
+      美国大兵: 20,
+      盟军侦察兵: 6,
+      战斗工兵: 6,
+    });
+  });
+
+  it('5. 跨回合兵力重新编制不残留僵尸键，且支持带括号分队拆分与跨基地按主兵种调配', () => {
+    const baseline = Schema.parse({
+      forces: {
+        troops: {
+          '美国大兵（量产战斗步兵·含徐磊/穆勒/宋蕊/周锐/铁楔子）': 20,
+          '战斗工兵（量产工兵班）': 6,
+        },
+      },
+      bases: [
+        {
+          id: 'base_dark_river',
+          name: '暗河地下主基地',
+          forces: {
+            troops: {
+              '美国大兵（旧编制）': 10,
+              '战斗工兵（主基地维保组）': 2,
+            },
+          },
+        },
+        {
+          id: 'base_pit_38',
+          name: '三十八号矿坑前哨（道班客栈）',
+          forces: {
+            troops: {
+              '美国大兵（矿坑驻防分队·穆勒领衔）': 10,
+              '战斗工兵（白芷筑城班）': 4,
+            },
+          },
+        },
+      ],
+    });
+
+    const rawMsg = `<态势>
+基地:
+  - 名称: 暗河地下主基地
+    驻军:
+      兵力:
+        美国大兵（突击一班）: 5
+        美国大兵（突击二班）: 5
+部队:
+  兵力:
+    美国大兵: 20
+</态势>`;
+
+    const parsed = parseMessageText(rawMsg, baseline, {});
+    expect(parsed.quarantine).toEqual([]);
+
+    // 分基地内「美国大兵（旧编制）」被自动清理，新拆分的突击一班/二班与未触及的战斗工兵完整保留
+    expect(parsed.data.bases[0].forces?.troops).toEqual({
+      '战斗工兵（主基地维保组）': 2,
+      '美国大兵（突击一班）': 5,
+      '美国大兵（突击二班）': 5,
+    });
+
+    // 全局内「美国大兵（量产战斗步兵...）」被干净的「美国大兵: 20」替代清理，不残留僵尸键
+    expect(parsed.data.forces.troops).toEqual({
+      美国大兵: 20,
+      '战斗工兵（量产工兵班）': 6,
+    });
+
+    // 验证调配引擎：用无括号的「美国大兵」从暗河地下主基地调配 7 人至三十八号矿坑前哨（瞬达）
+    const xfer = requestUnitTransfer(parsed.data, {
+      unit: '美国大兵',
+      qty: 7,
+      from_base: '暗河地下主基地',
+      to_base: '三十八号矿坑前哨（道班客栈）',
+      duration_min: 0,
+    });
+    expect(xfer.events[0]?.type).toBe('transfer_arrived');
+    expect(xfer.events[0]?.qty).toBe(7);
+    // 源基地突击一班(5)扣完删除，突击二班(5)扣2剩3
+    expect(xfer.next.bases?.[0]?.forces?.troops).toEqual({
+      '战斗工兵（主基地维保组）': 2,
+      '美国大兵（突击二班）': 3,
+    });
+    // 目标基地原本 10 名美国大兵，入驻 7 名后变为 17 名，全局总账仍守恒为 20 名
+    expect(xfer.next.bases?.[1]?.forces?.troops).toEqual({
+      '美国大兵（矿坑驻防分队·穆勒领衔）': 17,
+      '战斗工兵（白芷筑城班）': 4,
+    });
+    expect(xfer.next.forces?.troops?.['美国大兵']).toBe(20);
   });
 });

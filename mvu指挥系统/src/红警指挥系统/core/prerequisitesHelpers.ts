@@ -623,6 +623,9 @@ export const ROOT_CONYARD_BUILDINGS: ReadonlySet<string> = new Set([
   '尤里建造厂核心',
   '前沿工地',
   '作战前哨站',
+  '一次展开前沿节点',
+  'Sputnik一次展开前沿节点',
+  '前哨基地节点',
 ]);
 
 const EQUIVALENT_BUILDING_GROUPS: readonly (readonly string[])[] = [

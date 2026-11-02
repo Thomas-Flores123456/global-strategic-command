@@ -217,4 +217,92 @@ describe('开局设置的资金与科技进入中控台数据层防洗白与自�
     expect(res.data.economy.credits).toBe(2000);
     expect(res.data.tech.done).toEqual(['化石燃料发电学']);
   });
+
+  it('FD-53 · hydrateZeroFloorFromBoot 在 #0 楼 stat_data 缺失或被归零洗白时，从 $boot.importedStatSnapshot 完整自愈恢复 bases、forces.girls、codex 与资金科技', () => {
+    const importedSnapshot = {
+      schema_version: 2,
+      meta: { date: '2042-06-15', location: '夜之城外围', weather: '晴', day_count: 14, world_id: 'cyber2077' },
+      economy: { credits: 8600, credits_daily: 1200 },
+      tech: { done: ['化石燃料发电学', '装甲载具工学', '光棱增幅光学'] },
+      bases: [
+        {
+          id: 'badlands_hq',
+          name: '恶土主基地',
+          location: '夜之城恶土',
+          buildings: [{ name: '盟军建造厂', count: 1 }, { name: '磁能反应炉', count: 2 }],
+        },
+      ],
+      queues: [],
+      forces: {
+        infantry: 120,
+        vehicles: ['灰熊坦克 x4'],
+        aircraft: [],
+        navy: [],
+        girls: [
+          { name: '白凌', type: 'MCV核心机娘', origin: '红警系统制造', status: '驻守', base: 'badlands_hq' },
+          { name: '谭雅', type: '特种英雄机娘', origin: '红警系统制造', status: '待命', base: 'badlands_hq' },
+        ],
+        equipment: {},
+      },
+      codex: [
+        { name: '白凌', kind: '机娘', faction: '盟军', summary: '基地车核心机娘' },
+        { name: '恶土游骑兵', kind: '自创单位', faction: '盟军', summary: '自定义改装轻装甲' },
+      ],
+    };
+
+    const bootChatVars = {
+      $boot: {
+        confirmed: true,
+        preset: 'custom',
+        importedFrom: '旧战局_14天',
+        choices: {
+          worldId: 'cyber2077',
+          effective: {
+            credits: 8600,
+            techDone: ['化石燃料发电学', '装甲载具工学', '光棱增幅光学'],
+            exposure: 15,
+          },
+        },
+        importedStatSnapshot: importedSnapshot,
+      },
+    };
+
+    // 场景 A：#0 楼 stat_data 完全缺失（undefined）
+    const fromMissing = hydrateZeroFloorFromBoot(undefined, bootChatVars);
+    expect(fromMissing.has_stat_data).toBe(true);
+    const missingRestored = fromMissing.stat_data as typeof importedSnapshot;
+    expect(missingRestored.economy.credits).toBe(8600);
+    expect(missingRestored.bases).toHaveLength(1);
+    expect(missingRestored.bases[0].name).toBe('恶土主基地');
+    expect(missingRestored.forces.girls).toHaveLength(2);
+    expect(missingRestored.codex).toHaveLength(2);
+
+    // 场景 B：#0 楼 stat_data 被归零洗白（bases=[] / girls=[] / codex=[] / credits=0）
+    const wipedZeroFloor = {
+      schema_version: 2,
+      meta: { date: '', location: '', weather: '晴', day_count: 0, world_id: 'cyber2077' },
+      economy: { credits: 0, credits_daily: 0 },
+      tech: { done: [] },
+      bases: [],
+      queues: [],
+      forces: {
+        infantry: 0,
+        vehicles: [],
+        aircraft: [],
+        navy: [],
+        girls: [],
+        equipment: {},
+      },
+      codex: [],
+    };
+    const fromWiped = hydrateZeroFloorFromBoot(wipedZeroFloor, bootChatVars);
+    expect(fromWiped.has_stat_data).toBe(true);
+    const wipedRestored = fromWiped.stat_data as typeof importedSnapshot;
+    expect(wipedRestored.economy.credits).toBe(8600);
+    expect(wipedRestored.tech.done).toEqual(['化石燃料发电学', '装甲载具工学', '光棱增幅光学']);
+    expect(wipedRestored.bases).toHaveLength(1);
+    expect(wipedRestored.bases[0].buildings).toHaveLength(2);
+    expect(wipedRestored.forces.girls.map(gItem => gItem.name)).toEqual(['白凌', '谭雅']);
+    expect(wipedRestored.codex.map(c => c.name)).toEqual(['白凌', '恶土游骑兵']);
+  });
 });

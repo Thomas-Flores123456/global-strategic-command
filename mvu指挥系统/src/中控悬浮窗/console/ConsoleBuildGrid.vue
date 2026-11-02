@@ -56,6 +56,67 @@
       @reset="resetFilters"
     />
 
+    <!-- ══ 建造权限分级铭牌（FCV 现地筑城 / 一次展开前沿节点 / 机娘核心权能特许） ══ -->
+    <div
+      v-if="
+        currentTab !== '生产' &&
+        hasRuntimeBases &&
+        currentBaseAuthority.canBuild &&
+        (currentBaseAuthority.tier !== 'full' || currentBaseAuthority.fcvGirl)
+      "
+      data-test="build-authority-banner"
+      class="ra-authority-banner flex flex-col gap-0.5 border-b border-[var(--rac-accent)]/35 bg-[var(--rac-panel)] px-2 py-1 font-mono text-[11px]"
+    >
+      <div class="flex flex-wrap items-center justify-between gap-1">
+        <div class="flex min-w-0 items-center gap-1">
+          <Icon name="shield" :size="12" class=" shrink-0 text-[var(--rac-accent)]" />
+          <span class="truncate font-bold text-[var(--rac-hi)]">
+            {{ currentBaseAuthority.tierLabel }}
+          </span>
+          <span class="truncate text-[var(--rac-accent)]">
+            · {{ currentBaseAuthority.sourceSummary }}
+          </span>
+        </div>
+        <div class="flex shrink-0 items-center gap-1">
+          <span
+            v-if="currentBaseAuthority.independentQueue"
+            data-test="build-authority-indep-queue-badge"
+            class="ra-card-tag ra-card-tag--modernized"
+            title="依托 FCV 本体与工兵班在外围据点独立并行施工，不占用主基地白凌建造队列"
+          >
+            ◆ 独立并行队列
+          </span>
+          <button
+            v-if="
+              currentBaseAuthority.tier !== 'full' &&
+              currentBaseAuthority.availableFcvVehicle &&
+              !baseHasDeployedFcvSite
+            "
+            type="button"
+            data-test="deploy-fcv-inline-btn"
+            class="rounded-[2px] border border-[var(--rac-accent)]/60 bg-[var(--rac-accent)]/15 px-1.5 py-0.5 text-[11px] font-bold text-[var(--rac-hi)] transition-colors hover:bg-[var(--rac-accent)]/25"
+            @click="handleDeployFcvClick"
+          >
+            [展开前沿工地]
+          </button>
+        </div>
+      </div>
+      <div
+        v-if="currentBaseAuthority.tier !== 'full'"
+        class="truncate text-[11px] text-[var(--rac-muted)]"
+        :title="currentBaseAuthority.scopeHint"
+      >
+        {{ currentBaseAuthority.scopeHint }}
+      </div>
+      <div
+        v-if="mcvDeployStagedHint"
+        data-test="deploy-fcv-inline-hint"
+        class="text-[11px] text-[var(--rac-ok)]"
+      >
+        {{ mcvDeployStagedHint }}
+      </div>
+    </div>
+
     <!-- ══ 建造网格调度面板（经典 2 列网格卡片） ══ -->
     <div class="ra-grid-container flex min-h-0 flex-1 flex-col overflow-hidden p-1.5">
       <!-- 空态指示 -->
@@ -123,11 +184,11 @@
         </template>
         <template v-else-if="currentTab !== '生产' && hasRuntimeBases && !hasOperationalConyard">
           <span class="font-bold text-[var(--rac-warn)]">
-            当前基地「{{ currentBaseName }}」尚未展开建造厂核心（MCV）
+            当前基地「{{ currentBaseName }}」尚未建立建造核心（MCV / FCV / 前哨节点）
           </span>
           <template v-if="availableMcvInFleet">
             <span class="mt-1 text-[12px] text-[var(--rac-text)]">
-              车队待命载具：{{ availableMcvInFleet }} · 展开后即可解锁基建、工业、科研与防御建造序列
+              车队待命主基地车：{{ availableMcvInFleet }} · 展开后即可解锁全套主基地建造序列
             </span>
             <button
               type="button"
@@ -137,16 +198,49 @@
             >
               → 【下达展开 MCV 指令】（{{ availableMcvInFleet }}）
             </button>
-            <span
-              v-if="mcvDeployStagedHint"
-              data-test="deploy-mcv-hint"
-              class="mt-1.5 text-[12px] text-[var(--rac-ok)]"
-            >
-              {{ mcvDeployStagedHint }}
-            </span>
           </template>
-          <span v-else class="mt-1 text-[12px] text-[var(--rac-muted)]">
-            当前基地无运转中的建造厂，且车队中暂无可用 MCV 移动基地车
+          <template v-if="currentBaseAuthority.availableFcvVehicle">
+            <span class="mt-1.5 text-[12px] text-[var(--rac-text)]">
+              车队待命筑城车：{{ currentBaseAuthority.availableFcvVehicle }} · 展开为「前沿工地」后可解锁基础电力、T1 防御与仓储民生现地筑城
+            </span>
+            <button
+              type="button"
+              data-test="deploy-fcv-btn"
+              class="ra-deploy-mcv-btn mt-2 rounded-[2px] border border-[var(--rac-ok)] bg-[var(--rac-ok)]/15 px-3 py-1 font-mono text-[12px] font-bold text-[var(--rac-ok)] transition-colors hover:bg-[var(--rac-ok)]/25"
+              @click="handleDeployFcvClick"
+            >
+              → 【下达展开 FCV 指令】（{{ currentBaseAuthority.availableFcvVehicle }} → 前沿工地）
+            </button>
+          </template>
+          <template v-if="currentBaseAuthority.availableOutpostVehicle">
+            <span class="mt-1.5 text-[12px] text-[var(--rac-text)]">
+              车队待命前哨车：{{ currentBaseAuthority.availableOutpostVehicle }} · 不可逆锚定为「一次展开前沿节点」
+            </span>
+            <button
+              type="button"
+              data-test="deploy-outpost-btn"
+              class="ra-deploy-mcv-btn mt-2 rounded-[2px] border border-[var(--rac-accent)] bg-[var(--rac-accent)]/15 px-3 py-1 font-mono text-[12px] font-bold text-[var(--rac-hi)] transition-colors hover:bg-[var(--rac-accent)]/25"
+              @click="handleDeployOutpostNodeClick"
+            >
+              → 【下达展开前哨节点指令】（{{ currentBaseAuthority.availableOutpostVehicle }}）
+            </button>
+          </template>
+          <span
+            v-if="mcvDeployStagedHint"
+            data-test="deploy-mcv-hint"
+            class="mt-1.5 text-[12px] text-[var(--rac-ok)]"
+          >
+            {{ mcvDeployStagedHint }}
+          </span>
+          <span
+            v-if="
+              !availableMcvInFleet &&
+              !currentBaseAuthority.availableFcvVehicle &&
+              !currentBaseAuthority.availableOutpostVehicle
+            "
+            class="mt-1 text-[12px] text-[var(--rac-muted)]"
+          >
+            当前基地无运转中的建造核心，请调遣 MCV 移动基地车、前沿基地建设车（FCV）或 FCV 机娘进驻赋能
           </span>
         </template>
         <template v-else-if="currentTab === '生产' && hasRuntimeBases">
@@ -173,6 +267,7 @@
             item.builtCount,
             item.isMaxedOut,
             item.isModernized,
+            item.grantedByGirlSkill,
             item.isFavorite,
             item.queueModel?.progress,
             item.queueModel?.tone,
@@ -379,7 +474,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { useElementSize } from '@vueuse/core';
 import Icon from '../../红警指挥系统/ui/Icon.vue';
 import type { CodexEntry, QueueItem, Schema } from '../../红警指挥系统/core/schema';
@@ -393,6 +488,7 @@ import {
   isDebugUnlockAllFactionsActive,
 } from '../../红警指挥系统/composables/useDebugMode';
 import { openLookup } from '../../红警指挥系统/composables/useDetail';
+import { loadGirlDossierDetail } from '../models/archiveIndex';
 import TagFilterBar from './TagFilterBar.vue';
 import {
   BUILD_PANEL_GROUPS,
@@ -436,7 +532,9 @@ import {
   buildBuiltCountMap,
   buildCatalogCanonNames,
   buildCompletedTechAndProtocolSet,
+  buildDeployFcvOrderText,
   buildDeployMcvOrderText,
+  buildDeployOutpostNodeOrderText,
   buildFactionFilterPills,
   buildPrerequisiteContext,
   buildQueueDisplayModel,
@@ -444,17 +542,20 @@ import {
   buildResearchTierMap,
   buildSubTabsForGroup,
   checkBaseHasFactionMotherBuilding,
+  checkBuildingAllowedByAuthority,
   checkHasOperationalConyard,
   checkIsZeroBaseStandby,
   computeBuildQuickStatusCounts,
   computeTraitCounts,
   domainsOf,
+  evaluateBaseBuildAuthority,
   filterItemsByFaction,
   formatBuildCardTitle,
   inferBuildEntryFaction,
   inferProductionUnlockTierFromMap,
   isBuildItemFavorited,
   isDuplicateCodexEntry,
+  isFcvSiteBuildingName,
   isIndividualCharacterCodexEntry,
   isMcvVehicleName,
   loadBuildFavoritesFromStorage,
@@ -473,8 +574,15 @@ import {
   shouldSkipBuildingEntry,
   sortBuildGridItemsWithFavorites,
   toggleBuildFavoriteInSet,
+  isCodexEntryBuildableBySystem,
 } from './consoleBuildGridHelpers';
-import type { BuildingCardLiveStats, BuildQuickStatusFilter, MainTabId, SubTabId } from './consoleBuildGridHelpers';
+import type {
+  BuildingCardLiveStats,
+  BuildQuickStatusFilter,
+  CatalogMaidenItemLike,
+  MainTabId,
+  SubTabId,
+} from './consoleBuildGridHelpers';
 
 const props = withDefaults(
   defineProps<{
@@ -539,12 +647,83 @@ function deriveBuildableWithContext<T extends { name: string }>(
   return (fn as (items: readonly T[], ctx: unknown, queued?: readonly string[]) => T[])(items, ctx, []);
 }
 
-const prerequisiteContext = computed(() =>
-  buildPrerequisiteContext(props.snapshot, props.activeBaseIndex, catalog.protocols),
-);
-
 const currentBase = computed(() => resolveCurrentBase(props.snapshot, props.activeBaseIndex));
 const currentBaseName = computed(() => currentBase.value?.name?.trim() || resolvePlannedDeploySiteName(props.snapshot));
+
+/** 从目录与世界书按需加载机娘能力档案（供 FCV 机娘核心权能动态扩权） */
+const loadedGirlDossiers = reactive<
+  Record<
+    string,
+    {
+      name?: string;
+      model?: string;
+      specialSkills?: { name: string; tag?: string; desc: string }[];
+      specialEquipment?: { name: string; slot?: string; desc: string }[];
+    }
+  >
+>({});
+const loadingGirlDossierKeys = new Set<string>();
+
+watch(
+  () => [props.snapshot?.forces?.girls, props.snapshot?.girls] as const,
+  ([forceGirls, rootGirls]) => {
+    const merged = [...(forceGirls ?? []), ...(rootGirls ?? [])];
+    for (const g of merged) {
+      const name = g?.name?.trim();
+      if (!name || loadedGirlDossiers[name] || loadingGirlDossierKeys.has(name)) continue;
+      loadingGirlDossierKeys.add(name);
+      void loadGirlDossierDetail(name, { model: g.model })
+        .then(detail => {
+          if (detail) {
+            loadedGirlDossiers[name] = {
+              name: detail.name,
+              model: detail.model,
+              specialSkills: detail.specialSkills,
+              specialEquipment: detail.specialEquipment,
+            };
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          loadingGirlDossierKeys.delete(name);
+        });
+    }
+  },
+  { immediate: true, deep: true },
+);
+
+const catalogMaidenItems = computed<CatalogMaidenItemLike[]>(() => {
+  const rawItems = (catalog as { dynamicCatalog?: { items?: unknown[] } }).dynamicCatalog?.items ?? [];
+  return rawItems.filter(
+    (item): item is CatalogMaidenItemLike =>
+      Boolean(item && typeof item === 'object' && (item as { type?: string }).type === 'maiden'),
+  );
+});
+
+const currentBaseAuthority = computed(() =>
+  evaluateBaseBuildAuthority({
+    base: currentBase.value,
+    snapshot: props.snapshot,
+    catalogMaidenItems: catalogMaidenItems.value,
+    dossierMap: loadedGirlDossiers,
+  }),
+);
+
+const baseHasDeployedFcvSite = computed(() =>
+  (currentBase.value?.buildings ?? []).some(
+    b => (b.state ?? '运转') === '运转' && isFcvSiteBuildingName(b.name),
+  ),
+);
+
+const prerequisiteContext = computed(() =>
+  buildPrerequisiteContext(
+    props.snapshot,
+    props.activeBaseIndex,
+    catalog.protocols,
+    currentBaseAuthority.value,
+  ),
+);
+
 const hasRuntimeBases = computed(() => {
   const bases = props.snapshot?.bases ?? [];
   return bases.length > 0 && prerequisiteContext.value !== null;
@@ -552,7 +731,7 @@ const hasRuntimeBases = computed(() => {
 const currentBaseConyardFactions = computed(() => {
   const rawPrimary = (props.snapshot?.command as { primary_faction?: string } | undefined)?.primary_faction ?? '';
   const fallbackFaction = /soviet|sov|苏联|苏军|苏维埃/i.test(rawPrimary) ? 'soviet' : 'allied';
-  return resolveBaseConyardFactions(currentBase.value, fallbackFaction);
+  return resolveBaseConyardFactions(currentBase.value, fallbackFaction, currentBaseAuthority.value);
 });
 const hasOperationalConyard = computed(() => {
   if (isDebugBypassPrerequisitesActive()) return true;
@@ -560,7 +739,7 @@ const hasOperationalConyard = computed(() => {
   if (filter && filter !== 'all' && filter !== 'common') {
     return currentBaseConyardFactions.value.has(filter);
   }
-  return checkHasOperationalConyard(currentBase.value);
+  return checkHasOperationalConyard(currentBase.value, currentBaseAuthority.value);
 });
 
 export interface ConsoleBuildItem {
@@ -586,6 +765,8 @@ export interface ConsoleBuildItem {
   activeQueueCount?: number;
   unlockTier?: number;
   dynamic?: boolean;
+  grantedByGirlSkill?: boolean;
+  grantLabel?: string;
   isFavorite?: boolean;
   title?: string;
 }
@@ -642,6 +823,20 @@ function handleDeployMcvClick() {
   const mcv = availableMcvInFleet.value;
   if (!mcv) return;
   const { orderText, hintText } = buildDeployMcvOrderText(currentBaseName.value, mcv);
+  fillHostSendInput(orderText);
+  mcvDeployStagedHint.value = hintText;
+}
+
+function handleDeployFcvClick() {
+  const fcv = currentBaseAuthority.value.availableFcvVehicle || '前沿基地建设车';
+  const { orderText, hintText } = buildDeployFcvOrderText(currentBaseName.value, fcv);
+  fillHostSendInput(orderText);
+  mcvDeployStagedHint.value = hintText;
+}
+
+function handleDeployOutpostNodeClick() {
+  const veh = currentBaseAuthority.value.availableOutpostVehicle || '前哨基地展开车';
+  const { orderText, hintText } = buildDeployOutpostNodeOrderText(currentBaseName.value, veh);
   fillHostSendInput(orderText);
   mcvDeployStagedHint.value = hintText;
 }
@@ -711,13 +906,43 @@ const allItems = computed<ConsoleBuildItem[]>(() => {
   const conyardActive = hasOperationalConyard.value;
 
   // 1. 建筑目录 (catalog.buildings)：按主领域分桶，巨构关键词优先
-  const unlockedBuildingNames = new Set(
+  const baseAuth = currentBaseAuthority.value;
+  const derivedBuildingNames = new Set(
     debugBypass
       ? catalog.buildings.map(item => item.name)
       : prereqCtx && conyardActive
         ? deriveBuildableWithContext(catalog.buildings, prereqCtx).map(item => item.name)
         : [],
   );
+  const unlockedBuildingNames = new Set<string>();
+  const buildingAuthCheckMap = new Map<
+    string,
+    ReturnType<typeof checkBuildingAllowedByAuthority>
+  >();
+  for (const b of catalog.buildings) {
+    const bMeta = b as { id?: string; tier?: number };
+    const authCheck = checkBuildingAllowedByAuthority({
+      building: {
+        id: bMeta.id,
+        name: b.name,
+        tier: bMeta.tier,
+        cost: b.cost,
+        power: b.power,
+        desc: b.desc,
+        tags: b.tags,
+      },
+      authority: baseAuth,
+    });
+    buildingAuthCheckMap.set(b.name, authCheck);
+    if (debugBypass) {
+      unlockedBuildingNames.add(b.name);
+      continue;
+    }
+    if (!conyardActive || !authCheck.allowed) continue;
+    if (derivedBuildingNames.has(b.name) || authCheck.grantedByGirlSkill) {
+      unlockedBuildingNames.add(b.name);
+    }
+  }
 
   // 预计算当前基地活跃阵营已拥有的阵营专属建筑剥离名集合（如基地有盟军建造厂且目录含「盟军发电厂」，则通用槽位模板「发电厂」自动让位，避免出现两张相同 $800/+200 电厂卡）
   const activeFactionSpecificBuildingBaseNames = new Set<string>();
@@ -812,6 +1037,8 @@ const allItems = computed<ConsoleBuildItem[]>(() => {
       continue;
     }
     const { cat, sub } = bucketBuilding(b.name, b.desc, tags);
+    const authCheck = buildingAuthCheckMap.get(b.name);
+    const prereqText = b.research ? `需 ${b.research}` : b.need_building ? `需 ${b.need_building}` : '';
 
     const bldItem: ConsoleBuildItem = {
       id: `bld-${b.name}`,
@@ -821,12 +1048,15 @@ const allItems = computed<ConsoleBuildItem[]>(() => {
       faction,
       cost: b.cost,
       power: b.power,
-      prereq: b.research ? `需 ${b.research}` : b.need_building ? `需 ${b.need_building}` : '',
+      prereq: prereqText,
       desc: b.desc,
       tags,
       builtCount,
       liveStats,
       ...(activeQueueCount > 0 ? { activeQueueCount } : {}),
+      ...(authCheck?.grantedByGirlSkill
+        ? { grantedByGirlSkill: true, grantLabel: authCheck.grantLabel }
+        : {}),
       queueModel: q ? displayOf(q) : undefined,
       unlockTier: (b as { tier?: number }).tier ?? (b.research ? 1 : 0),
     };
@@ -989,6 +1219,7 @@ const allItems = computed<ConsoleBuildItem[]>(() => {
 
   for (const c of codex.value) {
     if (catalogNames.has(c.name)) continue;
+    if (!isCodexEntryBuildableBySystem(c)) continue;
     const { cost, power, codexTags, desc, codexFaction, cleanCodexName } = parseCodexEntryMeta(c);
     const codexDomain = c.kind === '建筑' ? 'building' : 'production';
     if (
@@ -1087,6 +1318,26 @@ const allItems = computed<ConsoleBuildItem[]>(() => {
       result.push(codexProdItem);
     } else if (c.kind === '建筑') {
       const tags = inferItemTags({ name: cleanCodexName, desc, tags: codexTags });
+      const codexAuthCheck = checkBuildingAllowedByAuthority({
+        building: {
+          name: cleanCodexName,
+          cost: isNaN(cost) ? 1000 : cost,
+          power,
+          desc,
+          tags,
+        },
+        authority: baseAuth,
+      });
+      if (
+        !debugBypass &&
+        runtimeBasesActive &&
+        !codexAuthCheck.allowed &&
+        !q &&
+        count <= 0 &&
+        (codexLiveStats?.underConstructionCount ?? 0) <= 0
+      ) {
+        continue;
+      }
       const { cat, sub } = bucketBuilding(cleanCodexName, desc, tags);
       const effectiveCodexQueueCount = Math.max(codexQueueCount, codexLiveStats?.underConstructionCount ?? 0);
       const codexBldItem: ConsoleBuildItem = {
@@ -1103,6 +1354,9 @@ const allItems = computed<ConsoleBuildItem[]>(() => {
         builtCount: count,
         liveStats: codexLiveStats,
         ...(effectiveCodexQueueCount > 0 ? { activeQueueCount: effectiveCodexQueueCount } : {}),
+        ...(codexAuthCheck.grantedByGirlSkill
+          ? { grantedByGirlSkill: true, grantLabel: codexAuthCheck.grantLabel }
+          : {}),
         queueModel: q ? displayOf(q) : undefined,
         unlockTier: 1,
         dynamic: true,

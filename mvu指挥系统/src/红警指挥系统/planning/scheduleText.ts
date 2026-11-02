@@ -1102,7 +1102,15 @@ export function planScheduleInjection(input: {
     productions: catalog.productions,
     retrofits: catalog.retrofits,
   });
-  const prodState = { bases: snapshot.data.bases, queues };
+  const rawSnapRec = snapshot.data as unknown as Record<string, unknown>;
+  const prodState = {
+    bases: snapshot.data.bases,
+    queues,
+    forces: rawSnapRec.forces as { girls?: ReadonlyArray<Record<string, unknown>>; [key: string]: unknown } | undefined,
+    mecha_girls: rawSnapRec.mecha_girls as Record<string, unknown> | undefined,
+    unit_Attachment: rawSnapRec.unit_Attachment as Record<string, unknown> | undefined,
+    vehicles_by_base: rawSnapRec.vehicles_by_base as Record<string, unknown> | undefined,
+  };
   const researchKeyFor = makeLaneKeyFor(lineOf);
   const prodKeyFor = makeProdLaneKeyFor(prodLaneOf);
   const engKeyFor = makeEngLaneKeyFor();

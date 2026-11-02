@@ -31,8 +31,10 @@ import {
   normalizeBases,
   normalizeGirlRecord,
   notableCharacterMatchesScope,
+  parseTroopUnitAndDesignation,
   parseVehicleToken,
   rawBaseMatchesScope,
+  resolveBaseDisplayName,
   resolveFocusedGirlProfile,
   type ArmoryBaseMeta,
   type ArmoryCommandOfficer,
@@ -174,21 +176,22 @@ export function buildArmoryViewModel(
       (baseRecord.serial ? dossierMap[baseRecord.serial] : undefined) ??
       null;
     const resolvedGirl = resolveFocusedGirlProfile(baseRecord, dossier, pendingMatch);
+    resolvedGirl.base = resolveBaseDisplayName(resolvedGirl.rawBase, normalizedBases, '战区直属');
     scopedGirls.push(resolvedGirl);
     scopedGirlSources.push({ item: resolvedGirl, raw: girl, pendingMatch });
   }
   const girlsIsEmpty = scopedGirls.length === 0;
 
   /* ─────────────── 2. 维度二：人员（personnel / infantry · 差额守恒） ─────────────── */
-  const personnelMap = new Map<string, { total: number; byBase: Map<string, number> }>();
-  const addPersonnel = (unitType: string, count: number, baseLabel: string) => {
-    const cleanUnit = unitType.trim();
+  const personnelMap = new Map<string, { unitType: string; total: number; byBase: Map<string, number> }>();
+  const addPersonnel = (stemKey: string, baseUnit: string, count: number, baseLabel: string) => {
+    const cleanUnit = baseUnit.trim();
     const n = Number(count);
-    if (!cleanUnit || !Number.isFinite(n) || n <= 0) return;
-    let entry = personnelMap.get(cleanUnit);
+    if (!stemKey || !cleanUnit || !Number.isFinite(n) || n <= 0) return;
+    let entry = personnelMap.get(stemKey);
     if (!entry) {
-      entry = { total: 0, byBase: new Map() };
-      personnelMap.set(cleanUnit, entry);
+      entry = { unitType: cleanUnit, total: 0, byBase: new Map() };
+      personnelMap.set(stemKey, entry);
     }
     entry.total += n;
     entry.byBase.set(baseLabel, (entry.byBase.get(baseLabel) ?? 0) + n);
@@ -203,37 +206,47 @@ export function buildArmoryViewModel(
       const cleanUnit = unit.trim();
       const n = Number(count);
       if (!cleanUnit || !Number.isFinite(n) || n <= 0) continue;
-      const uKey = canonKey(cleanUnit);
-      allocatedPersonnelByUnit.set(uKey, (allocatedPersonnelByUnit.get(uKey) ?? 0) + n);
+      const { baseUnit, designation, stemKey } = parseTroopUnitAndDesignation(cleanUnit);
+      if (!stemKey) continue;
+      allocatedPersonnelByUnit.set(stemKey, (allocatedPersonnelByUnit.get(stemKey) ?? 0) + n);
       if (baseMatchesScope(b, scope)) {
-        addPersonnel(cleanUnit, n, b.name);
+        const baseLabel = designation !== '' ? `${b.name}（${designation}）` : b.name;
+        addPersonnel(stemKey, baseUnit, n, baseLabel);
       }
     }
   }
 
   // 2) 再遍历战区全局 forces.infantry / forces.troops，按「全局总账 = 各基地驻军 + 战区机动直属」核算未分配余量
   const globalTroops = snapshot?.forces?.infantry ?? snapshot?.forces?.troops ?? {};
-  const remainingAllocatedPersonnel = new Map(allocatedPersonnelByUnit);
-  let unassignedPersonnelCount = 0;
+  const globalPersonnelByStem = new Map<string, { baseUnit: string; total: number }>();
   for (const [unit, count] of Object.entries(globalTroops)) {
     const cleanUnit = unit.trim();
     const globalCount = Number(count);
     if (!cleanUnit || !Number.isFinite(globalCount) || globalCount <= 0) continue;
-    const uKey = canonKey(cleanUnit);
-    const alloc = remainingAllocatedPersonnel.get(uKey) ?? 0;
-    const usedAlloc = Math.min(globalCount, alloc);
-    remainingAllocatedPersonnel.set(uKey, alloc - usedAlloc);
-    const unassigned = Math.max(0, globalCount - usedAlloc);
+    const { baseUnit, stemKey } = parseTroopUnitAndDesignation(cleanUnit);
+    if (!stemKey) continue;
+    const prev = globalPersonnelByStem.get(stemKey);
+    if (prev) {
+      prev.total += globalCount;
+    } else {
+      globalPersonnelByStem.set(stemKey, { baseUnit, total: globalCount });
+    }
+  }
+
+  let unassignedPersonnelCount = 0;
+  for (const [stemKey, { baseUnit, total: globalCount }] of globalPersonnelByStem.entries()) {
+    const alloc = allocatedPersonnelByUnit.get(stemKey) ?? 0;
+    const unassigned = Math.max(0, globalCount - alloc);
     if (unassigned > 0) {
       unassignedPersonnelCount += unassigned;
       if (isAllScope(scope)) {
-        addPersonnel(cleanUnit, unassigned, '战区机动直属');
+        addPersonnel(stemKey, baseUnit, unassigned, '战区机动直属');
       }
     }
   }
 
-  const personnelRows: ArmoryPersonnelRow[] = [...personnelMap.entries()].map(([unitType, info]) => ({
-    unitType,
+  const personnelRows: ArmoryPersonnelRow[] = [...personnelMap.values()].map(info => ({
+    unitType: info.unitType,
     total: info.total,
     byBase: [...info.byBase.entries()].map(([base, count]) => ({ base, count })),
   }));
@@ -275,7 +288,11 @@ export function buildArmoryViewModel(
         faction: adj.faction || '统帅部直属',
         attitude: String(adj.attitude || '效忠').trim(),
         trust: String(adj.trust ?? '核心幕僚').trim(),
-        statusOrBase: rawAdjBase || String(adj.status || '战区指挥部').trim(),
+        statusOrBase: resolveBaseDisplayName(
+          rawAdjBase || String(adj.status || '战区指挥部').trim(),
+          normalizedBases,
+          '战区指挥部',
+        ),
         desc: adj.note || '',
         callsign: String(adj.callsign ?? '').trim(),
         source: 'adjutant',
@@ -326,6 +343,14 @@ export function buildArmoryViewModel(
         existingNotable.roleOrIdentity = params['开局职务'] || params['席位任命'] || existingNotable.roleOrIdentity;
         existingNotable.faction = params['阵营归属'] || existingNotable.faction;
         existingNotable.desc = params['履历与绝活'] || c.desc || existingNotable.desc;
+        const rawStaffBase = params['驻地'] || params['基地'] || '';
+        if (rawStaffBase) {
+          existingNotable.statusOrBase = resolveBaseDisplayName(
+            rawStaffBase,
+            normalizedBases,
+            existingNotable.statusOrBase,
+          );
+        }
       }
       continue;
     }
@@ -356,7 +381,7 @@ export function buildArmoryViewModel(
       ).trim();
       const attitude = (params['态度'] || params['立场'] || '中立').trim();
       const trust = (params['信任度'] || params['好感'] || params['关系'] || '—').trim();
-      const statusOrBase = (rawLoc || '活动于战区').trim();
+      const statusOrBase = resolveBaseDisplayName(rawLoc, normalizedBases, '活动于战区');
       const desc = (
         c.desc ||
         params['近期交集'] ||
@@ -694,10 +719,11 @@ export function buildArmoryViewModel(
 
   const girlLoadouts: ArmoryLoadoutEntry[] = [];
   for (const g of scopedGirls) {
+    const resolvedLoadoutBase = resolveBaseDisplayName(g.rawBase || g.base, normalizedBases, '战区直属');
     for (const item of g.loadouts) {
       girlLoadouts.push({
         girl: g.name,
-        base: g.base,
+        base: resolvedLoadoutBase,
         item,
       });
     }
@@ -728,10 +754,11 @@ export function buildArmoryViewModel(
     if (q.type !== '生产' && q.type !== '改装') continue;
     if (!rawBaseMatchesScope(q.base, scope, normalizedBases, true)) continue;
 
+    const fallbackQueueBase = activeBases[0]?.name ?? '战区总装线';
     const entry: ArmoryQueueEntry = {
       type: q.type,
       item: q.item.trim(),
-      base: String(q.base || (activeBases[0]?.name ?? '战区总装线')).trim(),
+      base: resolveBaseDisplayName(q.base, normalizedBases, fallbackQueueBase),
       progress: Number(q.progress ?? 0),
       eta: String(q.eta ?? ''),
       status: String(q.status ?? 'active'),
@@ -756,16 +783,25 @@ export function buildArmoryViewModel(
     const remMin = Math.max(0, Math.round(Number(tr.remaining_minutes) || 0));
     if (remMin <= 0) continue;
     const totMin = Math.max(remMin, Math.round(Number(tr.total_minutes) || remMin));
-    const fromBase = String(tr.from_base || UNASSIGNED_POOL_LABEL).trim();
-    const toBase = String(tr.to_base || UNASSIGNED_POOL_LABEL).trim();
+    const rawFromBase = String(tr.from_base || UNASSIGNED_POOL_LABEL).trim();
+    const rawToBase = String(tr.to_base || UNASSIGNED_POOL_LABEL).trim();
 
     if (
       !isAllScope(scope) &&
-      !rawBaseMatchesScope(fromBase, scope, normalizedBases, false) &&
-      !rawBaseMatchesScope(toBase, scope, normalizedBases, false)
+      !rawBaseMatchesScope(rawFromBase, scope, normalizedBases, false) &&
+      !rawBaseMatchesScope(rawToBase, scope, normalizedBases, false)
     ) {
       continue;
     }
+
+    const fromBase =
+      rawFromBase === UNASSIGNED_POOL_LABEL
+        ? UNASSIGNED_POOL_LABEL
+        : resolveBaseDisplayName(rawFromBase, normalizedBases, UNASSIGNED_POOL_LABEL);
+    const toBase =
+      rawToBase === UNASSIGNED_POOL_LABEL
+        ? UNASSIGNED_POOL_LABEL
+        : resolveBaseDisplayName(rawToBase, normalizedBases, UNASSIGNED_POOL_LABEL);
 
     const cat = resolveTransferCategory(
       snapshot as unknown as Parameters<typeof resolveTransferCategory>[0],

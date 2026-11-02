@@ -71,9 +71,18 @@ export function filterDynamicCodexResearches<T extends CodexResearchEntryLike>(
   customAliases?: Readonly<Record<string, string>>,
 ): T[] {
   if (!Array.isArray(codexList) || codexList.length === 0) return [];
-  const techEntries = codexList.filter(
-    c => Boolean(c) && c.kind === '科技' && typeof c.name === 'string' && c.name.trim().length > 0,
-  );
+  const techEntries = codexList.filter(c => {
+    if (!c || c.kind !== '科技' || typeof c.name !== 'string' || c.name.trim().length === 0) {
+      return false;
+    }
+    const rawBuildable = String(
+      c.params?.['可建造'] ?? c.params?.['可研发'] ?? c.params?.['可制造'] ?? c.params?.['buildable'] ?? '',
+    ).trim();
+    if (rawBuildable && (/^(?:否|false|no|0)$/i.test(rawBuildable) || /(?:^否|不可|不能|禁止|仅情报|孤品)/.test(rawBuildable))) {
+      return false;
+    }
+    return true;
+  });
   if (techEntries.length === 0) return [];
   const researches = catalogResearches ?? [];
   if (researches.length === 0) return techEntries;

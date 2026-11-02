@@ -568,6 +568,20 @@ const isArchiveOrPersonalDossier = computed(() => {
   if (k === '机娘' || k === '人物' || k === '档案' || k === '阵营' || k === '势力' || k === '地点' || k === '保障工程') {
     return true;
   }
+  const hasNonBuildableParam = detail.data.params.some(([key, val]) => {
+    const kTrim = key.trim();
+    const vTrim = String(val ?? '').trim();
+    if (['可建造', '可制造', '可生产', '可研发', '系统可造', 'buildable'].includes(kTrim)) {
+      return /^(?:否|false|no|0)$/i.test(vTrim) || /(?:^否|不可|不能|禁止|仅情报|孤品|战利品)/.test(vTrim);
+    }
+    if (['来源性质', '来源', '性质'].includes(kTrim)) {
+      return /(?:缴获|战利品|孤品|敌方专属|不可建造|不可制造|不可生产|不可研发|仅情报)/.test(vTrim);
+    }
+    return false;
+  });
+  if (hasNonBuildableParam) {
+    return true;
+  }
   const note = (detail.data.note ?? '').trim();
   if (
     note.startsWith('正史 ·') ||

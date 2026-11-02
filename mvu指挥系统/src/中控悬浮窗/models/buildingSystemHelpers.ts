@@ -1,7 +1,14 @@
 /**
  * buildingSystemHelpers.ts —— 基地建筑五大体系类型定义、蓝图节点/连线常量、分类与指标计算辅助
  */
+import {
+  checkBuildingAllowedByAuthority,
+  evaluateBaseBuildAuthority,
+  type BaseBuildAuthorityEvaluation,
+} from '../../红警指挥系统/core/buildAuthority';
 import { CONYARD_ORIGIN_NAMES } from './tagTaxonomy';
+
+export { checkBuildingAllowedByAuthority, evaluateBaseBuildAuthority, type BaseBuildAuthorityEvaluation };
 
 export type BuildingSystemId = 'military' | 'defense' | 'agro' | 'industry' | 'research_space';
 export type BuildingScopeMode = 'base' | 'global';
@@ -229,20 +236,25 @@ export function inferConyardFaction(
 export function resolveBaseOperationalConyardFactions(
   base: { buildings?: readonly { name: string; state?: string; faction?: string }[] } | undefined,
   fallbackFaction: 'allied' | 'soviet' | 'yuri' | (string & {}) = 'allied',
+  authority?: BaseBuildAuthorityEvaluation | null,
 ): Set<'allied' | 'soviet' | 'yuri' | (string & {})> {
   const factions = new Set<'allied' | 'soviet' | 'yuri' | (string & {})>();
-  if (!base?.buildings) return factions;
-  for (const b of base.buildings) {
-    if ((b.state ?? '运转') === '运转' && isConyardBuildingName(b.name)) {
-      if (b.faction) {
-        const explicit = normalizeBuildingFactionFilter(b.faction);
-        if (explicit && explicit !== 'all' && explicit !== 'common') {
-          factions.add(explicit);
-          continue;
+  if (base?.buildings) {
+    for (const b of base.buildings) {
+      if ((b.state ?? '运转') === '运转' && isConyardBuildingName(b.name)) {
+        if (b.faction) {
+          const explicit = normalizeBuildingFactionFilter(b.faction);
+          if (explicit && explicit !== 'all' && explicit !== 'common') {
+            factions.add(explicit);
+            continue;
+          }
         }
+        factions.add(inferConyardFaction(b.name, fallbackFaction));
       }
-      factions.add(inferConyardFaction(b.name, fallbackFaction));
     }
+  }
+  if (factions.size === 0 && authority?.canBuild) {
+    factions.add(fallbackFaction);
   }
   return factions;
 }
@@ -469,6 +481,9 @@ export interface SystemCatalogEntry {
   cost: number;
   power: number;
   prereqText: string;
+  grantedByGirlSkill?: boolean;
+  grantLabel?: string;
+  authorityLocked?: boolean;
 }
 
 export interface BuildingSystemView {
@@ -488,6 +503,7 @@ export interface BuildingOverviewModel {
   factionFilter: BuildingFactionFilter;
   availableFactions: BuildingFactionOption[];
   hasOperationalConyard: boolean;
+  buildAuthority?: BaseBuildAuthorityEvaluation;
   activeBaseIndex: number;
   activeBaseName: string;
   totalBuiltCount: number;
@@ -517,7 +533,20 @@ export const BLUEPRINT_NODES: readonly BuildingBlueprintNodeSpec[] = [
       soviet: { name: '苏联建造厂', shortLabel: '苏联建造厂' },
       yuri: { name: '尤里建造厂核心', shortLabel: '尤里建造厂' },
     },
-    aliases: ['建造厂', '盟军建造厂', '苏联建造厂', '尤里建造厂', '尤里建造厂核心', '尤里机动建设车', '心灵前哨站', '前沿工地', '作战前哨站'],
+    aliases: [
+      '建造厂',
+      '盟军建造厂',
+      '苏联建造厂',
+      '尤里建造厂',
+      '尤里建造厂核心',
+      '尤里机动建设车',
+      '心灵前哨站',
+      '前沿工地',
+      '作战前哨站',
+      '一次展开前沿节点',
+      'Sputnik一次展开前沿节点',
+      '前哨基地节点',
+    ],
   },
   {
     id: 'mil_barracks',

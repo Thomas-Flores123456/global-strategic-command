@@ -46,7 +46,13 @@ import {
   type StorageLike,
 } from '../../中控悬浮窗/pda/pdaState';
 import { packToChoices, parseSavePack } from '../../开场启动器/importSave';
-import { createMockHostAdapter, restoreSavePackExtendedState } from '../../开场启动器/pipeline';
+import {
+  consolidateImportedSummaryEntries,
+  createMockHostAdapter,
+  IMPORTED_SUMMARY_OVERVIEW_NAME,
+  reanchorTimelineForImportedChat,
+  restoreSavePackExtendedState,
+} from '../../开场启动器/pipeline';
 import { defaultChoices } from '../../开场启动器/presets';
 import {
   captureAndRecordWorldbookMutations,
@@ -632,7 +638,7 @@ describe('SEAM-06 · SavePack V2 全量存档包解析、V1 兼容与扩展状�
 
     expect(adapter.chatVars['$parse']).toEqual({ aliases: { 矿车: '武装采矿车' } });
     expect(adapter.chatVars['$dlc']).toEqual([{ id: 'dlc_01' }]);
-    expect((adapter.chatVars['$timeline'] as { maxFloorWatermark?: number })?.maxFloorWatermark).toBe(10);
+    expect((adapter.chatVars['$timeline'] as { maxFloorWatermark?: number })?.maxFloorWatermark).toBe(0);
 
     const restoredBookEntries = await fakeGw.getWorldbook(restoreOut.boundBookName);
     expect(restoredBookEntries).toEqual([
@@ -750,6 +756,12 @@ describe('SEAM-06 · SavePack V2 全量存档包解析、V1 兼容与扩展状�
     const entriesBeforeIso = await fakeGw.getWorldbook(restoreOut.boundBookName);
     expect(entriesBeforeIso).toHaveLength(3);
     expect(entriesBeforeIso[0]).toMatchObject({
+      name: IMPORTED_SUMMARY_OVERVIEW_NAME,
+      enabled: true,
+      strategy: { type: 'constant', keys: ['前情战史', '旧档纪要'] },
+      position: { type: 'at_depth', role: 'system', depth: 5, order: 95 },
+    });
+    expect(entriesBeforeIso[1]).toMatchObject({
       name: '档案·白凌',
       comment: '白凌核心档案',
       position: { type: 'after_character_definition', order: 210, depth: 4 },
@@ -758,10 +770,11 @@ describe('SEAM-06 · SavePack V2 全量存档包解析、V1 兼容与扩展状�
       extra: { floor: 5, swipe: 0 },
     });
 
-    // 验证高于 #0 楼的 wbJournal 已清空（保留 opLog）
+    // 验证高于 #0 楼的 wbJournal 与 opLog 均已清空，maxFloorWatermark 归零
     const ledgerAfterRestore = readTimelineLedger();
     expect(ledgerAfterRestore.boundBookName).toBe(restoreOut.boundBookName);
-    expect(ledgerAfterRestore.floors.f_5.swipes.s_0.opLog).toHaveLength(1);
+    expect(ledgerAfterRestore.maxFloorWatermark).toBe(0);
+    expect(ledgerAfterRestore.floors.f_5.swipes.s_0.opLog).toEqual([]);
     expect(ledgerAfterRestore.floors.f_5.swipes.s_0.wbJournal).toEqual([]);
     expect(ledgerAfterRestore.floors.f_8.swipes.s_0.wbJournal).toEqual([]);
 
@@ -776,9 +789,155 @@ describe('SEAM-06 · SavePack V2 全量存档包解析、V1 兼容与扩展状�
     const activeBook = fakeGw.getBoundBook();
     const entriesAfterIso = await fakeGw.getWorldbook(activeBook);
     expect(entriesAfterIso.map(e => e.name)).toEqual([
+      IMPORTED_SUMMARY_OVERVIEW_NAME,
       '档案·白凌',
       '科技·超导电容·设定',
-      '摘要·001-008',
+    ]);
+  });
+
+  it('FD-53 · consolidateImportedSummaryEntries 在 continuation 下将 摘要·001-020 归并为 00·前情战史总纲（继承自旧档），在 new_game_plus 下剔除旧摘要', () => {
+    const rawEntries = [
+      { name: '档案·白凌', content: '白凌核心档案', enabled: true, keys: ['白凌'] },
+      {
+        name: '摘要·001-020',
+        content: '第一阶段子摘要（已被大摘要覆盖）',
+        enabled: true,
+        extra: { from: 1, to: 20, coveredByMacro: true },
+      },
+      {
+        name: '摘要·大·001-080',
+        content: '前80楼战略大摘要总述',
+        enabled: true,
+        extra: { from: 1, to: 80 },
+      },
+      {
+        name: '摘要·081-100',
+        content: '81至100楼近期中摘要',
+        enabled: true,
+        extra: { from: 81, to: 100 },
+      },
+    ];
+
+    const contResult = consolidateImportedSummaryEntries(rawEntries, {
+      mode: 'continuation',
+      sourceChat: '第一战区主线',
+    });
+    expect(contResult.map(e => e.name)).toEqual([IMPORTED_SUMMARY_OVERVIEW_NAME, '档案·白凌']);
+    expect(contResult[0].content).toContain('第一战区主线');
+    expect(contResult[0].content).toContain('前80楼战略大摘要总述');
+    expect(contResult[0].content).toContain('81至100楼近期中摘要');
+    expect(contResult[0].content).not.toContain('第一阶段子摘要（已被大摘要覆盖）');
+    expect(contResult[0].strategy).toEqual({ type: 'constant', keys: ['前情战史', '旧档纪要'] });
+    expect(contResult[0].position).toEqual({ type: 'at_depth', role: 'system', depth: 5, order: 95 });
+
+    const ngpResult = consolidateImportedSummaryEntries(rawEntries, {
+      mode: 'new_game_plus',
+      sourceChat: '第一战区主线',
+    });
+    expect(ngpResult.map(e => e.name)).toEqual(['档案·白凌']);
+  });
+
+  it('FD-53 · reanchorTimelineForImportedChat 同时清空高于 #0 楼的 wbJournal 与 opLog，并将 maxFloorWatermark 置 0', () => {
+    const rawLedger = {
+      version: 1,
+      originChatId: '旧聊天',
+      boundBookName: '红警档案·旧书',
+      maxFloorWatermark: 24,
+      floors: {
+        f_0: {
+          floorId: 0,
+          activeSwipeId: 0,
+          swipes: {
+            s_0: {
+              floorId: 0,
+              swipeId: 0,
+              opLog: [{ kind: 'BOOT_INIT', ts: 1 }],
+              wbJournal: [{ entryName: '初始词条' }],
+            },
+          },
+        },
+        f_3: {
+          floorId: 3,
+          activeSwipeId: 0,
+          swipes: {
+            s_0: {
+              floorId: 3,
+              swipeId: 0,
+              opLog: [{ kind: 'COMMIT_PLANNING', ts: 10 }],
+              wbJournal: [{ entryName: '档案·苏离' }],
+            },
+          },
+        },
+      },
+    };
+
+    const reanchored = reanchorTimelineForImportedChat(rawLedger, '新聊天_01', '红警档案·新书');
+    expect(reanchored.originChatId).toBe('新聊天_01');
+    expect(reanchored.boundBookName).toBe('红警档案·新书');
+    expect(reanchored.maxFloorWatermark).toBe(0);
+    const floors = reanchored.floors as Record<string, { swipes: Record<string, { opLog: unknown[]; wbJournal: unknown[] }> }>;
+    // #0 楼原样保留
+    expect(floors.f_0.swipes.s_0.opLog).toHaveLength(1);
+    expect(floors.f_0.swipes.s_0.wbJournal).toHaveLength(1);
+    // 高于 #0 楼的 opLog 与 wbJournal 同时清空
+    expect(floors.f_3.swipes.s_0.opLog).toEqual([]);
+    expect(floors.f_3.swipes.s_0.wbJournal).toEqual([]);
+  });
+
+  it('FD-53 · restoreSavePackExtendedState 恢复 promoted_worldbooks 并立即将聊天绑定书、私产书、DLC 书加入全局启用列表（排他卸载旧聊天档案书）', async () => {
+    const stat = makeValidStatData();
+    const v2Res = parseSavePack(
+      JSON.stringify({
+        version: 2,
+        kind: 'redalert-save',
+        exportedAt: '2026-10-31T10:00:00.000Z',
+        source: { chat: '旧战局A', message_id: 20 },
+        stat_data: stat,
+        dlc_registry: [{ id: 'dlc_custom', bookName: '扩展·自定义战术包' }],
+        promoted_registry: {
+          entries: {
+            bailing_independent: { targetBook: '私产·白凌独立卷' },
+          },
+        },
+        archive_registry: {
+          entries: {
+            retired_1: { name: '旧条目' },
+          },
+        },
+        promoted_worldbooks: {
+          '私产·白凌独立卷': [
+            { name: '档案·白凌·深度传记', content: '白凌私产书内容', enabled: true, keys: ['白凌'] },
+          ],
+        },
+        chat_worldbook_entries: [
+          { name: '档案·苏离', content: '苏离档案', enabled: true, keys: ['苏离'] },
+          { name: '摘要·001-020', content: '1到20楼前情战史', enabled: true },
+        ],
+      }),
+    );
+    expect(v2Res.ok).toBe(true);
+    if (!v2Res.ok) return;
+
+    const adapter = createMockHostAdapter(0);
+    adapter.globalBooks.push('红警档案·上局残留旧书·20261001T0000');
+    const fakeGw = createFakeWorldbookGateway({}, '');
+
+    const out = await restoreSavePackExtendedState(v2Res.pack, {
+      adapter,
+      gateway: fakeGw,
+      importMode: 'continuation',
+    });
+
+    expect(out.restoredVars).toEqual(['$dlc', '$promoted', '$archive']);
+    expect(out.boundBookName).toContain('红警档案·');
+    expect(adapter.globalBooks).toContain(out.boundBookName);
+    expect(adapter.globalBooks).toContain('私产·白凌独立卷');
+    expect(adapter.globalBooks).toContain('扩展·自定义战术包');
+    expect(adapter.globalBooks).not.toContain('红警档案·上局残留旧书·20261001T0000');
+
+    const promotedEntries = await fakeGw.getWorldbook('私产·白凌独立卷');
+    expect(promotedEntries).toEqual([
+      { name: '档案·白凌·深度传记', content: '白凌私产书内容', enabled: true, keys: ['白凌'] },
     ]);
   });
 });

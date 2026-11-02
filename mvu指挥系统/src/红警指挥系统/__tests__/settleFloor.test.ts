@@ -2212,6 +2212,58 @@ describe('UTO-SETTLE-01 · settleFloor.ts 三路硬编码分流消解与 UTO 编
     expect(reconciled.next.tech.done.filter(t => t === '基础步兵训练学')).toHaveLength(1);
     expect(reconciled.next.tech.done).not.toContain('复合装甲冶金学');
   });
+
+  it('FD-55 PKG-A：资金链结算接入民心乘数（万众一心 ×1.20 / 沸反盈天 ×0.75）且持久化标称日率保持原值', () => {
+    const mkChainState = (moraleOverride: { value: number; level: string; engaged: boolean }) =>
+      mkStat({
+        morale: moraleOverride,
+        economy: {
+          credits: 1000,
+          credits_daily: 1000,
+          wallet: { 银元: 100 },
+          chains: [
+            {
+              id: 'c-in',
+              name: '北坡本土商路',
+              flow: '收入',
+              rate_daily: 1000,
+              wallet_daily: { 银元: 100 },
+              eff: 1,
+              status: 'active',
+              started_day: 1,
+              reason: '',
+            },
+            {
+              id: 'c-out',
+              name: '前线驻防维护费',
+              flow: '支出',
+              rate_daily: 200,
+              eff: 1,
+              status: 'active',
+              started_day: 1,
+              reason: '',
+            },
+          ],
+        },
+      });
+
+    // 1. 高民心（万众一心 9.0 -> ×1.20）：正向收入 1000 * 1.2 = 1200，减去支出 200 = +1000/日；银元 +100 * 1.2 = +120
+    const highState = mkChainState({ value: 9.0, level: '万众一心', engaged: true });
+    const highSettled = settleFloor(highState, highState, '<timePast>1 D 0 H 0 M</timePast>');
+    expect(highSettled.data.economy.credits).toBe(2000);
+    expect(highSettled.data.economy.credits_daily).toBe(1000);
+    expect(highSettled.data.economy.wallet['银元']).toBe(220);
+    // 确认落盘链条标称 rate_daily 与 wallet_daily 未被永久覆写
+    expect(highSettled.data.economy.chains[0].rate_daily).toBe(1000);
+    expect(highSettled.data.economy.chains[0].wallet_daily?.['银元']).toBe(100);
+
+    // 2. 低民心（沸反盈天 1.5 -> ×0.75）：正向收入 1000 * 0.75 = 750，减去支出 200 = +550/日；银元 +100 * 0.75 = +75
+    const lowState = mkChainState({ value: 1.5, level: '沸反盈天', engaged: true });
+    const lowSettled = settleFloor(lowState, lowState, '<timePast>1 D 0 H 0 M</timePast>');
+    expect(lowSettled.data.economy.credits).toBe(1550);
+    expect(lowSettled.data.economy.credits_daily).toBe(550);
+    expect(lowSettled.data.economy.wallet['银元']).toBe(175);
+  });
 });
 
 

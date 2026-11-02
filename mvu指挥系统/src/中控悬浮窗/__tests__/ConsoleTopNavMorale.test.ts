@@ -104,6 +104,7 @@ interface VElement {
   kind: 'element';
   tag: string;
   attrs: Record<string, string>;
+  listeners: Record<string, (...args: unknown[]) => void>;
   children: VNodeItem[];
   parent: VElement | null;
 }
@@ -115,7 +116,7 @@ interface VText {
 type VNodeItem = VElement | VText;
 
 function makeElement(tag: string): VElement {
-  return { kind: 'element', tag, attrs: {}, children: [], parent: null };
+  return { kind: 'element', tag, attrs: {}, listeners: {}, children: [], parent: null };
 }
 
 function getText(node: VNodeItem): string {
@@ -169,7 +170,14 @@ function mountTopNav(Comp: Component, extraProps: Record<string, unknown> = {}) 
       return node.parent.children[idx + 1] ?? null;
     },
     patchProp: (el, key, _prev, next) => {
-      if (key.startsWith('on') && key.length > 2) return;
+      if (key.startsWith('on') && key.length > 2) {
+        if (typeof next === 'function') {
+          el.listeners[key] = next as (...args: unknown[]) => void;
+        } else {
+          delete el.listeners[key];
+        }
+        return;
+      }
       if (next === null || next === undefined || next === false) {
         delete el.attrs[key];
       } else {
@@ -297,7 +305,40 @@ describe('FD-36 PKG-C · ConsoleTopNav 暴露度 EL 等级增强与民心五阶�
     const metricsRow = findByDataTest(root, 'topnav-metrics-row');
     expect(metricsRow).toBeDefined();
     expect(metricsRow!.attrs.class).toContain('grid-cols-2');
+    expect(metricsRow!.attrs.class).not.toContain('pointer-events-none');
     expect(findByDataTest(metricsRow!, 'topnav-exposure-pill')).toBeDefined();
     expect(findByDataTest(metricsRow!, 'topnav-morale-pill')).toBeDefined();
+  });
+
+  it('5. FD-55 双胶囊原貌点击交互：点击民心胶囊 emit("open-modal", "morale")，点击暴露胶囊 emit("open-modal", "exposure")，preLaunchLocked 时拦截', async () => {
+    const Comp = await loadConsoleTopNav();
+    const openedModals: string[] = [];
+    const { root } = mountTopNav(Comp, {
+      preLaunchLocked: false,
+      onOpenModal: (modal: string) => openedModals.push(modal),
+    });
+
+    const expPill = findByDataTest(root, 'topnav-exposure-pill')!;
+    const morPill = findByDataTest(root, 'topnav-morale-pill')!;
+    expect(expPill.attrs.class).toContain('cursor-pointer');
+    expect(morPill.attrs.class).toContain('cursor-pointer');
+    expect(expPill.attrs.role).toBe('button');
+    expect(morPill.attrs.role).toBe('button');
+
+    morPill.listeners.onClick?.(new Event('click'));
+    expect(openedModals).toEqual(['morale']);
+
+    expPill.listeners.onClick?.(new Event('click'));
+    expect(openedModals).toEqual(['morale', 'exposure']);
+
+    // preLaunchLocked 锁定态下点击不触发弹窗
+    const lockedModals: string[] = [];
+    const { root: lockedRoot } = mountTopNav(Comp, {
+      preLaunchLocked: true,
+      onOpenModal: (modal: string) => lockedModals.push(modal),
+    });
+    findByDataTest(lockedRoot, 'topnav-morale-pill')!.listeners.onClick?.(new Event('click'));
+    findByDataTest(lockedRoot, 'topnav-exposure-pill')!.listeners.onClick?.(new Event('click'));
+    expect(lockedModals).toEqual([]);
   });
 });

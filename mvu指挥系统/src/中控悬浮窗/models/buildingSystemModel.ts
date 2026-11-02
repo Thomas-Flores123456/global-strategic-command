@@ -20,7 +20,9 @@ import {
   BLUEPRINT_NODES,
   BUILDING_SYSTEM_TABS,
   buildMetricsForSystem,
+  checkBuildingAllowedByAuthority,
   classifyBuildingSystem,
+  evaluateBaseBuildAuthority,
   inferBuildingFaction,
   inferConyardFaction,
   inferSystemSubGroup,
@@ -29,7 +31,9 @@ import {
   normalizeBuildingFactionFilter,
   resolveAvailableBuildingFactions,
   resolveBaseOperationalConyardFactions,
+  type BaseBuildAuthorityEvaluation,
   type BuildingBlueprintNode,
+  type CatalogMaidenItemLike,
   type BuildingBlueprintNodeSpec,
   type BuildingFactionFilter,
   type BuildingNodeState,
@@ -186,7 +190,21 @@ function matchesNodeSpec(buildingName: string, spec: BuildingBlueprintNodeSpec):
 export function buildBuildingOverviewModel(
   snapshot: StatData | null | undefined,
   catalog?: Partial<EffectiveCatalog> | null,
-  options?: { scope?: BuildingScopeMode; activeBaseIndex?: number; factionFilter?: BuildingFactionFilter },
+  options?: {
+    scope?: BuildingScopeMode;
+    activeBaseIndex?: number;
+    factionFilter?: BuildingFactionFilter;
+    dossierMap?: Record<
+      string,
+      | {
+          name?: string;
+          model?: string;
+          specialSkills?: { name: string; tag?: string; desc: string }[];
+          specialEquipment?: { name: string; slot?: string; desc: string }[];
+        }
+      | undefined
+    >;
+  },
 ): BuildingOverviewModel {
   const scope: BuildingScopeMode = options?.scope ?? 'base';
   const factionFilter: BuildingFactionFilter = options?.factionFilter ?? 'all';
@@ -373,14 +391,30 @@ export function buildBuildingOverviewModel(
         : 'allied';
   const normalizedFilter = normalizeBuildingFactionFilter(factionFilter);
 
+  const rawDynamicItems = (catalog as { dynamicCatalog?: { items?: unknown[] } } | null | undefined)?.dynamicCatalog
+    ?.items ?? [];
+  const catalogMaidenItems = rawDynamicItems.filter(
+    (item): item is CatalogMaidenItemLike =>
+      Boolean(item && typeof item === 'object' && (item as { type?: string }).type === 'maiden'),
+  );
+  const dossierMap = options?.dossierMap;
+
   const operationalConyardFactions = new Set<string>();
+  const baseAuthorityMap = new Map<string, BaseBuildAuthorityEvaluation>();
   for (const base of basesForPrereq) {
-    for (const fac of resolveBaseOperationalConyardFactions(base, fallbackConyardFaction)) {
+    const auth = evaluateBaseBuildAuthority({ base, snapshot, catalogMaidenItems, dossierMap });
+    baseAuthorityMap.set(base.id || base.name, auth);
+    for (const fac of resolveBaseOperationalConyardFactions(base, fallbackConyardFaction, auth)) {
       operationalConyardFactions.add(fac);
     }
   }
+  const activeBaseAuthority = currentBase
+    ? (baseAuthorityMap.get(currentBase.id || currentBase.name) ??
+      evaluateBaseBuildAuthority({ base: currentBase, snapshot, catalogMaidenItems, dossierMap }))
+    : evaluateBaseBuildAuthority({ base: null, snapshot, catalogMaidenItems, dossierMap });
+
   const debugBypass = isDebugBypassPrerequisitesActive();
-  const hasAnyConyard = debugBypass || operationalConyardFactions.size > 0;
+  const hasAnyConyard = debugBypass || operationalConyardFactions.size > 0 || activeBaseAuthority.canBuild;
   const hasConyardForFaction = (fac: string): boolean => {
     if (debugBypass) return true;
     if (!fac || fac === 'all' || fac === 'common') return hasAnyConyard;
@@ -399,28 +433,80 @@ export function buildBuildingOverviewModel(
     }
   }
 
+  // 收集战区后方基地已运转建筑集合（供 FCV 前沿工地 / 前哨节点依托后方产线满足母体前置）
+  const rearOperationalNames = new Set<string>();
+  for (const b of allBases) {
+    for (const bld of b.buildings ?? []) {
+      if ((bld.state ?? '运转') === '运转' && bld.name?.trim()) {
+        const t = bld.name.trim();
+        rearOperationalNames.add(t);
+        const s = stripFactionBuildingPrefix(t);
+        if (s && s.length >= 2) rearOperationalNames.add(s);
+      }
+    }
+  }
+
   for (const base of basesForPrereq) {
-    const baseConyardFactions = resolveBaseOperationalConyardFactions(base, fallbackConyardFaction);
+    const baseAuth =
+      baseAuthorityMap.get(base.id || base.name) ??
+      evaluateBaseBuildAuthority({ base, snapshot, catalogMaidenItems, dossierMap });
+    const baseConyardFactions = resolveBaseOperationalConyardFactions(base, fallbackConyardFaction, baseAuth);
     if (baseConyardFactions.size === 0) continue;
     if (normalizedFilter !== 'all' && normalizedFilter !== 'common' && !baseConyardFactions.has(normalizedFilter)) {
       continue;
     }
+    const enrichedBases = allBases.map(b => {
+      if (b !== base && b.id !== base.id) return b;
+      if (baseAuth.tier !== 'fcv_whitelist' && baseAuth.tier !== 'outpost_node') return b;
+      const existing = new Set((b.buildings ?? []).map(x => x.name.trim()));
+      const expanded = [...(b.buildings ?? [])];
+      if (!existing.has('前沿工地')) {
+        existing.add('前沿工地');
+        expanded.push({ name: '前沿工地', layer: '', state: '运转' });
+      }
+      if (!existing.has('发电厂')) {
+        existing.add('发电厂');
+        expanded.push({ name: '发电厂', layer: '', state: '运转' });
+      }
+      for (const rearName of rearOperationalNames) {
+        if (!existing.has(rearName)) {
+          existing.add(rearName);
+          expanded.push({ name: rearName, layer: '', state: '运转' });
+        }
+      }
+      return { ...b, buildings: expanded };
+    });
     const ctx = buildCatalogPrerequisiteContext({
-      bases: allBases,
+      bases: enrichedBases,
       selectedBaseId: base.id,
       techDone: snapshot?.tech?.done ?? [],
       forces: (snapshot?.forces ?? { troops: {}, vehicles: [], girls: [] }) as unknown as import('../../红警指挥系统/core/catalogRuntimeContext').RuntimeForcesLike,
       protocols: snapshot?.protocols,
     });
     if (ctx) {
-      for (const b of deriveBuildableWithContext(catalogBuildings, ctx, [])) {
+      const derivedSet = new Set(deriveBuildableWithContext(catalogBuildings, ctx, []).map(x => x.name));
+      for (const b of catalogBuildings) {
         if (b.id === 'bld.common.construction_yard_core' || CONYARD_ORIGIN_NAMES.has(b.name.trim())) {
           continue;
         }
         const bFaction = inferBuildingFaction({ id: b.id, name: b.name, faction: b.faction, tags: b.tags });
         if (bFaction !== 'common' && !baseConyardFactions.has(bFaction)) continue;
+        const authCheck = checkBuildingAllowedByAuthority({
+          building: {
+            id: b.id,
+            name: b.name,
+            tier: (b as { tier?: number }).tier,
+            cost: b.cost,
+            power: b.power,
+            desc: b.desc,
+            tags: b.tags,
+          },
+          authority: baseAuth,
+        });
+        if (!authCheck.allowed) continue;
+        if (!derivedSet.has(b.name) && !authCheck.grantedByGirlSkill) continue;
         unlockedNames.add(b.name);
-        if (bFaction === 'common') {
+        if (bFaction === 'common' || authCheck.grantedByGirlSkill) {
           unlockedNames.add(stripFactionBuildingPrefix(b.name));
         }
       }
@@ -881,6 +967,18 @@ export function buildBuildingOverviewModel(
             ? normalizedFilter
             : 'common';
       const entryHasRequiredConyard = hasConyardForFaction(entryRequiredFaction);
+      const authCheck = checkBuildingAllowedByAuthority({
+        building: {
+          id: bId,
+          name: cb.name,
+          tier: (cb as { tier?: number }).tier,
+          cost: cb.cost,
+          power: cb.power,
+          desc: cb.desc,
+          tags: cb.tags,
+        },
+        authority: activeBaseAuthority,
+      });
       const isUnlocked = !isConyard && entryHasRequiredConyard && unlockedNames.has(cb.name);
 
       let state: BuildingNodeState = 'locked';
@@ -897,6 +995,8 @@ export function buildBuildingOverviewModel(
       } else if (isUnlocked) {
         state = 'unlocked';
         statusText = '可建造';
+      } else if (scope === 'base' && activeBaseAuthority.canBuild && !authCheck.allowed) {
+        statusText = '权限受限';
       }
 
       const prereqParts: string[] = [];
@@ -928,11 +1028,13 @@ export function buildBuildingOverviewModel(
               : 'MCV';
       const prereqText = !entryHasRequiredConyard && !isConyard
         ? `需先展开${mcvLabel}${prereqParts.length ? ` · ${prereqParts.join(' / ')}` : ''}`
-        : prereqParts.length > 0
-          ? prereqParts.join(' · ')
-          : isConyard
-            ? `由${mcvLabel}就地展开`
-            : '基础可建';
+        : scope === 'base' && activeBaseAuthority.canBuild && !authCheck.allowed && !isConyard
+          ? authCheck.lockReason || '超出当前据点建造权限'
+          : prereqParts.length > 0
+            ? prereqParts.join(' · ')
+            : isConyard
+              ? `由${mcvLabel}就地展开`
+              : '基础可建';
 
       return {
         id: bId,
@@ -946,6 +1048,9 @@ export function buildBuildingOverviewModel(
         cost: cb.cost ?? 0,
         power: cb.power ?? 0,
         prereqText,
+        grantedByGirlSkill: authCheck.grantedByGirlSkill,
+        grantLabel: authCheck.grantLabel,
+        authorityLocked: scope === 'base' && activeBaseAuthority.canBuild && !authCheck.allowed,
       };
     });
 
@@ -1174,6 +1279,7 @@ export function buildBuildingOverviewModel(
       catalog as unknown as Parameters<typeof resolveAvailableBuildingFactions>[1],
     ),
     hasOperationalConyard,
+    buildAuthority: activeBaseAuthority,
     activeBaseIndex,
     activeBaseName,
     totalBuiltCount: builtEntries.length,

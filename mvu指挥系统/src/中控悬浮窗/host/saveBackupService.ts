@@ -16,9 +16,11 @@ import {
   type SavePack,
   type SavePackWorldbookEntry,
 } from '../../开场启动器/importSave';
+import { useCatalogStore } from '../../红警指挥系统/composables/useCatalog';
 import { readCurrentHostChatId } from '../../红警指挥系统/core/timelineLedger';
 import { migrateV1toV2, Schema } from '../../红警指挥系统/core/schema';
 import { tav } from '../../红警指挥系统/parse/systemCheck';
+import { syncMultiFactionWorldbooksOnFloorEvent } from './floorObservers';
 import { getHostWindow } from './modalHost';
 
 export const CURRENT_SAVE_SCHEMA = 2 as const;
@@ -32,6 +34,9 @@ export interface SavePackV2WithSchema extends SavePack {
     version: string;
     avatar?: string;
   };
+  promoted_registry?: Record<string, unknown>;
+  archive_registry?: Record<string, unknown>;
+  promoted_worldbooks?: Record<string, SavePackWorldbookEntry[]>;
 }
 
 export interface BuildSavePackResult {
@@ -92,6 +97,93 @@ function safeClone<T>(val: T): T {
   } catch {
     return val;
   }
+}
+
+function mapRawWorldbookEntries(rawEntries: unknown[]): SavePackWorldbookEntry[] {
+  return rawEntries
+    .filter(
+      (e): e is Record<string, unknown> =>
+        Boolean(e) &&
+        typeof e === 'object' &&
+        !Array.isArray(e) &&
+        typeof (e as { name?: unknown }).name === 'string',
+    )
+    .map((e): SavePackWorldbookEntry => {
+      const strategy = e.strategy as { keys?: unknown[] } | undefined;
+      const rawKeys = Array.isArray(e.keys)
+        ? e.keys
+        : Array.isArray(strategy?.keys)
+          ? strategy.keys
+          : undefined;
+      return {
+        name: String(e.name),
+        content: typeof e.content === 'string' ? e.content : '',
+        ...(typeof e.enabled === 'boolean' ? { enabled: e.enabled } : {}),
+        ...(typeof e.comment === 'string' && e.comment ? { comment: e.comment } : {}),
+        ...(rawKeys ? { keys: rawKeys.map(k => String(k)) } : {}),
+        ...(isPlainRecord(e.position) ? { position: safeClone(e.position) } : {}),
+        ...(isPlainRecord(e.strategy) ? { strategy: safeClone(e.strategy) } : {}),
+        ...(isPlainRecord(e.recursion) ? { recursion: safeClone(e.recursion) } : {}),
+        ...(isPlainRecord(e.extra) ? { extra: safeClone(e.extra) } : {}),
+      };
+    });
+}
+
+function normalizePromotedWorldbooks(
+  raw: unknown,
+): Record<string, SavePackWorldbookEntry[]> | undefined {
+  if (!isPlainRecord(raw)) return undefined;
+  const out: Record<string, SavePackWorldbookEntry[]> = {};
+  for (const [bookName, list] of Object.entries(raw)) {
+    const trimmed = bookName.trim();
+    if (!trimmed || !Array.isArray(list)) continue;
+    out[trimmed] = mapRawWorldbookEntries(list);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function toWritableWorldbookEntries(
+  entries: SavePackWorldbookEntry[],
+): Record<string, unknown>[] {
+  return entries
+    .filter(e => e && typeof e === 'object' && typeof e.name === 'string')
+    .map(e => ({
+      name: e.name,
+      content: typeof e.content === 'string' ? e.content : '',
+      enabled: e.enabled ?? true,
+      ...(typeof e.comment === 'string' && e.comment ? { comment: e.comment } : {}),
+      ...(Array.isArray(e.keys) ? { keys: [...e.keys] } : {}),
+      ...(isPlainRecord(e.position) ? { position: safeClone(e.position) } : {}),
+      ...(isPlainRecord(e.strategy) ? { strategy: safeClone(e.strategy) } : {}),
+      ...(isPlainRecord(e.recursion) ? { recursion: safeClone(e.recursion) } : {}),
+      ...(isPlainRecord(e.extra) ? { extra: safeClone(e.extra) } : {}),
+    }));
+}
+
+function mergeWorldbookEntriesByName(
+  existing: Record<string, unknown>[],
+  incoming: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  const base = Array.isArray(existing)
+    ? existing.map(e => (isPlainRecord(e) ? { ...e } : e))
+    : [];
+  const idxByName = new Map<string, number>();
+  base.forEach((e, idx) => {
+    if (isPlainRecord(e) && typeof e.name === 'string') {
+      idxByName.set(e.name, idx);
+    }
+  });
+  for (const entry of incoming) {
+    const name = String(entry.name ?? '');
+    const existingIdx = idxByName.get(name);
+    if (existingIdx !== undefined) {
+      base[existingIdx] = { ...base[existingIdx], ...entry };
+    } else {
+      idxByName.set(name, base.length);
+      base.push(entry);
+    }
+  }
+  return base;
 }
 
 /**
@@ -369,40 +461,53 @@ export async function buildCurrentSavePack(): Promise<BuildSavePackResult> {
     const timelineLedger = isPlainRecord(chatVars.$timeline)
       ? safeClone(chatVars.$timeline)
       : undefined;
+    const promotedRegistry = isPlainRecord(chatVars.$promoted)
+      ? safeClone(chatVars.$promoted)
+      : undefined;
+    const archiveRegistry = isPlainRecord(chatVars.$archive)
+      ? safeClone(chatVars.$archive)
+      : undefined;
+
+    const getWb = tav<
+      (name: string) => Promise<Record<string, unknown>[]> | Record<string, unknown>[]
+    >('getWorldbook');
 
     let chatWorldbookEntries: SavePackWorldbookEntry[] | undefined;
     try {
       const getChatWbName = tav<(target?: string) => string | null>('getChatWorldbookName');
-      const getWb = tav<(name: string) => Promise<Record<string, unknown>[]>>('getWorldbook');
       const boundBook = getChatWbName ? (getChatWbName('current') ?? '').trim() : '';
       if (boundBook && getWb) {
-        const rawEntries = await getWb(boundBook);
+        const rawEntries = await Promise.resolve(getWb(boundBook));
         if (Array.isArray(rawEntries)) {
-          chatWorldbookEntries = rawEntries
-            .filter(e => e && typeof e === 'object' && typeof e.name === 'string')
-            .map((e): SavePackWorldbookEntry => {
-              const strategy = e.strategy as { keys?: unknown[] } | undefined;
-              const rawKeys = Array.isArray(e.keys)
-                ? e.keys
-                : Array.isArray(strategy?.keys)
-                  ? strategy.keys
-                  : undefined;
-              return {
-                name: String(e.name),
-                content: typeof e.content === 'string' ? e.content : '',
-                ...(typeof e.enabled === 'boolean' ? { enabled: e.enabled } : {}),
-                ...(typeof e.comment === 'string' && e.comment ? { comment: e.comment } : {}),
-                ...(rawKeys ? { keys: rawKeys.map(k => String(k)) } : {}),
-                ...(isPlainRecord(e.position) ? { position: safeClone(e.position) } : {}),
-                ...(isPlainRecord(e.strategy) ? { strategy: safeClone(e.strategy) } : {}),
-                ...(isPlainRecord(e.recursion) ? { recursion: safeClone(e.recursion) } : {}),
-                ...(isPlainRecord(e.extra) ? { extra: safeClone(e.extra) } : {}),
-              };
-            });
+          chatWorldbookEntries = mapRawWorldbookEntries(rawEntries);
         }
       }
     } catch {
       /* 异步读取世界书失败时省略 chat_worldbook_entries，不阻断导出 */
+    }
+
+    let promotedWorldbooks: Record<string, SavePackWorldbookEntry[]> | undefined;
+    if (promotedRegistry && getWb) {
+      const targetBooks = new Set<string>();
+      for (const rec of Object.values(promotedRegistry)) {
+        if (isPlainRecord(rec) && typeof rec.targetBook === 'string' && rec.targetBook.trim()) {
+          targetBooks.add(rec.targetBook.trim());
+        }
+      }
+      const collected: Record<string, SavePackWorldbookEntry[]> = {};
+      for (const targetBook of targetBooks) {
+        try {
+          const rawEntries = await Promise.resolve(getWb(targetBook));
+          if (Array.isArray(rawEntries)) {
+            collected[targetBook] = mapRawWorldbookEntries(rawEntries);
+          }
+        } catch {
+          /* 单本私产世界书读取失败静默跳过，绝不阻断导出 */
+        }
+      }
+      if (Object.keys(collected).length > 0) {
+        promotedWorldbooks = collected;
+      }
     }
 
     const cardMeta = await resolveCurrentCardMeta();
@@ -422,6 +527,9 @@ export async function buildCurrentSavePack(): Promise<BuildSavePackResult> {
       ...(dlcRegistry !== undefined ? { dlc_registry: dlcRegistry } : {}),
       ...(timelineLedger !== undefined ? { timeline_ledger: timelineLedger } : {}),
       ...(chatWorldbookEntries !== undefined ? { chat_worldbook_entries: chatWorldbookEntries } : {}),
+      ...(promotedRegistry !== undefined ? { promoted_registry: promotedRegistry } : {}),
+      ...(archiveRegistry !== undefined ? { archive_registry: archiveRegistry } : {}),
+      ...(promotedWorldbooks !== undefined ? { promoted_worldbooks: promotedWorldbooks } : {}),
     };
 
     const jsonText = JSON.stringify(pack);
@@ -743,10 +851,30 @@ export async function restoreSavePackInPlace(
       };
     }
     pack = parsed.pack;
+    try {
+      const rawObj = JSON.parse(rawJsonOrPack);
+      if (isPlainRecord(rawObj)) {
+        const pExt = pack as Partial<SavePackV2WithSchema>;
+        if (pExt.promoted_registry === undefined && isPlainRecord(rawObj.promoted_registry)) {
+          pExt.promoted_registry = safeClone(rawObj.promoted_registry);
+        }
+        if (pExt.archive_registry === undefined && isPlainRecord(rawObj.archive_registry)) {
+          pExt.archive_registry = safeClone(rawObj.archive_registry);
+        }
+        if (pExt.promoted_worldbooks === undefined && isPlainRecord(rawObj.promoted_worldbooks)) {
+          const normPw = normalizePromotedWorldbooks(rawObj.promoted_worldbooks);
+          if (normPw) pExt.promoted_worldbooks = normPw;
+        }
+      }
+    } catch {
+      /* ignore fallback parse error */
+    }
   } else if (isPlainRecord(rawJsonOrPack) && rawJsonOrPack.kind === 'redalert-save') {
     try {
       const migrated = migrateV1toV2(rawJsonOrPack.stat_data);
       const stat = Schema.parse(migrated);
+      const rawExt = rawJsonOrPack as Partial<SavePackV2WithSchema>;
+      const normPw = normalizePromotedWorldbooks(rawExt.promoted_worldbooks);
       pack = {
         ...rawJsonOrPack,
         stat_data: stat,
@@ -758,7 +886,14 @@ export async function restoreSavePackInPlace(
             : rawJsonOrPack.version === 2
               ? 2
               : 1,
-      };
+        ...(isPlainRecord(rawExt.promoted_registry)
+          ? { promoted_registry: safeClone(rawExt.promoted_registry) }
+          : {}),
+        ...(isPlainRecord(rawExt.archive_registry)
+          ? { archive_registry: safeClone(rawExt.archive_registry) }
+          : {}),
+        ...(normPw ? { promoted_worldbooks: normPw } : {}),
+      } as SavePack;
       if (migrated !== rawJsonOrPack.stat_data) {
         warnings.push('旧版 v1 存档已自动迁移至 v2 结构');
       }
@@ -776,6 +911,8 @@ export async function restoreSavePackInPlace(
       warnings,
     };
   }
+
+  const packWithExt = pack as SavePack & Partial<SavePackV2WithSchema>;
 
   if (pack.migratedFromV1 && !warnings.some(w => w.includes('v1'))) {
     warnings.push('旧版 v1 存档已自动迁移至 v2 结构');
@@ -872,41 +1009,32 @@ export async function restoreSavePackInPlace(
     };
   }
 
-  // 恢复聊天绑定世界书词条
+  // 恢复聊天绑定世界书词条与已提升私产书词条
   let restoredWorldbookEntriesCount = 0;
   let boundBookName = '';
-  if (Array.isArray(pack.chat_worldbook_entries) && pack.chat_worldbook_entries.length > 0) {
-    const getChatWbName = tav<(target?: string) => string | null | undefined>('getChatWorldbookName');
-    const getOrCreateChatWb = tav<(target?: string, name?: string) => Promise<string> | string>(
-      'getOrCreateChatWorldbook',
-    );
-    const replaceWb = tav<
-      (name: string, entries: Record<string, unknown>[]) => Promise<unknown> | unknown
-    >('replaceWorldbook');
-    const createOrReplaceWb = tav<
-      (name: string, entries: Record<string, unknown>[]) => Promise<unknown> | unknown
-    >('createOrReplaceWorldbook');
-    const updateWbWith = tav<
-      (
-        name: string,
-        updater: (entries: Record<string, unknown>[]) => Record<string, unknown>[],
-      ) => Promise<unknown> | unknown
-    >('updateWorldbookWith');
-    const createWb = tav<
-      (name: string, entries: Record<string, unknown>[]) => Promise<unknown> | unknown
-    >('createWorldbook');
+  const getChatWbName = tav<(target?: string) => string | null | undefined>('getChatWorldbookName');
+  const getOrCreateChatWb = tav<(target?: string, name?: string) => Promise<string> | string>(
+    'getOrCreateChatWorldbook',
+  );
+  const getWbNames = tav<() => Promise<string[]> | string[]>('getWorldbookNames');
+  const replaceWb = tav<
+    (name: string, entries: Record<string, unknown>[]) => Promise<unknown> | unknown
+  >('replaceWorldbook');
+  const createOrReplaceWb = tav<
+    (name: string, entries: Record<string, unknown>[]) => Promise<unknown> | unknown
+  >('createOrReplaceWorldbook');
+  const updateWbWith = tav<
+    (
+      name: string,
+      updater: (entries: Record<string, unknown>[]) => Record<string, unknown>[],
+    ) => Promise<unknown> | unknown
+  >('updateWorldbookWith');
+  const createWb = tav<
+    (name: string, entries: Record<string, unknown>[]) => Promise<unknown> | unknown
+  >('createWorldbook');
 
-    const entriesToWrite: Record<string, unknown>[] = pack.chat_worldbook_entries.map(e => ({
-      name: e.name,
-      content: e.content,
-      enabled: e.enabled ?? true,
-      ...(typeof e.comment === 'string' && e.comment ? { comment: e.comment } : {}),
-      ...(Array.isArray(e.keys) ? { keys: [...e.keys] } : {}),
-      ...(isPlainRecord(e.position) ? { position: safeClone(e.position) } : {}),
-      ...(isPlainRecord(e.strategy) ? { strategy: safeClone(e.strategy) } : {}),
-      ...(isPlainRecord(e.recursion) ? { recursion: safeClone(e.recursion) } : {}),
-      ...(isPlainRecord(e.extra) ? { extra: safeClone(e.extra) } : {}),
-    }));
+  if (Array.isArray(pack.chat_worldbook_entries) && pack.chat_worldbook_entries.length > 0) {
+    const entriesToWrite = toWritableWorldbookEntries(pack.chat_worldbook_entries);
 
     try {
       let targetBook = typeof getChatWbName?.('current') === 'string' ? getChatWbName('current')!.trim() : '';
@@ -944,7 +1072,66 @@ export async function restoreSavePackInPlace(
     }
   }
 
-  // 恢复 chat 域变量（$parse、$dlc、重锚定 originChatId 后的 $timeline、以及 $save_schema）
+  // 恢复 promoted_worldbooks 私产书词条
+  if (isPlainRecord(packWithExt.promoted_worldbooks)) {
+    const promotedEntriesMap = Object.entries(packWithExt.promoted_worldbooks);
+    if (promotedEntriesMap.length > 0) {
+      let knownBooks: Set<string> | null = null;
+      if (getWbNames) {
+        try {
+          const names = await Promise.resolve(getWbNames());
+          if (Array.isArray(names)) {
+            knownBooks = new Set(names.map(n => String(n).trim()).filter(Boolean));
+          }
+        } catch {
+          knownBooks = null;
+        }
+      }
+
+      const directWriteWb = createOrReplaceWb ?? replaceWb ?? createWb;
+      for (const [bookName, rawList] of promotedEntriesMap) {
+        const trimmedBook = bookName.trim();
+        if (!trimmedBook || !Array.isArray(rawList)) continue;
+        const entriesToWrite = toWritableWorldbookEntries(rawList);
+        const bookExists = knownBooks ? knownBooks.has(trimmedBook) : true;
+        try {
+          let wrotePromoted = false;
+          if (updateWbWith && bookExists) {
+            try {
+              await Promise.resolve(
+                updateWbWith(trimmedBook, existing =>
+                  mergeWorldbookEntriesByName(existing, entriesToWrite),
+                ),
+              );
+              wrotePromoted = true;
+            } catch {
+              wrotePromoted = false;
+            }
+          }
+          if (!wrotePromoted && directWriteWb) {
+            await Promise.resolve(directWriteWb(trimmedBook, entriesToWrite));
+            wrotePromoted = true;
+          } else if (!wrotePromoted && updateWbWith) {
+            await Promise.resolve(
+              updateWbWith(trimmedBook, existing =>
+                mergeWorldbookEntriesByName(existing, entriesToWrite),
+              ),
+            );
+            wrotePromoted = true;
+          }
+          if (!wrotePromoted) {
+            warnings.push(`私产世界书「${trimmedBook}」未能写回（缺少世界书写入接口）`);
+          }
+        } catch (e) {
+          warnings.push(
+            `恢复私产世界书「${trimmedBook}」时出现异常：${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+    }
+  }
+
+  // 恢复 chat 域变量（$parse、$dlc、$promoted、$archive、重锚定后的 $timeline、$boot 以及 $save_schema）
   const getChatName = tav<() => string>('getCurrentChatName');
   let currentChatId = '';
   if (getChatName) {
@@ -970,13 +1157,80 @@ export async function restoreSavePackInPlace(
     if (boundBookName) {
       reanchoredTimeline.boundBookName = boundBookName;
     }
+    if (targetMid === 0) {
+      reanchoredTimeline.maxFloorWatermark = 0;
+      if (isPlainRecord(reanchoredTimeline.floors)) {
+        const nextFloors: Record<string, unknown> = {};
+        for (const [floorKey, rawSlot] of Object.entries(reanchoredTimeline.floors)) {
+          if (!isPlainRecord(rawSlot)) {
+            nextFloors[floorKey] = rawSlot;
+            continue;
+          }
+          const slotFloorId =
+            typeof rawSlot.floorId === 'number' ? rawSlot.floorId : Number(floorKey);
+          if (Number.isFinite(slotFloorId) && slotFloorId > 0) {
+            nextFloors[floorKey] = {
+              ...rawSlot,
+              wbJournal: [],
+              opLog: [],
+            };
+          } else {
+            nextFloors[floorKey] = rawSlot;
+          }
+        }
+        reanchoredTimeline.floors = nextFloors;
+      }
+    }
   }
+
+  const existingChatVars = (gv?.({ type: 'chat' }) ?? {}) as Record<string, unknown>;
+  const existingBoot = existingChatVars.$boot;
+  const needConfirmBoot = !isPlainRecord(existingBoot) || existingBoot.confirmed !== true;
+  const unlockedFactions =
+    Array.isArray(pack.stat_data.command?.unlocked_factions) &&
+    pack.stat_data.command.unlocked_factions.length > 0
+      ? [...pack.stat_data.command.unlocked_factions]
+      : ['allied'];
+  const primaryFaction = unlockedFactions[0] || 'allied';
+  const importedFromLabel = pack.source?.chat || '备份恢复';
+
+  const autoBootPayload = needConfirmBoot
+    ? {
+        confirmed: true,
+        preset: 'custom',
+        importedFrom: importedFromLabel,
+        confirmedAt: new Date().toISOString(),
+        choices: {
+          worldId: pack.stat_data.meta.world_id,
+          factionId: primaryFaction,
+          selectedFactions: unlockedFactions,
+          date: pack.stat_data.meta.date,
+          locationId: pack.stat_data.bases?.[0]?.id || '',
+          imported: true,
+          importedFrom: importedFromLabel,
+          effective: {
+            credits: pack.stat_data.economy.credits,
+            techDone: [...pack.stat_data.tech.done],
+            exposure: pack.stat_data.exposure.value,
+            narrativeSeed: '',
+          },
+        },
+        importedStatSnapshot: safeClone(pack.stat_data),
+      }
+    : undefined;
 
   const chatPatch: Record<string, unknown> = {
     $save_schema: resolvedSchema,
     ...(isPlainRecord(pack.parse_state) ? { $parse: safeClone(pack.parse_state) } : {}),
     ...(Array.isArray(pack.dlc_registry) ? { $dlc: safeClone(pack.dlc_registry) } : {}),
+    ...(isPlainRecord(packWithExt.promoted_registry)
+      ? { $promoted: safeClone(packWithExt.promoted_registry) }
+      : {}),
+    ...(isPlainRecord(packWithExt.archive_registry)
+      ? { $archive: safeClone(packWithExt.archive_registry) }
+      : {}),
     ...(reanchoredTimeline !== undefined ? { $timeline: reanchoredTimeline } : {}),
+    ...(autoBootPayload !== undefined ? { $boot: autoBootPayload } : {}),
   };
 
   try {
@@ -1012,6 +1266,49 @@ export async function restoreSavePackInPlace(
     }
   } catch (e) {
     warnings.push(`恢复聊天扩展状态时出现异常：${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  if (needConfirmBoot) {
+    try {
+      if (typeof window !== 'undefined') {
+        const payload = {
+          type: 'ra-boot-state-changed',
+          confirmed: true,
+          theme: primaryFaction,
+        };
+        window.postMessage?.(payload, '*');
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage?.(payload, '*');
+          const frames = window.parent.frames;
+          if (frames) {
+            for (let i = 0; i < frames.length; i++) {
+              try {
+                frames[i]?.postMessage?.(payload, '*');
+              } catch {
+                /* cross-frame guard */
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      /* ignore postMessage errors in non-browser test env */
+    }
+  }
+
+  // 立即触发全局世界书启用同步与目录刷新
+  try {
+    await syncMultiFactionWorldbooksOnFloorEvent({
+      getStatData: () => clonedStat as unknown as Record<string, unknown>,
+    });
+  } catch {
+    /* ignore worldbook sync failure in non-host environment */
+  }
+
+  try {
+    await useCatalogStore().refresh();
+  } catch {
+    /* ignore catalog store refresh failure when pinia is inactive */
   }
 
   return {

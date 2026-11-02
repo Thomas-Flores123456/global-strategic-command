@@ -9,6 +9,7 @@ import { packToChoices, parseSavePack } from '../importSave';
 import {
   buildStatData,
   composeLaunchMessage,
+  createImportTakeoverSteps,
   createLaunchSteps,
   createMockHostAdapter,
   runLaunchPipeline,
@@ -17,6 +18,7 @@ import {
   defaultRecommendedChoices,
   FALLBACK_T1_TECH_NAMES,
   HUMAN_COMPANION_PRESETS,
+  IMPORT_SAVE_MODES,
   OPENING_ENTRY_MODES,
   OPENING_SYSTEM_LINK_MODES,
   resolveSystemLinkMode,
@@ -273,5 +275,120 @@ describe('开场启动器 V2 生产级战术 HUD 契约校验', () => {
     expect(
       resolveSystemLinkMode({ entryMode: 'pre_transmigration', systemLinkMode: 'commander_initiate' }),
     ).toBe('commander_initiate');
+  });
+
+  it('FD-53 · App.vue 与 Step4Launch.vue 接线跨战局导入双模式切换（continuation / new_game_plus）与免发消息首楼直接接管通道', async () => {
+    expect(IMPORT_SAVE_MODES.map(m => m.id)).toEqual(['continuation', 'new_game_plus']);
+    expect(APP_SFC).toContain('data-testid="import-mode-switch"');
+    expect(APP_SFC).toContain('import-mode-continuation');
+    expect(APP_SFC).toContain('import-mode-new-game-plus');
+    expect(APP_SFC).toContain('data-testid="top-import-takeover-btn"');
+    expect(APP_SFC).toContain('createImportTakeoverSteps');
+    expect(APP_SFC).toContain('takeoverZeroFloorFromTopDrawer');
+    expect(APP_SFC).toContain('0 座（二周目重开）');
+
+    expect(STEP4_SFC).toContain('data-testid="step4-import-mode-switch"');
+    expect(STEP4_SFC).toContain('data-testid="step4-takeover-only-btn"');
+    expect(STEP4_SFC).toContain('createImportTakeoverSteps');
+    expect(STEP4_SFC).toContain('launchTakeoverOnly');
+    expect(STEP4_SFC).toContain('发射战局接力简报 · 继续战役');
+
+    const importedStat = Schema.parse({
+      meta: { world_id: 'cyber2077', date: '2042-09-01', location: '恶土深处·干涸盐湖' },
+      economy: { credits: 5600, power: { gen: 200, use: 120 } },
+      tech: { done: ['化石燃料发电学', '矿石精炼学'] },
+      command: { unlocked_factions: ['allied', 'soviet'] },
+      bases: [
+        {
+          id: 'badlands_deep',
+          name: '恶土深处前哨基地',
+          location: '恶土深处·干涸盐湖',
+          status: '运转中',
+          buildings: [
+            { name: '建造厂', count: 1, state: '运转' },
+            { name: '矿石精炼厂', count: 2, state: '运转' },
+          ],
+        },
+      ],
+      forces: {
+        infantry: ['盟军步兵班×2'],
+        vehicles: ['采矿车×2'],
+        aircraft: [],
+        navy: [],
+        girls: [
+          { name: '白凌', duty: '工程总管', hp: '完好', base: '恶土深处前哨基地' },
+          { name: '喀秋莎', duty: '重工督造', hp: '完好', base: '恶土深处前哨基地' },
+        ],
+      },
+      codex: [
+        {
+          name: '自定义战术义体·神经加速器',
+          kind: '科技',
+          desc: '旧战局自研黑客义体模块',
+          params: { 世代: 'T2' },
+        },
+      ],
+    });
+
+    const parsed = parseSavePack(
+      JSON.stringify({
+        version: 2,
+        kind: 'redalert-save',
+        exportedAt: '2026-10-31T00:00:00.000Z',
+        source: { chat: '旧战局·恶土防线', message_id: 18 },
+        stat_data: importedStat,
+      }),
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const { choices } = packToChoices(parsed.pack, defaultRecommendedChoices());
+    expect(choices.importMode).toBe('continuation');
+
+    // 1) continuation 模式：保留基地与建筑，跳过多阵营开局二次打折，生成【跨战局接力·战区态势交接简报】
+    const statCont = buildStatData(choices);
+    expect(statCont.bases).toHaveLength(1);
+    expect(statCont.bases[0]?.buildings).toHaveLength(2);
+    expect(statCont.economy.credits).toBe(5600);
+    const msgCont = composeLaunchMessage(choices);
+    expect(msgCont).toContain('【跨战局接力·战区态势交接简报】');
+    expect(msgCont).toContain('恶土深处前哨基地');
+    expect(msgCont).not.toContain('无在役基地（MCV 未展开前禁止预设基地）');
+
+    // 2) new_game_plus 模式：基地归零，继承图鉴、科技与机娘名录（base 重置为空），简报回归初抵开荒
+    choices.importMode = 'new_game_plus';
+    const statNgp = buildStatData(choices);
+    expect(statNgp.bases).toHaveLength(0);
+    expect(statNgp.tech.done).toEqual(expect.arrayContaining(['化石燃料发电学', '矿石精炼学']));
+    expect(statNgp.codex.some(c => c.name === '自定义战术义体·神经加速器')).toBe(true);
+    const katyusha = statNgp.forces.girls.find(g => g.name === '喀秋莎');
+    expect(katyusha).toBeDefined();
+    expect(katyusha?.base).toBe('');
+    const msgNgp = composeLaunchMessage(choices);
+    expect(msgNgp).toContain('【战地初抵序幕】');
+    expect(msgNgp).toContain('- 初始基地状态：无在役基地（MCV 未展开前禁止预设基地）');
+
+    // 3) createImportTakeoverSteps：免发消息直接落盘接管 #0 楼
+    choices.importMode = 'continuation';
+    const adapter = createMockHostAdapter(0);
+    const takeoverProgress = await runLaunchPipeline(createImportTakeoverSteps(), {
+      adapter,
+      choices,
+      importedPack: parsed.pack,
+    });
+    expect(takeoverProgress.filter(p => p.status !== 'running').map(p => [p.name, p.status])).toEqual([
+      ['validateWorld', 'done'],
+      ['bindWorldBooks', 'done'],
+      ['applyPersona', 'skipped'],
+      ['writeStatData', 'done'],
+      ['markBoot', 'done'],
+    ]);
+    expect(adapter.sentMessages).toHaveLength(0);
+    expect(adapter.generateCount).toBe(0);
+    const bootAfterTakeover = readBootFrom(adapter.getChatVars());
+    expect(bootAfterTakeover.confirmed).toBe(true);
+    const writtenStat = adapter.getStatData() as Schema;
+    expect(writtenStat.bases).toHaveLength(1);
+    expect(writtenStat.economy.credits).toBe(5600);
   });
 });

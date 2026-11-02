@@ -30,6 +30,13 @@
  *    不注入时行为与 v1 逐字节一致。能力面映射注记见 LANE_DEPLOY_CAPABILITY 定义处。
  */
 
+import {
+  isFcvSiteBuildingName,
+  isFcvVehicleName,
+  isOutpostNodeBuildingName,
+  isOutpostNodeVehicleName,
+} from '../core/buildAuthority';
+
 /* ═══════════════ 类型定义 ═══════════════ */
 
 /** 产线 ID（§1 九线全表） */
@@ -90,6 +97,10 @@ export interface LaneStateView {
       /** 加速对象（§4.3）：缺省/'global'＝加速全部基地同品类；'base'＝仅本基地 */
       accel_scope?: string;
     }>;
+    forces?: {
+      vehicles?: ReadonlyArray<string | { name?: string; type?: string }> | Record<string, number>;
+      [key: string]: unknown;
+    };
   }>;
   queues?: ReadonlyArray<{ type: string; item: string; base?: string; status?: string; lane?: string }>;
   /** 模式切换在途事务（§4.4，schema optional 挂载；旧档缺席＝零行为变化） */
@@ -99,6 +110,15 @@ export interface LaneStateView {
     target_mode: string;
     remaining_minutes: number;
   }>;
+  /** 战区兵力与机娘编成（可选，供识别驻扎在据点的 FCV 机娘如白芷） */
+  forces?: {
+    girls?: ReadonlyArray<Record<string, unknown>>;
+    vehicles?: ReadonlyArray<string | { name?: string; type?: string }>;
+    [key: string]: unknown;
+  };
+  mecha_girls?: Record<string, unknown>;
+  unit_Attachment?: Record<string, unknown>;
+  vehicles_by_base?: Record<string, unknown>;
 }
 
 /** 裁决器消费的最小事务视图（与 transactionEngine TransactionItem 结构兼容＋Q4 可选 lane） */
@@ -482,7 +502,16 @@ export function buildingMatchesLaneAnchor(buildingName: string, def: LaneDef, de
   }
   const required = LANE_DEPLOY_CAPABILITY[def.laneId];
   if (required === undefined || deployOf === undefined) return false;
-  return (deployOf(buildingName) ?? []).some(granted => capabilityCovers(granted, required));
+  if ((deployOf(buildingName) ?? []).some(granted => capabilityCovers(granted, required))) {
+    return true;
+  }
+  if (
+    (def.laneId === 'lane.defense' || def.laneId === 'lane.other_building') &&
+    (isFcvSiteBuildingName(buildingName) || isOutpostNodeBuildingName(buildingName))
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /* ═══════════════ 容量与加速（§2 Q3 canon 原生容量／§4 双模） ═══════════════ */
@@ -512,10 +541,118 @@ function isProductionMode(building: { mode?: string }, def: LaneDef): boolean {
   return building.mode !== '加速';
 }
 
+const INACTIVE_GIRL_HP_STATES = new Set(['阵亡', '离线', '重伤', '战损', '被毁', '停机']);
+
+function hasFieldVehicleMatch(rawVehicles: unknown): boolean {
+  if (!rawVehicles) return false;
+  if (Array.isArray(rawVehicles)) {
+    return rawVehicles.some(entry => {
+      const vName =
+        typeof entry === 'string'
+          ? entry
+          : typeof entry === 'object' && entry !== null
+            ? String((entry as { name?: unknown; type?: unknown }).name ?? (entry as { type?: unknown }).type ?? '')
+            : '';
+      return isFcvVehicleName(vName) || isOutpostNodeVehicleName(vName);
+    });
+  }
+  if (typeof rawVehicles === 'object') {
+    for (const [k, v] of Object.entries(rawVehicles as Record<string, unknown>)) {
+      const qty = typeof v === 'number' ? v : Number(v);
+      if ((Number.isNaN(qty) || qty > 0) && (isFcvVehicleName(k) || isOutpostNodeVehicleName(k))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * 判定目标基地是否驻扎有在役 FCV（前沿基地建设车 / FCV 机娘如白芷）或前哨基地展开车。
+ * 用于在基地尚未生成虚拟「前沿工地」建筑条目时，为该基地的 `lane.defense`（防御辅助建造线）
+ * 与 `lane.other_building`（其他建筑线）提供 1 个现地筑城工位容量（绝不解锁 `lane.main` 主建筑建造线）。
+ */
+export function hasFieldConstructionUnitInBase(state: LaneStateView, baseRef: string): boolean {
+  const base = resolveBase(state, baseRef);
+  if (!base) return false;
+
+  // 1. 检查 base.forces.vehicles
+  if (hasFieldVehicleMatch(base.forces?.vehicles)) {
+    return true;
+  }
+
+  // 2. 检查 state.vehicles_by_base[base.id / base.name]
+  const vByBase = state.vehicles_by_base;
+  if (vByBase && typeof vByBase === 'object') {
+    const baseId = (base.id ?? '').trim();
+    const baseName = (base.name ?? '').trim();
+    if (baseId && hasFieldVehicleMatch((vByBase as Record<string, unknown>)[baseId])) return true;
+    if (baseName && hasFieldVehicleMatch((vByBase as Record<string, unknown>)[baseName])) return true;
+  }
+
+  // 3. 检查驻扎于该基地的在役 FCV / 前哨展开车机娘（forces.girls / mecha_girls / unit_Attachment）
+  const baseIdNorm = (base.id ?? '').trim().toLowerCase();
+  const baseNameNorm = (base.name ?? '').trim().toLowerCase();
+  const matchesTargetBase = (rawBase: unknown): boolean => {
+    const bStr = String(rawBase ?? '').trim().toLowerCase();
+    if (!bStr) return false;
+    return (
+      (baseIdNorm.length > 0 && bStr === baseIdNorm) ||
+      (baseNameNorm.length > 0 && (bStr === baseNameNorm || baseNameNorm.includes(bStr) || bStr.includes(baseNameNorm)))
+    );
+  };
+
+  const isGirlFcvOrOutpost = (g: Record<string, unknown>): boolean => {
+    const hp = String(g.hp ?? g.status ?? '').trim();
+    if (hp && INACTIVE_GIRL_HP_STATES.has(hp)) return false;
+    const model = String(g.model ?? g.unit_type ?? '');
+    const weapons = String(g.weapons ?? g.form_mech ?? '');
+    const serial = String(g.serial ?? '');
+    return (
+      isFcvVehicleName(model) ||
+      isFcvVehicleName(weapons) ||
+      isOutpostNodeVehicleName(model) ||
+      /^FCV[-_0-9]/i.test(serial)
+    );
+  };
+
+  for (const g of state.forces?.girls ?? []) {
+    if (g && typeof g === 'object' && matchesTargetBase(g.base) && isGirlFcvOrOutpost(g)) {
+      return true;
+    }
+  }
+
+  if (state.mecha_girls && typeof state.mecha_girls === 'object') {
+    for (const val of Object.values(state.mecha_girls)) {
+      if (val && typeof val === 'object') {
+        const g = val as Record<string, unknown>;
+        if (matchesTargetBase(g.base ?? g.location) && isGirlFcvOrOutpost(g)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  if (state.unit_Attachment && typeof state.unit_Attachment === 'object') {
+    for (const [k, val] of Object.entries(state.unit_Attachment)) {
+      if (val && typeof val === 'object') {
+        const att = val as Record<string, unknown>;
+        if (matchesTargetBase(att.base ?? att.location) && ( isGirlFcvOrOutpost(att) || isFcvVehicleName(k) )) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 /**
  * 某基地某产线容量＝该基地该品类「生产模式」锚定建筑数（§2 Q3 canon 原生容量）；
  * 全部加速＝0（队列滞留，待任一切回生产）。基地不可解析返回 undefined（fail-open 由调用方兜底 1）。
  * E2b：锚定命中走双通道（buildingMatchesLaneAnchor），deployOf 未注入时与 v1 逐字节一致。
+ * FCV / 前哨展开车补强：当 `lane.defense` 或 `lane.other_building` 在 `buildings[]` 中无直接锚定建筑（count===0），
+ * 但该基地驻扎有在役 FCV（如「前沿基地建设车」或机娘「白芷」）或前哨展开车时，提供 1 个现地筑城工位容量。
  */
 export function laneCapacityInBase(
   state: LaneStateView,
@@ -531,6 +668,13 @@ export function laneCapacityInBase(
     if (!isPresent(building)) continue;
     if (!buildingMatchesLaneAnchor(building.name, def, deployOf)) continue;
     if (isProductionMode(building, def)) count += 1;
+  }
+  if (
+    count === 0 &&
+    (def.laneId === 'lane.defense' || def.laneId === 'lane.other_building') &&
+    hasFieldConstructionUnitInBase(state, baseRef)
+  ) {
+    return 1;
   }
   return count;
 }

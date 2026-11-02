@@ -177,10 +177,40 @@ function stripUnitFactionPrefix(name: string): string {
   return stripped.length >= 2 ? stripped : name.trim();
 }
 
+const SQUAD_DESIGNATION_INNER_RE =
+  /班|组|分队|小队|中队|大队|支队|特遣队|突击队|侦察队|工兵队|工程队|抢修队|守备队|巡逻队|警卫队|卫戍队|预备队|直属队|机动队|连|排|营|哨|编制|建制|番号|驻防|驻守|守备|卫戍|巡逻|警戒|维保|外勤|内勤|外围|筑城|抢修|后勤|直属|机动|预备|主力|突击|量产|领衔|率领|带队|统领|含|辖|配属|编入|分驻|部$/;
+const TROOP_BASE_UNIT_RE =
+  /兵|大兵|步兵|动员|工程师|工兵|侦察|警犬|军犬|狙击|特工|海豹|谭雅|鲍里斯|军医|医护|卫队|蛙人|新兵|狂兽人|磁暴|防空|火箭|飞行|超时空|民兵|警卫|哨兵/;
+const MODEL_VARIANT_ONLY_RE = /(?:扩仓|改型|改装|双模|战备|爆破|模块)型$/;
+const PAREN_QTY_ONLY_RE = /^[+-]?\d+(?:\.\d+)?\s*(?:名|人|辆|台|架|艘|门|部|挺|具)?$/;
+
+/**
+ * 剥离兵种键名末尾括号里的班组/分队/驻防/维保/警戒/外勤/量产/领衔/含...等编制注记，
+ * 保留非兵种型号括号（如 `(6枚扩仓型)`）及纯数字增量括号（由 `extractParenQty` 处理）。
+ */
+export function stripUnitSquadDesignation(name: string): string {
+  const trimmed = String(name ?? '').trim();
+  if (!trimmed) return '';
+  const m = trimmed.match(/^(.+?)\s*(?:（([^（）]+)）|\(([^()]+)\))\s*$/);
+  if (!m) return trimmed;
+  const base = m[1].trim();
+  const inner = (m[2] ?? m[3] ?? '').trim();
+  if (!base || !inner) return trimmed;
+  if (PAREN_QTY_ONLY_RE.test(inner)) return trimmed;
+  if (
+    SQUAD_DESIGNATION_INNER_RE.test(inner) ||
+    (TROOP_BASE_UNIT_RE.test(base) && !MODEL_VARIANT_ONLY_RE.test(inner))
+  ) {
+    return base;
+  }
+  return trimmed;
+}
+
 function resolveTargetRecordKey(
   target: Record<string, unknown>,
   alignedName: string,
   rawName: string,
+  allowSquadFallback = true,
 ): string {
   if (Object.prototype.hasOwnProperty.call(target, alignedName)) return alignedName;
   if (Object.prototype.hasOwnProperty.call(target, rawName)) return rawName;
@@ -191,10 +221,20 @@ function resolveTargetRecordKey(
   const cStrippedAligned = canon(stripUnitFactionPrefix(alignedName));
   const cStrippedRaw = canon(stripUnitFactionPrefix(rawName));
   const prefixHit = Object.keys(target).find(k => {
+    if (!allowSquadFallback && stripUnitSquadDesignation(k) !== k.trim()) return false;
     const ck = canon(stripUnitFactionPrefix(k));
     return Boolean(ck && (ck === cStrippedAligned || ck === cStrippedRaw));
   });
   if (prefixHit !== undefined) return prefixHit;
+  if (allowSquadFallback) {
+    const uAligned = unitCanonKey(alignedName);
+    const uRaw = unitCanonKey(rawName);
+    const squadHit = Object.keys(target).find(k => {
+      const uk = unitCanonKey(k);
+      return Boolean(uk && (uk === uAligned || uk === uRaw));
+    });
+    if (squadHit !== undefined) return squadHit;
+  }
   return alignedName || rawName;
 }
 
@@ -213,11 +253,49 @@ function parseQtyNumber(val: unknown): number | null {
   return null;
 }
 
+function collectUnitRewriteCanons(rawOrAligned: string, ctx: Ctx): string[] {
+  const base = stripUnitSquadDesignation(rawOrAligned) || rawOrAligned.trim();
+  const c1 = unitCanonKey(base);
+  const aligned = ctx.align ? alignName(base, ctx.align).name : base;
+  const c2 = unitCanonKey(aligned);
+  return [...new Set([c1, c2].filter(Boolean))];
+}
+
+function deductAcrossMatchingSquadKeys(
+  target: Record<string, unknown>,
+  primaryKey: string,
+  canonSet: ReadonlySet<string>,
+  lossAmount: number,
+  ctx: Ctx,
+): void {
+  let remaining = Math.max(0, lossAmount);
+  const candidateKeys = [
+    primaryKey,
+    ...Object.keys(target).filter(k => {
+      if (k === primaryKey) return false;
+      const ks = collectUnitRewriteCanons(k, ctx);
+      return ks.some(c => canonSet.has(c));
+    }),
+  ];
+  for (const k of candidateKeys) {
+    if (remaining <= 0) break;
+    const cur = typeof target[k] === 'number' && Number.isFinite(target[k] as number) ? (target[k] as number) : 0;
+    if (cur <= 0) continue;
+    const deductHere = Math.min(cur, remaining);
+    target[k] = Math.max(0, cur - deductHere);
+    remaining -= deductHere;
+  }
+  if (!(primaryKey in target)) {
+    target[primaryKey] = 0;
+  }
+}
+
 function mergeSingleNumEntry(
   target: Record<string, unknown>,
   rawKeyInput: string,
   val: unknown,
   ctx: Ctx,
+  writtenKeysByCanon?: Map<string, Set<string>>,
 ): boolean {
   const rawKey = rawKeyInput.trim();
   if (!rawKey) return false;
@@ -227,28 +305,54 @@ function mergeSingleNumEntry(
     const isLossSuffix = Boolean(deltaMatch[3]);
     const d = parseQtyNumber(val);
     if (!baseRaw || d == null) return false;
-    const aligned = applyAlign(baseRaw, ctx, `部队.兵力[${baseRaw}]`, 'entity');
-    const targetKey = resolveTargetRecordKey(target, aligned, baseRaw);
-    const cur =
-      typeof target[targetKey] === 'number' && Number.isFinite(target[targetKey] as number)
-        ? (target[targetKey] as number)
-        : 0;
+    const baseClean = stripUnitSquadDesignation(baseRaw) || baseRaw;
+    const aligned = applyAlign(baseClean, ctx, `部队.兵力[${baseRaw}]`, 'entity');
+    const targetKey = resolveTargetRecordKey(target, aligned, baseRaw, true);
     const deltaVal = isLossSuffix ? -Math.abs(d) : d;
-    target[targetKey] = Math.max(0, cur + deltaVal);
+    if (deltaVal < 0) {
+      const canonSet = new Set(collectUnitRewriteCanons(baseRaw, ctx));
+      deductAcrossMatchingSquadKeys(target, targetKey, canonSet, Math.abs(deltaVal), ctx);
+    } else {
+      const cur =
+        typeof target[targetKey] === 'number' && Number.isFinite(target[targetKey] as number)
+          ? (target[targetKey] as number)
+          : 0;
+      target[targetKey] = Math.max(0, cur + deltaVal);
+    }
     ctx.appliedCount++;
     return true;
   }
   const n = parseQtyNumber(val);
   if (n == null) return false;
-  const aligned = applyAlign(rawKey, ctx, `部队.兵力[${rawKey}]`, 'entity');
-  const targetKey = resolveTargetRecordKey(target, aligned, rawKey);
+  const strippedSquad = stripUnitSquadDesignation(rawKey);
+  const hasSquadDesignation = strippedSquad !== rawKey;
+  let targetKey: string;
+  if (hasSquadDesignation) {
+    const cRaw = canon(rawKey);
+    const exactHit = Object.keys(target).find(k => canon(k) === cRaw);
+    targetKey = exactHit ?? rawKey;
+  } else {
+    const aligned = applyAlign(rawKey, ctx, `部队.兵力[${rawKey}]`, 'entity');
+    targetKey = resolveTargetRecordKey(target, aligned, rawKey, false);
+  }
   target[targetKey] = Math.max(0, n);
+  if (writtenKeysByCanon) {
+    for (const ck of collectUnitRewriteCanons(rawKey, ctx)) {
+      let set = writtenKeysByCanon.get(ck);
+      if (!set) {
+        set = new Set<string>();
+        writtenKeysByCanon.set(ck, set);
+      }
+      set.add(targetKey);
+    }
+  }
   ctx.appliedCount++;
   return true;
 }
 
 /** record 按键合并（值支持 delta：键名后缀变化），用于兵力 troops；兼容 LLM 输出对象数组 `[{名称, 数量}]` */
 export function mergeNumRecord(target: Record<string, unknown>, src: unknown, ctx: Ctx): void {
+  const writtenKeysByCanon = new Map<string, Set<string>>();
   if (Array.isArray(src)) {
     for (const elem of src) {
       if (!isUsable(elem) || Array.isArray(elem)) continue;
@@ -258,20 +362,36 @@ export function mergeNumRecord(target: Record<string, unknown>, src: unknown, ct
       const nameT = take(obj, idx, consumed, NAME_ALIASES);
       const qtyT = take(obj, idx, consumed, ['数量', '人数', '兵力', '台数', '件数', 'qty', 'count', 'num']);
       if (nameT && nameT.value != null && qtyT && qtyT.value != null) {
-        mergeSingleNumEntry(target, String(nameT.value), qtyT.value, ctx);
+        mergeSingleNumEntry(target, String(nameT.value), qtyT.value, ctx, writtenKeysByCanon);
         continue;
       }
       const keys = Object.keys(obj);
       if (keys.length === 1) {
         const k = keys[0];
-        mergeSingleNumEntry(target, k, obj[k], ctx);
+        mergeSingleNumEntry(target, k, obj[k], ctx, writtenKeysByCanon);
       }
     }
+  } else if (isUsable(src)) {
+    for (const [k, v] of Object.entries(src as Record<string, unknown>)) {
+      mergeSingleNumEntry(target, k, v, ctx, writtenKeysByCanon);
+    }
+  } else {
     return;
   }
-  if (!isUsable(src)) return;
-  for (const [k, v] of Object.entries(src as Record<string, unknown>)) {
-    mergeSingleNumEntry(target, k, v, ctx);
+
+  // 当本轮输入对某主兵种给出了非增量定额编制时，自动清理同一字典内同主兵种但不在本轮输入中的旧带括号/旧编制键
+  if (writtenKeysByCanon.size > 0) {
+    for (const existingKey of Object.keys(target)) {
+      const existingCanons = collectUnitRewriteCanons(existingKey, ctx);
+      const matchedKeepSets = existingCanons
+        .map(ck => writtenKeysByCanon.get(ck))
+        .filter((s): s is Set<string> => s !== undefined);
+      if (matchedKeepSets.length === 0) continue;
+      const isKept = matchedKeepSets.some(s => s.has(existingKey));
+      if (!isKept) {
+        delete target[existingKey];
+      }
+    }
   }
 }
 
@@ -489,7 +609,8 @@ export function mergeVehicles(f: Record<string, unknown>, vehT: { key: string; v
 }
 
 function unitCanonKey(rawName: string): string {
-  return canon(stripUnitFactionPrefix(rawName)) || canon(rawName);
+  const base = stripUnitSquadDesignation(rawName);
+  return canon(stripUnitFactionPrefix(base)) || canon(base) || canon(rawName);
 }
 
 function snapshotNumRecordByCanon(rec: unknown): Map<string, number> {
@@ -510,7 +631,8 @@ function extractTouchedRecordCanons(src: unknown, ctx: Ctx): Set<string> {
     const trimmed = raw.trim();
     if (!trimmed) return;
     const deltaMatch = trimmed.match(/^(.+?)(?:(_?delta)|变化|增减|(损耗|战损|减少))$/i);
-    const base = (deltaMatch ? deltaMatch[1] : trimmed).trim();
+    const rawBase = (deltaMatch ? deltaMatch[1] : trimmed).trim();
+    const base = stripUnitSquadDesignation(rawBase) || rawBase;
     if (!base) return;
     const aligned = ctx.align ? alignName(base, ctx.align).name : base;
     out.add(unitCanonKey(aligned));
@@ -742,18 +864,16 @@ function applyCasualtyNumEntries(
       });
       return;
     }
-    const aligned = applyAlign(baseRaw, ctx, `${labelPath}[${baseRaw}]`, 'entity');
-    const targetKey = resolveTargetRecordKey(target, aligned, baseRaw);
+    const baseClean = stripUnitSquadDesignation(baseRaw) || baseRaw;
+    const aligned = applyAlign(baseClean, ctx, `${labelPath}[${baseRaw}]`, 'entity');
+    const targetKey = resolveTargetRecordKey(target, aligned, baseRaw, true);
     touchedCanons.add(unitCanonKey(aligned));
     touchedCanons.add(unitCanonKey(baseRaw));
     touchedCanons.add(unitCanonKey(targetKey));
-    const cur =
-      typeof target[targetKey] === 'number' && Number.isFinite(target[targetKey] as number)
-        ? (target[targetKey] as number)
-        : 0;
     const loss = Math.abs(Math.trunc(n));
     if (loss > 0) {
-      target[targetKey] = Math.max(0, cur - loss);
+      const canonSet = new Set(collectUnitRewriteCanons(baseRaw, ctx));
+      deductAcrossMatchingSquadKeys(target, targetKey, canonSet, loss, ctx);
     }
     ctx.appliedCount++;
   };
@@ -1658,22 +1778,34 @@ export function syncGlobalForcesFloorFromBases(data: StatData): void {
     for (const [k, v] of Object.entries(troops)) {
       const n = typeof v === 'number' && Number.isFinite(v) ? v : 0;
       if (n <= 0) continue;
-      const ck = canon(k);
+      const ck = unitCanonKey(k);
+      if (!ck) continue;
+      const cleanDisplayKey = stripUnitSquadDesignation(k).trim() || k.trim();
       const prev = troopSums.get(ck);
       if (prev) {
         prev.total += n;
       } else {
-        troopSums.set(ck, { displayKey: k, total: n });
+        troopSums.set(ck, { displayKey: cleanDisplayKey, total: n });
       }
     }
   }
   if (troopSums.size > 0) {
     const gTroops = (globalForces.troops ??= {}) as Record<string, number>;
     for (const [ck, { displayKey, total }] of troopSums.entries()) {
-      const existingKey = Object.keys(gTroops).find(k => canon(k) === ck) ?? displayKey;
-      const curVal = typeof gTroops[existingKey] === 'number' ? gTroops[existingKey] : 0;
-      if (curVal < total) {
-        gTroops[existingKey] = total;
+      const matchingKeys = Object.keys(gTroops).filter(k => unitCanonKey(k) === ck);
+      const existingSum = matchingKeys.reduce((sum, k) => {
+        const val = gTroops[k];
+        return sum + (typeof val === 'number' && Number.isFinite(val) ? Math.max(0, val) : 0);
+      }, 0);
+      if (existingSum < total) {
+        const diff = total - existingSum;
+        const cleanExistingKey = matchingKeys.find(k => stripUnitSquadDesignation(k) === k.trim());
+        const targetKey = cleanExistingKey ?? matchingKeys[0] ?? (stripUnitSquadDesignation(displayKey).trim() || displayKey);
+        const curVal =
+          typeof gTroops[targetKey] === 'number' && Number.isFinite(gTroops[targetKey])
+            ? Math.max(0, gTroops[targetKey])
+            : 0;
+        gTroops[targetKey] = curVal + diff;
       }
     }
   }
@@ -2976,6 +3108,8 @@ export function upsertExpansion(
         }
       };
 
+      takeHwParam('可建造', ['可建造', '可制造', '可生产', '可研发', '系统可造', 'buildable']);
+      takeHwParam('来源性质', ['来源性质', '来源', '性质', '出处', 'origin']);
       takeHwParam('造价', ['造价', '研发费用', '建造费用', '生产费用', '列装费用', '费用', '经费', 'cost', 'price']);
       takeHwParam('工期', ['工期', '研发周期', '建造周期', '生产周期', '训练周期', '周期', '耗时', '预计', 'eta', 'duration']);
       takeHwParam('耗电', ['耗电', '电力', '电网负载', '负载', '发电', 'power']);
@@ -6572,6 +6706,21 @@ export function mapBase(
     const rawSite = String(siteT.value).trim();
     target.site_type = normalizeBaseSiteType(rawSite) || rawSite;
     ctx.appliedCount++;
+  }
+  // 基地辖区局部民心（FD-36 / FD-55：支持绝对值与增量，clamp [0, 10]，未声明则保持原状）
+  const baseMoraleAbsT = take(src, idx, consumed, ['民心', '局部民心', '民心指数', 'morale']);
+  const baseMoraleDelta = takeDelta(src, idx, consumed, ['民心', '局部民心', '民心指数', 'morale']);
+  if (baseMoraleDelta !== null && Number.isFinite(baseMoraleDelta)) {
+    const prevBaseMorale =
+      typeof target.morale === 'number' && Number.isFinite(target.morale) ? target.morale : 5.0;
+    target.morale = Math.round(Math.max(0, Math.min(10, prevBaseMorale + baseMoraleDelta)) * 100) / 100;
+    ctx.appliedCount++;
+  } else if (baseMoraleAbsT && baseMoraleAbsT.value != null) {
+    const numVal = toNum(baseMoraleAbsT.value);
+    if (numVal !== null && Number.isFinite(numVal)) {
+      target.morale = Math.round(Math.max(0, Math.min(10, numVal)) * 100) / 100;
+      ctx.appliedCount++;
+    }
   }
   // 电力：发电/用电
   const powT = take(src, idx, consumed, ['电力', 'power']);

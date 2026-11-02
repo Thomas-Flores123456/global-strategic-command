@@ -271,6 +271,32 @@ export const PRODUCTION_BLOCK_REGEX = /<\s*生产\s*>([\s\S]*?)<\s*\/\s*生产\s
 const DECL_LINE_REGEX =
   /^\s*(?:[-*•]\s*)?([^:：]+?)\s*[:：]\s*(\d+(?:\.\d+)?)\s*([^\s,，;；|（(]*)\s*(?:[（(](.*?)[）)]|[,，;；|]\s*(.+))?\s*$/;
 const SUBKEY_LINE_REGEX = /^\s*(基地|base|类型|type)\s*[:：]\s*(.+?)\s*$/i;
+const YAML_FIELD_LINE_REGEX =
+  /^\s*([-*•]\s*)?(名称|项目|单位|对象|item|name|unit|数量|数目|qty|count|基地|据点|属地|base|类型|类别|type|category|状态|status|理由|原因|备注|说明|reason|note|desc)\s*[:：]\s*(.*?)\s*$/i;
+
+function normalizeDeclarationType(raw: string): string {
+  const v = raw.trim();
+  if (v === '建筑' || v === '基建') return '建造';
+  if (v === '科研' || v === '科技') return '研究';
+  if (v === '巨构') return '工程';
+  if (
+    v === '人员' ||
+    v === '步兵' ||
+    v === '载具' ||
+    v === '陆地载具' ||
+    v === '空中载具' ||
+    v === '空军' ||
+    v === '水面舰艇' ||
+    v === '海军' ||
+    v === '舰艇' ||
+    v === '装备' ||
+    v === '军备' ||
+    v === '单位'
+  ) {
+    return '生产';
+  }
+  return v;
+}
 
 function applyInlineDeclarationMeta(target: ProductionDeclaration, rawMeta: string | undefined): void {
   if (!rawMeta || !rawMeta.trim()) return;
@@ -281,18 +307,33 @@ function applyInlineDeclarationMeta(target: ProductionDeclaration, rawMeta: stri
     const val = m[2].trim();
     if (!val) continue;
     if (key === '基地' || key === 'base') target.base = val;
-    else target.type = val;
+    else target.type = normalizeDeclarationType(val);
   }
+}
+
+interface PendingYamlDeclaration {
+  item?: string;
+  qty?: number;
+  qtyRaw?: string;
+  invalidQtyLine?: string;
+  base?: string;
+  type?: string;
+  rawLine?: string;
 }
 
 /**
  * 解析 LLM 输出中的 `<生产>` 声明块（验收标准②）。
- * 报文格式（锚定 timePastParser 既有夹具）：
+ * 报文格式（锚定 timePastParser 既有夹具，并兼容多行 YAML 字典条目）：
  *   <生产>
  *   - 犀牛主战坦克: 1台
  *   - 天启坦克：2辆
  *     基地: 青岚基地        // 可选消歧行，缩进挂在上一声明下
  *   轨道空间站·居住舱: 1项 (基地: 恶土前哨主基地, 类型: 工程)
+ *   - 类别: 建筑
+ *     名称: 生态副食与水循环保障站
+ *     基地: 三十八号矿坑前哨（道班客栈）
+ *     数量: 1
+ *     状态: 已完成
  *   </生产>
  * 非法行不静默丢弃——进 rejected 留痕（对齐调度令 rejected 哲学）。
  */
@@ -309,47 +350,167 @@ export function parseProductionDeclarations(rawText: unknown): ProductionParseRe
     found = true;
     const body = blockMatch[1] ?? '';
     let current: ProductionDeclaration | null = null;
+    let pendingYaml: PendingYamlDeclaration | null = null;
+
+    const flushPendingYaml = () => {
+      if (!pendingYaml) return;
+      const p = pendingYaml;
+      pendingYaml = null;
+      if (p.invalidQtyLine) {
+        rejected.push({
+          raw: p.invalidQtyLine,
+          reason: 'invalid_qty',
+          detail: `声明数量「${p.qtyRaw ?? ''}」非法（须为正整数）`,
+        });
+        return;
+      }
+      if (!p.item) {
+        if (p.rawLine) {
+          rejected.push({ raw: p.rawLine, reason: 'malformed_line', detail: 'YAML 声明条目缺少项目名称' });
+        }
+        return;
+      }
+      const decl: ProductionDeclaration = {
+        item: p.item,
+        qty: p.qty ?? 1,
+        raw: p.rawLine ?? `- ${p.item}: ${p.qty ?? 1}`,
+      };
+      if (p.base) decl.base = p.base;
+      if (p.type) decl.type = p.type;
+      declarations.push(decl);
+    };
+
+    const applyYamlField = (target: PendingYamlDeclaration, rawKey: string, rawVal: string, fullLine: string) => {
+      const k = rawKey.toLowerCase();
+      const val = rawVal.replace(/^["']|["']$/g, '').trim();
+      if (k === '名称' || k === '项目' || k === '单位' || k === '对象' || k === 'item' || k === 'name' || k === 'unit') {
+        if (val) target.item = val;
+        if (!target.rawLine) target.rawLine = fullLine;
+        return;
+      }
+      if (k === '数量' || k === '数目' || k === 'qty' || k === 'count') {
+        const mNum = val.match(/^(\d+(?:\.\d+)?)/);
+        const n = mNum ? Number(mNum[1]) : Number.NaN;
+        if (!Number.isInteger(n) || n <= 0) {
+          target.qtyRaw = mNum ? mNum[1] : val;
+          target.invalidQtyLine = fullLine;
+        } else {
+          target.qty = n;
+        }
+        return;
+      }
+      if (k === '基地' || k === '据点' || k === '属地' || k === 'base') {
+        if (val) target.base = val;
+        return;
+      }
+      if (k === '类型' || k === '类别' || k === 'type' || k === 'category') {
+        if (val) target.type = normalizeDeclarationType(val);
+        return;
+      }
+      // 状态/理由/备注等描述性字段静默吸收，不误判为畸变行
+    };
+
     for (const line of body.split(/\r?\n/)) {
       if (!line.trim()) continue;
-      const subMatch = line.match(SUBKEY_LINE_REGEX);
-      if (subMatch) {
-        if (current) {
-          const key = subMatch[1].toLowerCase();
-          const value = subMatch[2].trim();
-          if (key === '基地' || key === 'base') current.base = value;
-          else current.type = value;
-        } else {
-          rejected.push({ raw: line.trim(), reason: 'malformed_line', detail: '无法识别的 <生产> 块内行' });
+      const trimmed = line.trim();
+
+      const yamlMatch = line.match(YAML_FIELD_LINE_REGEX);
+      if (yamlMatch) {
+        const hasBullet = Boolean(yamlMatch[1]);
+        const key = yamlMatch[2];
+        const val = yamlMatch[3] ?? '';
+        const keyLower = key.toLowerCase();
+
+        if (hasBullet) {
+          flushPendingYaml();
+          current = null;
+          pendingYaml = { rawLine: trimmed };
+          applyYamlField(pendingYaml, key, val, trimmed);
+          continue;
         }
+
+        if (pendingYaml) {
+          applyYamlField(pendingYaml, key, val, trimmed);
+          continue;
+        }
+
+        if (current) {
+          if (keyLower === '基地' || keyLower === '据点' || keyLower === '属地' || keyLower === 'base') {
+            if (val.trim()) current.base = val.trim();
+            continue;
+          }
+          if (keyLower === '类型' || keyLower === '类别' || keyLower === 'type' || keyLower === 'category') {
+            if (val.trim()) current.type = normalizeDeclarationType(val.trim());
+            continue;
+          }
+          if (
+            keyLower === '状态' ||
+            keyLower === 'status' ||
+            keyLower === '理由' ||
+            keyLower === '原因' ||
+            keyLower === '备注' ||
+            keyLower === '说明' ||
+            keyLower === 'reason' ||
+            keyLower === 'note' ||
+            keyLower === 'desc'
+          ) {
+            continue;
+          }
+        }
+
+        // 无前导 '-' 但以 名称/项目/类别/类型 开头的无列表符多行 YAML
+        if (
+          keyLower === '名称' ||
+          keyLower === '项目' ||
+          keyLower === '单位' ||
+          keyLower === '对象' ||
+          keyLower === 'item' ||
+          keyLower === 'name' ||
+          keyLower === 'unit' ||
+          keyLower === '类别'
+        ) {
+          current = null;
+          pendingYaml = { rawLine: trimmed };
+          applyYamlField(pendingYaml, key, val, trimmed);
+          continue;
+        }
+
+        rejected.push({ raw: trimmed, reason: 'malformed_line', detail: '无法识别的 <生产> 块内行' });
         continue;
       }
+
+      // 若遇到非 YAML 元数据行，先结算挂起中的 YAML 条目
+      flushPendingYaml();
+
       const declMatch = line.match(DECL_LINE_REGEX);
       if (declMatch) {
         const item = declMatch[1].trim();
         const qtyRaw = declMatch[2];
         const qty = Number(qtyRaw);
         if (!item) {
-          rejected.push({ raw: line.trim(), reason: 'malformed_line', detail: '声明行缺少项目名' });
+          rejected.push({ raw: trimmed, reason: 'malformed_line', detail: '声明行缺少项目名' });
           current = null;
           continue;
         }
         if (!Number.isInteger(qty) || qty <= 0) {
           rejected.push({
-            raw: line.trim(),
+            raw: trimmed,
             reason: 'invalid_qty',
             detail: `声明数量「${qtyRaw}」非法（须为正整数）`,
           });
           current = null;
           continue;
         }
-        current = { item, qty, raw: line.trim() };
+        current = { item, qty, raw: trimmed };
         applyInlineDeclarationMeta(current, declMatch[4] ?? declMatch[5]);
         declarations.push(current);
         continue;
       }
       // 块内非空、非声明、非消歧行：可能是 LLM 夹带叙述
-      rejected.push({ raw: line.trim(), reason: 'malformed_line', detail: '无法识别的 <生产> 块内行' });
+      rejected.push({ raw: trimmed, reason: 'malformed_line', detail: '无法识别的 <生产> 块内行' });
     }
+
+    flushPendingYaml();
   }
 
   return { found, declarations, rejected };
