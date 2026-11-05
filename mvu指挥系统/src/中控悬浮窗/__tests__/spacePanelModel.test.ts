@@ -185,6 +185,8 @@ describe('PKG-B · spacePanelModel 天基航天测控与合同拟定纯函数模
       research: 'M1A2 SEPv3灰熊混动改装包',
       grade: '大改' as const,
       desc: '灰熊主战坦克混动升级。',
+      target_unit: 'M1A1灰熊主战坦克',
+      upgraded_name: 'M1A2 SEPv3混动灰熊主战坦克',
     };
     const airDef = {
       kind: 'retrofit' as const,
@@ -206,6 +208,8 @@ describe('PKG-B · spacePanelModel 天基航天测控与合同拟定纯函数模
       research: '爱国者阵地增强改装',
       grade: '小改' as const,
       desc: '防空阵地升级。',
+      host_building: '爱国者防空阵地',
+      upgraded_name: '爱国者PAC-3增强防空阵地',
     };
 
     expect(resolveRetrofitCategory(landDef)).toBe('land');

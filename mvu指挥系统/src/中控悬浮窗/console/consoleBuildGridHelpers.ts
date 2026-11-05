@@ -20,7 +20,6 @@ import { canon } from '../../红警指挥系统/parse/parsePipeline';
 import { buildCatalogPrerequisiteContext, buildCompletedTechAndProtocolSet } from '../../红警指挥系统/core/catalogRuntimeContext';
 import { laneDefFromKey } from '../../红警指挥系统/engines/productionLanes';
 import { BUILTIN_BUILDING_UPGRADE_SPECS } from '../../红警指挥系统/engines/productionReconciliation';
-import { BUILTIN_RETROFIT_UPGRADE_SPECS } from '../../红警指挥系统/engines/projectEngineHelpers';
 import { SCHEDULE_COPY } from '../../红警指挥系统/planning/scheduleCopy';
 import {
   BUILD_PANEL_GROUPS,
@@ -1133,24 +1132,6 @@ export function resolveModernizedProductionUnit(params: {
         researchName: research,
       };
     }
-  }
-
-  // 2. 兜底扫描内置 48 条改装规格表（兼容单测未挂载完整 catalog.retrofits 的场景）
-  for (const [retrofitName, spec] of Object.entries(BUILTIN_RETROFIT_UPGRADE_SPECS)) {
-    if (!spec.target_unit?.length) continue;
-    if (!completedSet.has(canon(spec.research)) && !completedSet.has(spec.research)) continue;
-    if (!matchesTarget(spec.target_unit)) continue;
-    const upgName =
-      spec.research === '航母电磁弹射改装工程研发' && canon(cleanName) === canon('CV-63小鹰级常规动力航空母舰')
-        ? 'CV-63小鹰级航空母舰(电弹现代改)'
-        : spec.upgraded_name;
-    return {
-      isModernized: true,
-      displayName: upgName,
-      baseUnitName: cleanName,
-      retrofitName,
-      researchName: spec.research,
-    };
   }
 
   return { isModernized: false, displayName: cleanName, baseUnitName: cleanName };

@@ -912,7 +912,6 @@ describe('F2-乙 · operationCompletionsToDeclarations ＋ 门内统一裁决', 
         }),
       ],
     };
-
     const parsed12 = parseProductionDeclarations('<生产>\n- 工程兵: 2名\n</生产>');
     const rec12 = reconcileProduction(state12, parsed12);
     expect(rec12.verdicts[0]?.verdict).toBe('MATCH');
@@ -920,6 +919,27 @@ describe('F2-乙 · operationCompletionsToDeclarations ＋ 门内统一裁决', 
     expect(rec12.next.forces?.equipment).toEqual({});
     expect(rec12.next.bases?.[0]?.forces?.troops).toEqual({ 美国大兵: 4, 工程兵: 2 });
     expect((rec12.next.bases?.[0]?.forces as { equipment?: Record<string, number> })?.equipment).toEqual({});
+  });
+});
+
+describe('G1-02 · reconcileProduction autoSettleRemaining 接线', () => {
+  it('无 <生产> 声明时（Δt=0 楼），autoSettleRemaining 将满工时 settling 自动交割为 done', () => {
+    const q = txn({ item: '犀牛主战坦克', status: 'settling', progress: 100, spent_minutes: 1000, qty_done: 1 });
+    const rec = reconcileProduction(stateWith([q], { forces: { troops: {}, vehicles: [] } }), noDecl(), {
+      autoSettleRemaining: true,
+    });
+    expect(rec.next.queues[0].status).toBe('done');
+    expect(rec.next.queues[0].auto_settled).toBe(true);
+    expect(rec.verdicts[0]).toMatchObject({ verdict: 'MATCH', claimedQty: 1 });
+  });
+
+  it('同楼声明判 OVERRUN 的 settling 项不被自动交割', () => {
+    const q = txn({ item: '犀牛主战坦克', status: 'settling', progress: 100, spent_minutes: 5000, total_minutes: 5000, qty: 5, qty_done: 5 });
+    const rec = reconcileProduction(stateWith([q]), declsOf('<生产>\n- 犀牛主战坦克: 6台\n</生产>'), {
+      autoSettleRemaining: true,
+    });
+    expect(rec.next.queues[0].status).toBe('settling');
+    expect(rec.verdicts.map(v => v.verdict)).toEqual(['OVERRUN']);
   });
 });
 

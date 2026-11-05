@@ -248,6 +248,8 @@ import Icon from '../../红警指挥系统/ui/Icon.vue';
 import type { DataPatch, Schema } from '../../红警指挥系统/core/schema';
 import { useDataStore } from '../../红警指挥系统/composables/store';
 import { appendFloorProcessOp } from '../../红警指挥系统/core/timelineLedger';
+import { hashText } from '../../红警指挥系统/composables/useParseAuthority';
+import { tav } from '../../红警指挥系统/parse/systemCheck';
 import { useCatalogStore } from '../../红警指挥系统/composables/useCatalog';
 import { useFloatingStore } from '../../红警指挥系统/composables/useFloatingStore';
 import {
@@ -267,6 +269,17 @@ import {
   recordFailure,
   shouldAutoRetry,
 } from '../models/patchFailFingerprint';
+
+/**
+ * G1-03：补丁裁决过程量必须记在楼层当前真实 swipe 下（与 useParse 重放取槽同源），
+ * 并附带原文哈希（G1-05），否则非 0 号 swipe 的裁决在重算时丢失。
+ */
+function readFloorSwipeContext(floorId: number): { swipe: number; textHash: string } {
+  const gcm = tav<(id: number) => { swipe_id?: unknown; message?: unknown }[]>('getChatMessages');
+  const msg = gcm?.(floorId)?.[0];
+  const swipe = typeof msg?.swipe_id === 'number' && Number.isInteger(msg.swipe_id) ? msg.swipe_id : 0;
+  return { swipe, textHash: msg ? hashText(String(msg.message ?? '')) : '' };
+}
 
 const props = defineProps<{
   open?: boolean;
@@ -403,14 +416,20 @@ async function applyPatch(
             },
           };
         });
-        appendFloorProcessOp(floorId, 0, {
-          kind: 'PATCH_DECISION',
-          ts: Date.now(),
-          patchId: patch.id,
-          patchTarget: patch.target,
-          decision: 'approve',
-          patchSnapshot: patch,
-        });
+        const ctx = readFloorSwipeContext(floorId);
+        appendFloorProcessOp(
+          floorId,
+          ctx.swipe,
+          {
+            kind: 'PATCH_DECISION',
+            ts: Date.now(),
+            patchId: patch.id,
+            patchTarget: patch.target,
+            decision: 'approve',
+            patchSnapshot: patch,
+          },
+          ctx.textHash,
+        );
         refreshedNeeded = true;
         if (!options?.skipRefresh) {
           await floating.refresh();
@@ -453,14 +472,20 @@ async function deferPatch(patch: DataPatch) {
           },
         };
       });
-      appendFloorProcessOp(floorId, 0, {
-        kind: 'PATCH_DECISION',
-        ts: Date.now(),
-        patchId: patch.id,
-        patchTarget: patch.target,
-        decision: 'defer',
-        patchSnapshot: patch,
-      });
+      const deferCtx = readFloorSwipeContext(floorId);
+      appendFloorProcessOp(
+        floorId,
+        deferCtx.swipe,
+        {
+          kind: 'PATCH_DECISION',
+          ts: Date.now(),
+          patchId: patch.id,
+          patchTarget: patch.target,
+          decision: 'defer',
+          patchSnapshot: patch,
+        },
+        deferCtx.textHash,
+      );
       await floating.refresh();
     }
   } catch (err) {
@@ -487,14 +512,20 @@ async function rejectPatch(patch: DataPatch) {
         const raw = Array.isArray(sd.pending_data_patches) ? (sd.pending_data_patches as DataPatch[]) : [];
         return { ...vars, stat_data: { ...sd, pending_data_patches: raw.filter(p => p.id !== patch.id) } };
       });
-      appendFloorProcessOp(floorId, 0, {
-        kind: 'PATCH_DECISION',
-        ts: Date.now(),
-        patchId: patch.id,
-        patchTarget: patch.target,
-        decision: 'reject',
-        patchSnapshot: patch,
-      });
+      const rejectCtx = readFloorSwipeContext(floorId);
+      appendFloorProcessOp(
+        floorId,
+        rejectCtx.swipe,
+        {
+          kind: 'PATCH_DECISION',
+          ts: Date.now(),
+          patchId: patch.id,
+          patchTarget: patch.target,
+          decision: 'reject',
+          patchSnapshot: patch,
+        },
+        rejectCtx.textHash,
+      );
       await floating.refresh();
     }
   } catch (err) {

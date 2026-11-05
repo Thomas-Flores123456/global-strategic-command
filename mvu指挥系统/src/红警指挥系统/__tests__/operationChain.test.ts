@@ -206,6 +206,19 @@ describe('EVT-OPR-01 · 天候衰减视图 withWeatherView', () => {
     const view = withWeatherView(clamped.chains, '辐射风暴');
     expect(settleChainsDeltaT(view, 1440, 1).deltaCredits).toBe(0);
   });
+
+  it('G6-06 天候封顶与链 eff 上限一致：eff=1.8 大雾下为 1.53 而非被封到 1', () => {
+    const view = withWeatherView([{ ...corridor(), eff: 1.8 }], '大雾');
+    expect(view[0].eff).toBeCloseTo(1.53, 6);
+  });
+
+  it('G6-02 电网恢复保留 eff>1 的加成', () => {
+    const boosted = { ...corridor(), eff: 1.6 };
+    const out = applyGridConstraints({ chains: [boosted], bases: [mkBase('b1', 0, 999)] });
+    expect(out.chains[0].eff).toBe(0);
+    const back = applyGridConstraints({ chains: out.chains, bases: [mkBase('b1', 999, 0)] });
+    expect(back.chains[0]).toMatchObject({ status: 'active', eff: 1.6 });
+  });
 });
 
 /* ═══════════════ 纯函数不可变性与确定性 ═══════════════ */

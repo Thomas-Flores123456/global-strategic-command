@@ -271,7 +271,6 @@ export function parseMessageText(
     floorId?: number;
     authority?: AuthorityInput;
     credibilityIndex?: EntityCredibilityIndex;
-    disallowLegacyWarStatCredits?: boolean;
     deployIndex?: DeployCatalogIndexLike;
     protocolCatalog?: ProtocolIndexSource;
     deferPlanningCommit?: boolean;
@@ -517,7 +516,6 @@ export function parseMessageText(
       applyWarStat(parsed as Record<string, unknown>, data, ctx, deployTagDecls, {
         isFirstFloor: opts.isFirstFloor,
         isInitialStateTag: block.tag === '初始状态',
-        disallowLegacyWarStatCredits: opts.disallowLegacyWarStatCredits,
       });
     }
   }
@@ -536,6 +534,7 @@ export function parseMessageText(
     bridgeExpansionParamsFromQueues(
       data.pending_expansions as Record<string, unknown>[],
       data.queues as Record<string, unknown>[],
+      data.bases as unknown as Record<string, unknown>[],
     );
     tickWorldEvolutionDecay(data, preExistingWorldKeys, touchedWorldKeys);
     enforceIntelStorageBounds(data);
@@ -951,7 +950,6 @@ function applyWarStat(
   warStatOpts?: {
     isFirstFloor?: boolean;
     isInitialStateTag?: boolean;
-    disallowLegacyWarStatCredits?: boolean;
   },
 ): void {
   const idx = keyIndex(w);
@@ -997,11 +995,8 @@ function applyWarStat(
 
   // economy
   const eco = data.economy as unknown as Record<string, unknown>;
-  if (
-    warStatOpts?.disallowLegacyWarStatCredits &&
-    !warStatOpts?.isFirstFloor &&
-    !warStatOpts?.isInitialStateTag
-  ) {
+  // G7-01：资金只允许首楼 / <初始状态> 设定开局值；非首楼 <战况>/<态势> 裸改资金一律拦截
+  if (!warStatOpts?.isFirstFloor && !warStatOpts?.isInitialStateTag) {
     const rawCreditsT = take(w, idx, consumed, ['资金', '经费', 'credits']);
     const rawDeltaT = take(w, idx, consumed, [
       '资金变化',
@@ -1030,58 +1025,7 @@ function applyWarStat(
       );
     }
   } else {
-    const prevCredits = eco.credits;
-    const appliedBeforeCredits = ctx.appliedCount;
-    const hasExplicitDelta =
-      idx.has(canon('资金变化')) ||
-      idx.has(canon('经费变化')) ||
-      idx.has(canon('credits_delta')) ||
-      idx.has(canon('creditsdelta')) ||
-      idx.has(canon('资金_delta')) ||
-      idx.has(canon('经费_delta'));
     setNumField(eco, 'credits', w, idx, consumed, ['资金', '经费', 'credits'], ctx, 'economy');
-    if (
-      ctx.appliedCount > appliedBeforeCredits &&
-      !warStatOpts?.isFirstFloor &&
-      !warStatOpts?.isInitialStateTag
-    ) {
-      const isUnexpandedInitialFooting =
-        (data.queues?.length ?? 0) === 0 &&
-        (data.bases ?? []).every(b => (b.buildings?.length ?? 0) === 0);
-      if (
-        typeof prevCredits === 'number' &&
-        prevCredits > 0 &&
-        eco.credits === 0 &&
-        !hasExplicitDelta &&
-        isUnexpandedInitialFooting
-      ) {
-        eco.credits = prevCredits;
-        ctx.appliedCount = appliedBeforeCredits;
-        yellow(
-          ctx,
-          {
-            layer: 'L2',
-            path: 'economy.credits',
-            message: '<态势> 在未展开初态下误报「资金: 0」，已保留开局初始资金',
-            before: 0,
-            after: prevCredits,
-          },
-          {
-            rule: 'R18',
-            target: 'economy.credits',
-            message: '已拦截未展开初态下将非零开局资金清零的误报',
-          },
-        );
-      } else {
-        green(ctx, {
-          layer: 'L2',
-          path: 'economy.credits',
-          message: '<战况> 遗产资金旁路兼容入账（建议改用 <事件> / <排产计划> / <暗网> 管理资金）',
-          before: prevCredits,
-          after: eco.credits,
-        });
-      }
-    }
   }
   setNumField(eco, 'credits_daily', w, idx, consumed, ['日结', '日均', 'credits_daily'], ctx, 'economy');
   const walletT = take(w, idx, consumed, ['钱袋', 'wallet']);

@@ -293,7 +293,7 @@
             >
               <div class="flex flex-col gap-1">
                 <div class="text-[12px] font-bold" style="color: var(--rac-alert)">
-                  🔒 跨维暗网量子信道尚未接通 · 待建【超维暗网中继站】
+                  🔒 跨维暗网量子信道尚未接通 · {{ model.darknet.marketStatusText }}
                 </div>
                 <div class="text-[11px]" style="color: var(--rac-text)">
                   需建造 T1 通用建筑 <strong>【超维暗网中继站】</strong>（造价 1,200 资金 · 耗电 30 · 前置发电厂）以接通跨维度黑市撮合系统、传质变现舱与专场拍卖所。

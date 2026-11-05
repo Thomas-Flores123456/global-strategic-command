@@ -28,14 +28,18 @@ import {
   writeTimelineLedger,
 } from '../../红警指挥系统/core/timelineLedger';
 import {
+  autoAdvanceChrono,
   cascadeRecomputeDownstream,
   forceCommissionChrono,
+  hashText,
   parseState,
   reconcileDeletedFloorsAbove,
   runParseFor,
   submitFix,
 } from '../../红警指挥系统/composables/useParse';
 import { ROSTER_ENTRY_NAME, type WorldbookEntry } from '../../红警指挥系统/worldbook/chatBookBinding';
+import { toggleBuildingInstanceState } from '../modals/modalBuildingsHelpers';
+import type { BuiltBuildingInstanceRef } from '../models/buildingSystemModel';
 import {
   installFloorObservers,
   teardownFloorObservers,
@@ -44,6 +48,8 @@ import {
 } from '../host/floorObservers';
 
 type Globals = Record<string, unknown>;
+
+vi.mock('toastr', () => ({ default: { success: vi.fn(), warning: vi.fn(), error: vi.fn() } }));
 
 interface MockTavernHarness {
   chatVars: Record<string, unknown>;
@@ -399,7 +405,10 @@ describe('SEAM-01 · MESSAGE_DELETED 监听、删楼水位线对账与世界书�
     try {
       // 预置 #2 楼的 $parse.done 与 $timeline 记录
       h.chatVars.$parse = {
-        done: { '0': { hash: 'h0', swipe_id: 0 }, '2': { hash: 'h2', swipe_id: 0 } },
+        done: {
+          '0': { hash: hashText('<战况>\n资金: 500\n</战况>'), swipe_id: 0 },
+          '2': { hash: hashText('<战况>\n资金变化: +300\n</战况>'), swipe_id: 0 },
+        },
         quarantine: { '2': [{ scope: 'block', tag: '战况', raw: 'x', error: 'e' }] },
         issues: {},
       };
@@ -425,6 +434,128 @@ describe('SEAM-01 · MESSAGE_DELETED 监听、删楼水位线对账与世界书�
       expect(calls).toEqual(['runParse:0', 'floating.refresh']);
     } finally {
       h.restore();
+    }
+  });
+  it('G9-01/G9-03：删中间楼按消息身份检出错位，精确回滚被删楼条目、高楼账本前移并清 $parse 重解析；legacy/非规范摘要不被删', async () => {
+    const bookName = '红警档案·测试卡·20261016';
+    const m = (t: string) => ({ role: 'assistant', is_hidden: false, message: t, swipe_id: 0 });
+    const h = createTavernHarness({
+      boundChatBook: bookName,
+      // 原 #0 #1 #2；删掉 #1 后原 #2 前移为 #1
+      messages: { 0: m('楼0'), 1: m('楼2') },
+      worldbooks: {
+        [bookName]: [
+          { name: '机娘_白凌_核心档案', content: '原#1楼新建', enabled: true },
+          { name: '机娘_喟秋莎_核心档案', content: '原#2楼新建', enabled: true },
+          { name: '旧摘要', content: 'legacy', enabled: true, extra: { legacy: true, to: 99 } },
+          { name: '前情卷宗·大·001-080', content: '旧档', enabled: true, extra: { to: 80 } },
+        ] as WorldbookEntry[],
+      },
+    });
+    const listeners: Record<string, ((...a: unknown[]) => unknown)[]> = {};
+    (globalThis as Globals).tavern_events = { MESSAGE_DELETED: 'message_deleted' };
+    const deps: FloorObserversDeps = {
+      runParse: vi.fn(async () => 'parsed' as const),
+      getLastMessageId: () => Math.max(...Object.keys(h.messages).map(Number)),
+      getChatMessages: (id: number) => (h.messages[id] ? [h.messages[id]] : []),
+      readChatId: () => h.currentChatId,
+      eventOn: vi.fn((evt: string, cb: (...a: unknown[]) => unknown) => {
+        (listeners[evt] ??= []).push(cb);
+        return { stop: () => {} };
+      }),
+    };
+    try {
+      h.chatVars.$parse = {
+        done: {
+          '0': { hash: hashText('楼0'), swipe_id: 0 },
+          '1': { hash: hashText('楼1'), swipe_id: 0 },
+          '2': { hash: hashText('楼2'), swipe_id: 0 },
+        },
+        quarantine: {},
+        issues: {},
+      };
+      appendWorldbookMutation(1, 0, {
+        ts: 2000,
+        bookName,
+        entryName: '机娘_白凌_核心档案',
+        op: 'create',
+        beforeEntry: null,
+      });
+      appendWorldbookMutation(2, 0, {
+        ts: 3000,
+        bookName,
+        entryName: '机娘_喟秋莎_核心档案',
+        op: 'create',
+        beforeEntry: null,
+      });
+      installFloorObservers({ refresh: vi.fn(async () => {}) }, deps);
+      await listeners['message_deleted']![0]!();
+
+      // 被删 #1 楼条目回滚；仍存活的原 #2 楼条目保留、账本前移为 #1；非规范/legacy 摘要不被误删
+      const names = h.worldbooks[bookName].map(e => e.name);
+      expect(names).toHaveLength(3);
+      expect(names).not.toContain('机娘_白凌_核心档案');
+      const ledger = readTimelineLedger();
+      expect(Object.keys(ledger.floors)).toEqual(['f_1']);
+      expect(ledger.floors['f_1'].swipes['s_0'].wbJournal.map(r => [r.entryName, r.floorId])).toEqual([
+        [names[0], 1],
+      ]);
+      // 错位楼起的解析留痕作废，等待重解析
+      expect(Object.keys((h.chatVars.$parse as Record<string, any>).done)).toEqual(['0']);
+
+      // 同一删楼事件重放（身份留痕已清）：不再重映射，也不重复回滚
+      const replay = await reconcileDeletedFloorsAbove(1, { midDeletionFrom: 1 });
+      expect(replay.rolledBackWbCount).toBe(0);
+      expect(h.worldbooks[bookName].map(e => e.name)).toEqual(names);
+      expect(Object.keys(readTimelineLedger().floors)).toEqual(['f_1']);
+
+      // G9-03：普通水位线对账时，legacy 摘要与非规范前缀带 extra.to 的条目不被当作越界摘要删除
+      await reconcileDeletedFloorsAbove(0);
+      expect(h.worldbooks[bookName].map(e => e.name)).toEqual(['旧摘要', '前情卷宗·大·001-080']);
+    } finally {
+      h.restore();
+    }
+  });
+
+  it('G9-01b：删中间楼后从错位楼起逐楼按顺序重解析（MESSAGE_DELETED 与只发 CHAT_CHANGED 两条路径）', async () => {
+    const m = (t: string) => ({ role: 'assistant', is_hidden: false, message: t, swipe_id: 0 });
+    const u = (t: string) => ({ role: 'user', is_hidden: false, message: t, swipe_id: 0 });
+    for (const evt of ['message_deleted', 'chat_changed'] as const) {
+      teardownFloorObservers();
+      // 原 #0..#4；删掉 #1 后原 #2/#3/#4 前移为 #1/#2/#3（#2 为 user 楼应跳过）
+      const h = createTavernHarness({ messages: { 0: m('楼0'), 1: m('楼2'), 2: u('楼3'), 3: m('楼4') } });
+      const listeners: Record<string, ((...a: unknown[]) => unknown)[]> = {};
+      (globalThis as Globals).tavern_events = { MESSAGE_DELETED: 'message_deleted', CHAT_CHANGED: 'chat_changed' };
+      const order: number[] = [];
+      const deps: FloorObserversDeps = {
+        runParse: vi.fn(async (id: number) => {
+          order.push(id);
+          return 'parsed' as const;
+        }),
+        getLastMessageId: () => Math.max(...Object.keys(h.messages).map(Number)),
+        getChatMessages: (id: number) => (h.messages[id] ? [h.messages[id]] : []),
+        readChatId: () => h.currentChatId,
+        eventOn: vi.fn((e: string, cb: (...a: unknown[]) => unknown) => {
+          (listeners[e] ??= []).push(cb);
+          return { stop: () => {} };
+        }),
+      };
+      try {
+        h.chatVars.$parse = {
+          done: Object.fromEntries(
+            ['楼0', '楼1', '楼2', '楼3', '楼4'].map((t, i) => [String(i), { hash: hashText(t), swipe_id: 0 }]),
+          ),
+          quarantine: {},
+          issues: {},
+        };
+        installFloorObservers({ refresh: vi.fn(async () => {}) }, deps);
+        order.length = 0; // 忽略 init 补解析
+        await listeners[evt]![0]!();
+        expect(order, evt).toEqual([1, 3]);
+        expect(Object.keys((h.chatVars.$parse as Record<string, any>).done), evt).toEqual(['0']);
+      } finally {
+        h.restore();
+      }
     }
   });
 });
@@ -470,13 +601,14 @@ describe('SEAM-02 · 交互过程量落账与 runParseFor(mid, true) 100% 幂等
       factionDefs: [{ faction: '苏联', mcv: '苏联建造厂', lab: '作战实验室' }],
     } as unknown as EffectiveCatalog;
 
+    const catalogSpy = vi.spyOn(await import('../../红警指挥系统/composables/useCatalog'), 'effectiveCatalogSnapshot').mockReturnValue(catalog);
     try {
       // 1. 解析 #0 与 #1 楼
       expect(await runParseFor(0, true)).toBe('parsed');
       expect(await runParseFor(1, true)).toBe('parsed');
 
       const floor1Initial = h.msgVars[1].stat_data as StatData;
-      expect(floor1Initial.economy.credits).toBe(3500);
+      expect(floor1Initial.economy.credits).toBe(3000); // G7-01：非首楼 <战况> 资金变化 +500 被拦截
       expect(floor1Initial.pending_data_patches).toHaveLength(1);
 
       // 2. 在 #1 楼执行玩家过程量①：手动批准排产方案（耗资 1800 入队 2 辆犀牛坦克）
@@ -499,7 +631,7 @@ describe('SEAM-02 · 交互过程量落账与 runParseFor(mid, true) 100% 幂等
         forceApprove: true,
       });
       expect(planCommitted.committed).toBe(true);
-      expect(planCommitted.next.economy.credits).toBe(1700); // 3500 - 1800
+      expect(planCommitted.next.economy.credits).toBe(1200); // 3000 - 1800
       expect(planCommitted.next.queues).toHaveLength(1);
       h.msgVars[1].stat_data = planCommitted.next;
 
@@ -548,8 +680,8 @@ describe('SEAM-02 · 交互过程量落账与 runParseFor(mid, true) 100% 幂等
       expect(await runParseFor(1, true)).toBe('parsed');
 
       const floor1Replayed = h.msgVars[1].stat_data as StatData & { applied_data_patches?: DataPatch[] };
-      // 排产扣款被恢复（1700 而非 Raw 算出的 3500）
-      expect(floor1Replayed.economy.credits).toBe(1700);
+      // 排产扣款被恢复（1200 而非 Raw 算出的 3000）
+      expect(floor1Replayed.economy.credits).toBe(1200);
       // CHRONO 特批入役结果被恢复（队列项 status === 'done'，且兵力表入账犀牛坦克）
       expect(floor1Replayed.queues.some(q => q.item === '犀牛坦克' && q.status === 'done')).toBe(true);
       // 补丁批准结果被恢复（pending_data_patches 清空，applied_data_patches 含该补丁）
@@ -562,14 +694,157 @@ describe('SEAM-02 · 交互过程量落账与 runParseFor(mid, true) 100% 幂等
       const fixRes = await submitFix(
         1,
         { scope: 'block', tag: '战况', raw: '坏块', error: 'YAML 语法错误' },
-        '资金变化: +250',
+        '暴露度: 4',
       );
       expect(fixRes.ok).toBe(true);
-      expect((h.msgVars[1].stat_data as StatData).economy.credits).toBe(1950);
+      expect((h.msgVars[1].stat_data as StatData).exposure.value).toBe(4);
+      expect((h.msgVars[1].stat_data as StatData).economy.credits).toBe(1200);
 
       // 再次重跑 runParseFor(1, true)，SUBMIT_FIX 快照也被自动重放保留
       expect(await runParseFor(1, true)).toBe('parsed');
-      expect((h.msgVars[1].stat_data as StatData).economy.credits).toBe(1950);
+      expect((h.msgVars[1].stat_data as StatData).exposure.value).toBe(4);
+    } finally {
+      catalogSpy.mockRestore();
+      h.restore();
+    }
+  });
+
+  it('G1-05：原文编辑后用户修复意图继续回放，且不覆盖新结算的其他变化', async () => {
+    const h = createTavernHarness({
+      messages: {
+        0: { role: 'assistant', is_hidden: false, message: '<战况>\n资金: 3000\n</战况>', swipe_id: 0 },
+        1: { role: 'assistant', is_hidden: false, message: '<战况>\n资金: 3500\n</战况>', swipe_id: 0 },
+      },
+    });
+    try {
+      expect(await runParseFor(0, true)).toBe('parsed');
+      expect(await runParseFor(1, true)).toBe('parsed');
+      const fixed = await submitFix(1, { scope: 'block', tag: '战况', raw: '坏块', error: 'YAML' }, '暴露度: 4');
+      expect(fixed.ok).toBe(true);
+      expect(await runParseFor(1, true)).toBe('parsed');
+      expect((h.msgVars[1].stat_data as StatData).exposure.value).toBe(4);
+
+      h.messages[1].message = '<战况>\n部队:\n  兵力:\n    工程兵变化: +12\n</战况>';
+      expect(await runParseFor(1, true)).toBe('parsed');
+      expect((h.msgVars[1].stat_data as StatData).forces.troops.工程兵).toBe(12);
+      expect((h.msgVars[1].stat_data as StatData).exposure.value).toBe(4);
+      expect(parseState.reports[0].events.some(e => e.message.includes('已作废'))).toBe(false);
+      const slot = getSwipeSlot(readTimelineLedger(), 1, 0);
+      expect(slot?.textHash).toBe(hashText(h.messages[1].message));
+      expect(slot?.opLog).toHaveLength(1);
+      expect(slot?.opLog[0]).not.toHaveProperty('fixedStatSnapshot');
+      // 缺失目标仅跳过该条；后续修复仍应用，记录仍保留。
+      appendFloorProcessOp(1, 0, { kind: 'BUILDING_DISPATCH', ts: 2,
+        baseId: '已删除基地', buildingName: '战车工厂', instanceOrdinal: 1, patch: { state: '停机' } });
+      appendFloorProcessOp(1, 0, { kind: 'SUBMIT_FIX', ts: 3, blockType: '战况', fixedYaml: '暴露度: 5' });
+      expect(await runParseFor(1, true)).toBe('parsed');
+      expect((h.msgVars[1].stat_data as StatData).exposure.value).toBe(5);
+      expect((h.msgVars[1].stat_data as StatData).forces.troops.工程兵).toBe(12);
+      expect(parseState.reports[0].events.some(e => e.message.includes('建筑调度基地已不存在'))).toBe(true);
+      expect(getSwipeSlot(readTimelineLedger(), 1, 0)?.opLog).toHaveLength(3);
+    } finally {
+      h.restore();
+    }
+  });
+
+  it('G6-07：自动顺延分钟数作为结算输入入账，重解析时时钟/队列按同一时长重算', async () => {
+    const h = createTavernHarness({
+      messages: {
+        0: { role: 'assistant', is_hidden: false, message: '<战况>\n资金: 3000\n</战况>', swipe_id: 0 },
+        1: { role: 'assistant', is_hidden: false, message: '纯叙述无标签', swipe_id: 0 },
+      },
+    });
+    try {
+      expect(await runParseFor(0, true)).toBe('parsed');
+      expect(await runParseFor(1, true)).toBe('parsed');
+      const clockPlain = JSON.stringify((h.msgVars[1].stat_data as StatData).clock);
+
+      parseState.chrono = {
+        message_id: 1,
+        chatId: h.currentChatId,
+        at: new Date().toISOString(),
+        verdicts: [
+          {
+            verdict: 'OVERRUN',
+            overrunKind: 'time_conflict',
+            item: '犮牛坦克',
+            declaredQty: 1,
+            claimedQty: 0,
+            remainderQty: 1,
+            detail: '时序差距',
+            physicalDoneQty: 0,
+            remainingMinutes: 720,
+          },
+        ],
+      };
+      const adv = await autoAdvanceChrono();
+      expect(adv.ok).toBe(true);
+      expect(adv.delta).toBe(720);
+      const clockAdvanced = JSON.stringify((h.msgVars[1].stat_data as StatData).clock);
+      expect(clockAdvanced).not.toBe(clockPlain);
+
+      const ops = getSwipeSlot(readTimelineLedger(), 1, 0)!.opLog;
+      expect(ops).toHaveLength(1);
+      expect(ops[0]).toMatchObject({ kind: 'CHRONO_RESOLVE', resolution: 'defer', extraDeltaMinutes: 720 });
+      expect(ops[0]).not.toHaveProperty('queuesSnapshot');
+
+      // 重解析不带 extraDeltaMinutes：从账本读出顺延分钟数，时钟与顺延后一致
+      expect(await runParseFor(1, true)).toBe('parsed');
+      expect(JSON.stringify((h.msgVars[1].stat_data as StatData).clock)).toBe(clockAdvanced);
+    } finally {
+      h.restore();
+    }
+  });
+
+  it('G2-01：面板建筑调度记入过程记录，重解析本楼后仍在；原文编辑后仍保留调度意图', async () => {
+    const baseYaml = (credits: number) =>
+      `<战况>\n资金: ${credits}\n基地:\n  - id: base_1\n    名称: 北坡主基地\n    建筑:\n      - 名称: 战车工厂\n      - 名称: 战车工厂\n</战况>`;
+    const h = createTavernHarness({
+      messages: {
+        0: { role: 'assistant', is_hidden: false, message: '<战况>\n资金: 3000\n</战况>', swipe_id: 0 },
+        1: { role: 'assistant', is_hidden: false, message: baseYaml(3000), swipe_id: 0 },
+      },
+    });
+    const states = () =>
+      ((h.msgVars[1].stat_data as StatData).bases[0]?.buildings ?? []).map(b => b.state ?? '运转');
+    try {
+      expect(await runParseFor(0, true)).toBe('parsed');
+      expect(await runParseFor(1, true)).toBe('parsed');
+      expect(states()).toEqual(['运转', '运转']);
+
+      const parsedBase = (h.msgVars[1].stat_data as StatData).bases[0]!;
+      const inst = {
+        baseIndex: 0,
+        baseId: parsedBase.id || parsedBase.name,
+        baseName: '北坡主基地',
+        buildingIndex: 1,
+        name: '战车工厂',
+        instanceOrdinal: 2,
+        state: '运转',
+        mode: '生产',
+        accelScope: 'global',
+      } as BuiltBuildingInstanceRef;
+      await toggleBuildingInstanceState(inst, {
+        dataStore: {},
+        floating: { floorId: 1, refresh: () => undefined },
+        updateFloorVars: (async (id: number, fn: (v: Record<string, unknown>) => Record<string, unknown>) => {
+          h.msgVars[id] = fn(h.msgVars[id] ?? {});
+        }) as never,
+        onTick: () => undefined,
+      });
+      expect(states()).toEqual(['运转', '停机']);
+      expect(getSwipeSlot(readTimelineLedger(), 1, 0)?.opLog).toMatchObject([
+        { kind: 'BUILDING_DISPATCH', baseId: inst.baseId, instanceOrdinal: 2, patch: { state: '停机' } },
+      ]);
+
+      // 重解析本楼（从上一楼重算）：调度仍在
+      expect(await runParseFor(1, true)).toBe('parsed');
+      expect(states()).toEqual(['运转', '停机']);
+
+      // 原文编辑不撤销用户调度
+      h.messages[1].message = baseYaml(3200);
+      expect(await runParseFor(1, true)).toBe('parsed');
+      expect(states()).toEqual(['运转', '停机']);
     } finally {
       h.restore();
     }
@@ -583,13 +858,13 @@ describe('SEAM-01 · cascadeRecomputeDownstream 下游级联重算', () => {
         0: {
           role: 'assistant',
           is_hidden: false,
-          message: '<战况>\n资金: 1000\n</战况>',
+          message: '<战况>\n部队:\n  兵力:\n    工程兵: 10\n</战况>',
           swipe_id: 0,
         },
         1: {
           role: 'assistant',
           is_hidden: false,
-          message: '<战况>\n资金变化: +200\n</战况>',
+          message: '<战况>\n部队:\n  兵力:\n    工程兵变化: +2\n</战况>',
           swipe_id: 0,
         },
         2: {
@@ -600,14 +875,14 @@ describe('SEAM-01 · cascadeRecomputeDownstream 下游级联重算', () => {
         3: {
           role: 'assistant',
           is_hidden: false,
-          message: '<战况>\n资金变化: +300\n</战况>',
+          message: '<战况>\n部队:\n  兵力:\n    工程兵变化: +3\n</战况>',
           swipe_id: 0,
         },
         4: {
           role: 'assistant',
           is_hidden: false,
           message:
-            '<战况>\n资金变化: +400\n</战况>\n<数据更新>\n- id: p_floor4\n  target: 动员兵\n  operation: patch\n  patch:\n    cost: 80\n</数据更新>',
+            '<战况>\n部队:\n  兵力:\n    工程兵变化: +4\n</战况>\n<数据更新>\n- id: p_floor4\n  target: 动员兵\n  operation: patch\n  patch:\n    cost: 80\n</数据更新>',
           swipe_id: 0,
         },
       },
@@ -619,9 +894,9 @@ describe('SEAM-01 · cascadeRecomputeDownstream 下游级联重算', () => {
       expect(await runParseFor(3, true)).toBe('parsed');
       expect(await runParseFor(4, true)).toBe('parsed');
 
-      expect((h.msgVars[1].stat_data as StatData).economy.credits).toBe(1200);
-      expect((h.msgVars[3].stat_data as StatData).economy.credits).toBe(1500);
-      expect((h.msgVars[4].stat_data as StatData).economy.credits).toBe(1900);
+      expect((h.msgVars[1].stat_data as StatData).forces.troops.工程兵).toBe(12);
+      expect((h.msgVars[3].stat_data as StatData).forces.troops.工程兵).toBe(15);
+      expect((h.msgVars[4].stat_data as StatData).forces.troops.工程兵).toBe(19);
 
       // 在 #4 楼记录一条玩家补丁批准过程量
       appendFloorProcessOp(4, 0, {
@@ -640,18 +915,18 @@ describe('SEAM-01 · cascadeRecomputeDownstream 下游级联重算', () => {
       });
 
       // 模拟编辑 #1 楼原文：将 +200 改为 +1200，并重跑 #1 楼
-      h.messages[1].message = '<战况>\n资金变化: +1200\n</战况>';
+      h.messages[1].message = '<战况>\n部队:\n  兵力:\n    工程兵变化: +12\n</战况>';
       expect(await runParseFor(1, true)).toBe('parsed');
-      expect((h.msgVars[1].stat_data as StatData).economy.credits).toBe(2200);
+      expect((h.msgVars[1].stat_data as StatData).forces.troops.工程兵).toBe(22);
 
       // 触发从 #1 楼向下的级联重算
       const recomputedFloors = await cascadeRecomputeDownstream(1);
       expect(recomputedFloors).toEqual([3, 4]); // 跳过 #2 user 楼，依次重算 #3、#4
 
       // 下游 #3 与 #4 均基于新基线更新，且 #4 楼的玩家补丁批准过程量被保留
-      expect((h.msgVars[3].stat_data as StatData).economy.credits).toBe(2500);
+      expect((h.msgVars[3].stat_data as StatData).forces.troops.工程兵).toBe(25);
       const floor4After = h.msgVars[4].stat_data as StatData & { applied_data_patches?: DataPatch[] };
-      expect(floor4After.economy.credits).toBe(2900);
+      expect(floor4After.forces.troops.工程兵).toBe(29);
       expect(floor4After.pending_data_patches).toHaveLength(0);
       expect(floor4After.applied_data_patches?.some(p => p.id === 'p_floor4')).toBe(true);
     } finally {

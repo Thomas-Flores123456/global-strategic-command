@@ -235,20 +235,17 @@ describe('PRT-UI-01 · ConsoleQuickActions 左键【科技 TECH】复合入口�
     }
   });
 
-  it('FloatingApp.vue 绑定 debugState.enabled 控制工程入口与 ModalEngineering，并在关闭 debugState.enabled 时自动关闭工程弹窗', async () => {
+  it('FloatingApp.vue 经 isFeatureEnabled(engineering) 统一开关控制工程入口与 ModalEngineering（D6）', async () => {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const floatingSrc = fs.readFileSync(
       path.resolve(__dirname, '../console/FloatingApp.vue'),
       'utf8',
     );
-    expect(floatingSrc).toContain(':show-engineering="debugState.enabled"');
-    expect(
-      floatingSrc.includes('v-if="debugState.enabled && activeModal === \'engineering\'"') ||
-        floatingSrc.includes('v-if="activeModal === \'engineering\' && debugState.enabled"'),
-    ).toBe(true);
-    expect(floatingSrc).toContain("if (key === 'engineering' && !debugState.enabled) return;");
-    expect(floatingSrc).toContain("if (!enabled && activeModal.value === 'engineering')");
+    expect(floatingSrc).toContain("const engineeringEnabled = isFeatureEnabled('engineering');");
+    expect(floatingSrc).toContain(':show-engineering="engineeringEnabled"');
+    expect(floatingSrc).toContain('v-if="activeModal === \'engineering\' && engineeringEnabled"');
+    expect(floatingSrc).toContain("if (key === 'engineering' && !engineeringEnabled) return;");
   });
 
   it('无 available / experimenting 协议时隐藏协议计数徽标', async () => {
@@ -1509,9 +1506,9 @@ describe('PRT-UI-03 · 实验指令同源预判拼装、自动实验排程开关
     expect(modalHtml).toContain('data-test="tab-protocols"');
     expect(modalHtml).toContain('data-protocol-ready="1"');
 
-    // 3. PanelProtocol 日产率计入副官 protocolDailyRateBonus (0.10 基础 + 0.15 尤里T2院所 + 0.12 副官 = 0.37)
+    // 3. PanelProtocol 日产率与结算同源计入副官 protocolDailyRateBonus（G3-09：(0.10 基础 + 0.15 尤里T2院所) × 1.12 = 0.28）
     const prtSetup = await loadProtocolSetup({ snapshot: yuriSnapshot, initialInstitute: 'yuri' });
-    expect(prtSetup.dailyPointRate.value).toBe(0.37);
+    expect(prtSetup.dailyPointRate.value).toBe(0.28);
     expect(prtSetup.instituteProgressSummary.value.common.total).toBe(7);
     expect(prtSetup.instituteProgressSummary.value.soviet.total).toBe(12);
     expect(prtSetup.instituteProgressSummary.value.allied.total).toBe(12);

@@ -1418,7 +1418,7 @@ describe('UTO-SETTLE-01 · settleFloor.ts 三路硬编码分流消解与 UTO 编
       ],
       protocols: [
         {
-          ref: 'soviet.iron_curtain_overload',
+          ref: 'sov.research.t2.iron_curtain_emergency_overload',
           status: 'available',
           exp: 0,
           attempts: 0,
@@ -1438,7 +1438,7 @@ describe('UTO-SETTLE-01 · settleFloor.ts 三路硬编码分流消解与 UTO 编
           verb: '协议排程',
           kind: 'protocol',
           protocolAction: 'schedule',
-          protocolId: 'soviet.iron_curtain_overload',
+          protocolId: 'sov.research.t2.iron_curtain_emergency_overload',
           protocolName: '铁幕紧急过载协议',
           scheduleAction: '加入候列',
         },
@@ -1458,7 +1458,7 @@ describe('UTO-SETTLE-01 · settleFloor.ts 三路硬编码分流消解与 UTO 编
 
     // 3. 协议排程事件入账：auto_queued 置为 true 且分配 queue_order=1
     expect(settled.data.protocols?.[0]).toMatchObject({
-      ref: 'soviet.iron_curtain_overload',
+      ref: 'sov.research.t2.iron_curtain_emergency_overload',
       auto_queued: true,
       queue_order: 1,
       hold: false,

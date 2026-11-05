@@ -23,7 +23,6 @@ import {
 } from '../core/entityCredibility';
 import { classifyBuildingRing, ringToCnLabel } from '../engines/buildingCoordEngine';
 import { BUILTIN_BUILDING_UPGRADE_SPECS } from '../engines/productionReconciliation';
-import { BUILTIN_RETROFIT_UPGRADE_SPECS } from '../engines/projectEngineHelpers';
 import { durationFromEntry } from '../engines/settleFloorHelpers';
 import { canon } from '../parse/parseTypesAndCanon';
 import { useCatalogStore } from './useCatalog';
@@ -575,20 +574,6 @@ export function openLookup(name: string, codex: CodexLike[] = []): DetailData {
       matchedRetrofitName = r.name;
       matchedBaseTargets = targets;
       break;
-    }
-  }
-  if (!matchedBaseTargets.length) {
-    for (const [rName, spec] of Object.entries(BUILTIN_RETROFIT_UPGRADE_SPECS)) {
-      if (!spec.target_unit?.length) continue;
-      if (
-        spec.upgraded_name === trimmedName ||
-        stripCount(spec.upgraded_name) === strippedCountName ||
-        (spec.research === '航母电磁弹射改装工程研发' && trimmedName === 'CV-63小鹰级航空母舰(电弹现代改)')
-      ) {
-        matchedRetrofitName = rName;
-        matchedBaseTargets = spec.target_unit;
-        break;
-      }
     }
   }
 

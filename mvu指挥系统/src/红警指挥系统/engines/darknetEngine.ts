@@ -44,6 +44,8 @@ const DARKNET_BLOCK_RE = new RegExp(
 );
 
 const MAX_LEDGER_RECORDS = 20;
+/** 入账类交割持久去重上限：远大于单局可能的显式交割数，只为防无限增长 */
+const MAX_SETTLED_TX_IDS = 500;
 const DEFAULT_AUCTION_INTERVAL_MINUTES = 10080; // 7日
 
 export interface ApplyDarknetResult {
@@ -426,7 +428,7 @@ function mapMarketItem(raw: unknown, index: number): DarknetMarketItem | null {
   });
 }
 
-function mapBountyItem(raw: unknown, index: number): DarknetBountyItem | null {
+function mapBountyItem(raw: unknown, _index: number): DarknetBountyItem | null {
   if (!isUsable(raw) || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
   const idx = keyIndex(obj);
@@ -477,7 +479,7 @@ function mapBountyItem(raw: unknown, index: number): DarknetBountyItem | null {
   ]);
 
   const target = String(targetT?.value ?? '').trim();
-  const id = String(idT?.value ?? '').trim() || (target ? `dn_bounty_${index + 1}` : '');
+  const id = String(idT?.value ?? '').trim() || (target ? `dn_bounty_${canon(target)}` : '');
   if (!id && !target) return null;
 
   const reward_credits = Math.max(0, parseFlexibleNumber(rewardT?.value).value ?? 0);
@@ -497,7 +499,7 @@ function mapBountyItem(raw: unknown, index: number): DarknetBountyItem | null {
   });
 }
 
-function mapAuctionItem(raw: unknown, index: number): DarknetAuctionItem | null {
+function mapAuctionItem(raw: unknown, _index: number): DarknetAuctionItem | null {
   if (!isUsable(raw) || Array.isArray(raw)) return null;
   const obj = raw as Record<string, unknown>;
   const idx = keyIndex(obj);
@@ -544,7 +546,8 @@ function mapAuctionItem(raw: unknown, index: number): DarknetAuctionItem | null 
   const refundedT = take(obj, idx, consumed, ['refunded', '已退回']);
 
   const name = String(nameT?.value ?? '').trim();
-  const id = String(idT?.value ?? '').trim() || (name ? `dn_auc_${index + 1}` : '');
+  // G7-04：自动编号按名称派生，避免下一期同位新拍品与永久防重集合中的旧 dn_auc_N 撞号
+  const id = String(idT?.value ?? '').trim() || (name ? `dn_auc_${canon(name)}` : '');
   if (!id && !name) return null;
 
   const start_price = Math.max(0, parseFlexibleNumber(startPriceT?.value).value ?? 0);
@@ -743,23 +746,22 @@ function resolveResourceDeductByNameAndQty(
 }
 
 /**
- * 尝试从 economy.resources 扣减指定六柱资源；
- * 若库存不足（或为 null / undefined / 0），返回 ok: false，绝不修改库存！
+ * 只检查六柱资源是否足以扣减，不修改库存（供多项扣减前全量预检）。
  */
-function tryDeductResource(
+function checkResourceDeduct(
   data: StatData,
   deduct: DarknetResourceMap,
-): { ok: boolean; reason?: string; actualKey?: string; before?: number | null; after?: number } {
+): { ok: boolean; reason?: string; actualKey?: string; before?: number | null; qty: number } {
   const pillar = normalizeResourcePillar(deduct.pillar);
   if (!pillar) {
-    return { ok: false, reason: `未知的资源柱「${deduct.pillar}」` };
+    return { ok: false, qty: 0, reason: `未知的资源柱「${deduct.pillar}」` };
   }
   const qty = Math.max(0, deduct.qty);
-  if (qty === 0) return { ok: true };
+  if (qty === 0) return { ok: true, qty };
 
   const res = data.economy.resources;
   if (!res || !res[pillar]) {
-    return { ok: false, reason: `六柱资源「${pillar}.${deduct.key}」尚未探明解锁（null），无法扣减 ${qty}` };
+    return { ok: false, qty, reason: `六柱资源「${pillar}.${deduct.key}」尚未探明解锁（null），无法扣减 ${qty}` };
   }
   const pillarMap = res[pillar];
   const matchedKey =
@@ -771,13 +773,30 @@ function tryDeductResource(
   if (currentVal === null || currentVal === undefined || !Number.isFinite(currentVal) || currentVal < qty) {
     return {
       ok: false,
+      qty,
       actualKey: matchedKey,
       before: currentVal ?? null,
       reason: `六柱库存不足：「${pillar}.${matchedKey}」当前为 ${currentVal ?? 'null'}，不足以扣减 ${qty}`,
     };
   }
+  return { ok: true, qty, actualKey: matchedKey, before: currentVal };
+}
 
-  const nextVal = currentVal - qty;
+/**
+ * 尝试从 economy.resources 扣减指定六柱资源；
+ * 若库存不足（或为 null / undefined / 0），返回 ok: false，绝不修改库存！
+ */
+function tryDeductResource(
+  data: StatData,
+  deduct: DarknetResourceMap,
+): { ok: boolean; reason?: string; actualKey?: string; before?: number | null; after?: number } {
+  const check = checkResourceDeduct(data, deduct);
+  if (!check.ok || check.qty === 0) return check;
+  const pillar = normalizeResourcePillar(deduct.pillar)!;
+  const pillarMap = data.economy.resources![pillar];
+  const matchedKey = check.actualKey!;
+  const currentVal = check.before as number;
+  const nextVal = currentVal - check.qty;
   pillarMap[matchedKey] = nextVal;
   return { ok: true, actualKey: matchedKey, before: currentVal, after: nextVal };
 }
@@ -823,6 +842,17 @@ function appendLedgerRecord(darknet: DarknetState, rec: DarknetSettlementRecord)
   if (darknet.ledger.length > MAX_LEDGER_RECORDS) {
     darknet.ledger = darknet.ledger.slice(-MAX_LEDGER_RECORDS);
   }
+  // G7-03：带显式编号且发生资金流动的交割进入持久去重集合（自动编号 dn_tx_* 不可复述，不入集合）
+  if (rec.credits_delta !== 0 && rec.id && !rec.id.startsWith('dn_tx_')) {
+    const store = (darknet.settled_tx_ids ??= []);
+    const key = canon(rec.id);
+    if (!store.includes(key)) store.push(key);
+    if (store.length > MAX_SETTLED_TX_IDS) darknet.settled_tx_ids = store.slice(-MAX_SETTLED_TX_IDS);
+  }
+}
+
+function isSettledTx(darknet: DarknetState, id: string): boolean {
+  return Boolean(id) && (darknet.settled_tx_ids ?? []).includes(canon(id));
 }
 
 function recordSettleKeys(store: string[], id: string, label: string, prefix: 'target' | 'name'): void {
@@ -854,6 +884,20 @@ export function applyDarknetBlockToState(
     .trim();
 
   if (!inner) {
+    return { events, quarantine, appliedCount };
+  }
+
+  // G7-07：解锁门禁——无已建成并运转的暗网中继站时整块不结算，信道回到「未接入」
+  if (!hasActiveDarknetRelay(data.bases)) {
+    if (data.economy.darknet && data.economy.darknet.market_status !== '未接入') {
+      data.economy.darknet.market_status = '未接入';
+    }
+    events.push({
+      light: '🟡',
+      layer: 'L2',
+      path: 'economy.darknet',
+      message: '<暗网> 未结算：无已建成并运转的暗网中继站（或所在基地断电/失守），整块交割已忽略',
+    });
     return { events, quarantine, appliedCount };
   }
 
@@ -946,6 +990,7 @@ export function applyDarknetBlockToState(
       appliedCount++;
     }
   } else if (darknet.market_status === '未接入') {
+    // G7-07：入口已确认存在运转中继站，接入状态由门禁事实而非块内缺字段决定（与被动刷新同口径）
     darknet.market_status = '正常连接';
   }
 
@@ -1127,6 +1172,7 @@ export function applyDarknetBlockToState(
       } else if (
         (a.status === 'passed' || a.status === 'cancelled') &&
         !a.refunded &&
+        a.consign_deducted === true &&
         (prevMatched ? prevMatched.status === 'bidding' : true) &&
         isPlayerParty(a.seller) &&
         a.resource_map &&
@@ -1149,14 +1195,16 @@ export function applyDarknetBlockToState(
       }
       mappedAuctions.push(a);
     }
-    if (mappedAuctions.length > 0 && allMatchedPrev && mappedAuctions.length < prevAuctions.length) {
-      for (const prevLot of prevAuctions) {
-        const existsInMapped = mappedAuctions.some(
-          ma => (ma.id && prevLot.id ? canon(ma.id) === canon(prevLot.id) : canon(ma.name) === canon(prevLot.name)),
-        );
-        if (!existsInMapped) {
-          mappedAuctions.push(prevLot);
-        }
+    for (const prevLot of prevAuctions) {
+      const existsInMapped = mappedAuctions.some(
+        ma => (ma.id && prevLot.id ? canon(ma.id) === canon(prevLot.id) : canon(ma.name) === canon(prevLot.name)),
+      );
+      if (existsInMapped) continue;
+      // G7-08：已托管未结算的我方寄售拍品不随列表替换消失
+      const keepConsigned =
+        prevLot.status === 'bidding' && isPlayerParty(prevLot.seller) && prevLot.consign_deducted === true;
+      if (keepConsigned || (mappedAuctions.length > 0 && allMatchedPrev && mappedAuctions.length < prevAuctions.length)) {
+        mappedAuctions.push(prevLot);
       }
     }
     darknet.auctions = mappedAuctions;
@@ -1307,6 +1355,19 @@ export function applyDarknetBlockToState(
       const bidValue = parsedBid.value;
       const noteStr = String(noteT?.value ?? '').trim();
       const recordId = idStr || `dn_tx_${currentDay}_${darknet.ledger.length + 1}`;
+      if (
+        idStr &&
+        (action === '售出实物' || action === '售出信息' || action === '完成悬赏' || action === '购买商品' || action === '拍卖送拍成交') &&
+        isSettledTx(darknet, idStr)
+      ) {
+        events.push({
+          light: '🟡',
+          layer: 'instruction',
+          path: 'economy.darknet.ledger',
+          message: `[暗网交割拦截] 交割编号「${idStr}」已结算，忽略复述（防重复入账）`,
+        });
+        continue;
+      }
       const resourceDeductList = deductT ? parseResourceMapList(deductT.value) : undefined;
       const resourceDeduct = resourceDeductList?.[0] ?? (deductT ? parseResourceMap(deductT.value) : undefined);
       const resourceMapList = resMapT ? parseResourceMapList(resMapT.value) : undefined;
@@ -1328,15 +1389,22 @@ export function applyDarknetBlockToState(
                     })()
                   : [];
 
-        let deductFailedReason: string | undefined;
-        for (const dt of deductTargets) {
-          if (dt.qty > 0) {
-            const check = tryDeductResource(data, dt);
-            if (!check.ok) {
-              deductFailedReason = check.reason;
-              break;
-            }
-          }
+        // G7-02：售出实物必须真实交出实物；G7-06：先全量预检，全部可扣才统一扣减，避免部分吞没
+        const positiveTargets = deductTargets.filter(dt => dt.qty > 0);
+        if (positiveTargets.length === 0) {
+          events.push({
+            light: '🟡',
+            layer: 'instruction',
+            path: 'economy.resources',
+            message: `[暗网交割阻断] 售出实物「${targetStr}」未声明数量或资源扣减，已拒绝入账（未扣库存、未加资金）`,
+          });
+          continue;
+        }
+        const deductFailedReason = positiveTargets
+          .map(dt => checkResourceDeduct(data, dt))
+          .find(check => !check.ok)?.reason;
+        if (!deductFailedReason) {
+          for (const dt of positiveTargets) tryDeductResource(data, dt);
         }
         if (deductFailedReason) {
           events.push({
@@ -1487,16 +1555,34 @@ export function applyDarknetBlockToState(
         const matchedItem = darknet.items.find(
           item => (idStr && canon(item.id) === canon(idStr)) || canon(item.name) === canon(targetStr),
         );
-        const cost = Math.max(
-          0,
-          Math.round(Math.abs(rawCreditsDelta !== 0 ? rawCreditsDelta : (bidValue ?? matchedItem?.price ?? 0))),
-        );
-        if (matchedItem && matchedItem.stock <= 0) {
+        // G7-20：在册商品只认标价×数量，「资金变动」仅作校验；未在册的直采订单（#58 楼实机用法）仍按声明金额扣款
+        const buyQty = parsedQty !== null && parsedQty > 0 ? Math.round(parsedQty) : 1;
+        const cost = matchedItem
+          ? Math.max(0, Math.round(matchedItem.price * buyQty))
+          : Math.max(0, Math.round(Math.abs(rawCreditsDelta !== 0 ? rawCreditsDelta : (bidValue ?? 0))));
+        if (!matchedItem && cost <= 0) {
           events.push({
             light: '🟡',
             layer: 'instruction',
             path: 'economy.darknet.items',
-            message: `[暗网采购阻断] 商品「${targetStr}」库存已售罄（stock=0）`,
+            message: `[暗网采购阻断] 商品「${targetStr}」不在当期商品列表且未声明金额，已拒绝交割`,
+          });
+          continue;
+        }
+        if (matchedItem && rawCreditsDelta !== 0 && Math.round(Math.abs(rawCreditsDelta)) !== cost) {
+          events.push({
+            light: '🟡',
+            layer: 'instruction',
+            path: 'economy.darknet.items',
+            message: `[暗网采购校正] 「${targetStr}」声称资金变动 ${rawCreditsDelta}，按标价 ${matchedItem.price}×${buyQty} = ${cost} 结算`,
+          });
+        }
+        if (matchedItem && matchedItem.stock < buyQty) {
+          events.push({
+            light: '🟡',
+            layer: 'instruction',
+            path: 'economy.darknet.items',
+            message: `[暗网采购阻断] 商品「${targetStr}」库存 ${matchedItem.stock}，不足 ${buyQty}`,
           });
           continue;
         }
@@ -1514,7 +1600,7 @@ export function applyDarknetBlockToState(
           resourceMapList && resourceMapList.length > 0
             ? resourceMapList
             : matchedItem?.resource_map
-              ? [matchedItem.resource_map]
+              ? [{ ...matchedItem.resource_map, qty: matchedItem.resource_map.qty * buyQty }]
               : [];
         let invalidResReason: string | undefined;
         for (const rm of effectiveResMaps) {
@@ -1545,9 +1631,7 @@ export function applyDarknetBlockToState(
           creditResourceMap(data, rm);
         }
         data.economy.credits = Math.round((data.economy.credits ?? 0) - cost);
-        if (matchedItem) {
-          matchedItem.stock = Math.max(0, matchedItem.stock - 1);
-        }
+        if (matchedItem) matchedItem.stock = Math.max(0, matchedItem.stock - buyQty);
         appendLedgerRecord(darknet, {
           id: recordId,
           action: '购买商品',
@@ -1560,7 +1644,7 @@ export function applyDarknetBlockToState(
           light: '🟢',
           layer: 'instruction',
           path: 'economy.darknet.items',
-          message: `[暗网交割] 购买商品「${matchedItem?.name ?? targetStr}」：-${cost} Credits`,
+          message: `[暗网交割] 购买商品「${matchedItem?.name ?? targetStr}」×${buyQty}：-${cost} Credits`,
         });
         appliedCount++;
         continue;
@@ -1591,21 +1675,24 @@ export function applyDarknetBlockToState(
         const leaderName = String(leaderT?.value ?? '我方指挥部').trim() || '我方指挥部';
         const roundName = String(roundT?.value ?? '').trim();
 
-        if (!matchedAuction) {
-          matchedAuction = DarknetAuctionItem.parse({
-            id: idStr || `dn_auc_${darknet.auctions.length + 1}`,
-            name: targetStr,
-            seller: '跨维匿名卖方',
-            start_price: bidAmount,
-            current_price: bidAmount,
-            leader: leaderName,
-            round_text: roundName || '第1轮',
-            status: 'bidding',
-            desc: noteStr,
-            ...(resourceMap ? { resource_map: resourceMap } : {}),
+        // G7-21：只接受在册且专场开放中的拍品；G7-23：我方不得对自己的寄售拍品出价
+        const bidRejectReason = !matchedAuction
+          ? '不在当期拍品列表中'
+          : darknet.auction_status !== 'bidding'
+            ? '当前不在竞拍专场期'
+            : isPlayerParty(leaderName) && isPlayerParty(matchedAuction.seller)
+              ? '不得对我方寄售拍品出价'
+              : '';
+        if (bidRejectReason || !matchedAuction) {
+          events.push({
+            light: '🟡',
+            layer: 'instruction',
+            path: 'economy.darknet.auctions',
+            message: `[暗网拍卖拦截] 拍品「${aucName}」${bidRejectReason}，已拒绝出价`,
           });
-          darknet.auctions.push(matchedAuction);
-        } else {
+          continue;
+        }
+        {
           // BUG-R2-10：当 bidAmount < matchedAuction.current_price 时仅发出 warning，不降低最高价，也不覆盖 leader
           if (bidAmount < matchedAuction.current_price) {
             events.push({
@@ -1686,16 +1773,28 @@ export function applyDarknetBlockToState(
           continue;
         }
 
-        const price = Math.max(
-          0,
-          Math.round(
-            Math.abs(
-              rawCreditsDelta !== 0
-                ? rawCreditsDelta
-                : (bidValue ?? matchedAuction?.current_price ?? matchedAuction?.start_price ?? 0),
-            ),
-          ),
-        );
+        // G7-21：落槌只接受在册拍品（当期或上期列表），不凭空新建；G7-23：不得竞得我方寄售拍品
+        if (!matchedAuction || isPlayerParty(matchedAuction.seller)) {
+          events.push({
+            light: '🟡',
+            layer: 'instruction',
+            path: 'economy.darknet.auctions',
+            message: `[暗网落槌阻断] 拍品「${targetStr}」${matchedAuction ? '为我方寄售拍品，不得自买' : '不在拍品列表中'}，已拒绝交割`,
+          });
+          continue;
+        }
+        // G7-19：成交价以在册最高价为准；「资金变动 / 出价」只能抬高、不能压低
+        const registeredPrice = Math.max(matchedAuction.current_price ?? 0, matchedAuction.start_price ?? 0);
+        const claimedPrice = Math.round(Math.abs(rawCreditsDelta !== 0 ? rawCreditsDelta : (bidValue ?? 0)));
+        const price = Math.max(0, registeredPrice, claimedPrice);
+        if (claimedPrice > 0 && claimedPrice < registeredPrice) {
+          events.push({
+            light: '🟡',
+            layer: 'instruction',
+            path: 'economy.darknet.auctions',
+            message: `[暗网落槌校正] 拍品「${matchedAuction.name}」声称成交价 ${claimedPrice} 低于在册最高价，按 ${price} 结算`,
+          });
+        }
 
         if ((data.economy.credits ?? 0) < price) {
           events.push({
@@ -1727,21 +1826,7 @@ export function applyDarknetBlockToState(
         }
 
         data.economy.credits = Math.round((data.economy.credits ?? 0) - price);
-        if (!matchedAuction) {
-          matchedAuction = DarknetAuctionItem.parse({
-            id: idStr || `dn_auc_${darknet.auctions.length + 1}`,
-            name: targetStr,
-            seller: '跨维匿名卖方',
-            start_price: price,
-            current_price: price,
-            leader: '我方指挥部',
-            round_text: String(roundT?.value ?? '最终落槌').trim() || '最终落槌',
-            status: 'sold',
-            desc: noteStr,
-            ...(resourceMap ? { resource_map: resourceMap } : {}),
-          });
-          darknet.auctions.push(matchedAuction);
-        } else {
+        {
           matchedAuction.status = 'sold';
           matchedAuction.leader = '我方指挥部';
           if (price > 0) matchedAuction.current_price = price;
@@ -1912,7 +1997,8 @@ export function applyDarknetBlockToState(
           continue;
         }
 
-        const effectiveResMap = matchedAuction.resource_map ?? resourceMap ?? resourceDeduct;
+        // G7-05d：只退回确实托管扣过的库存，且只按拍品在册映射退，不采信本条交割自带的映射
+        const effectiveResMap = matchedAuction.consign_deducted === true ? matchedAuction.resource_map : undefined;
         if (!alreadyRefundedInThisBlock && effectiveResMap && effectiveResMap.qty > 0) {
           creditResourceMap(data, effectiveResMap);
         }
@@ -1963,8 +2049,31 @@ export function applyDarknetBlockToState(
           }
         }
         if (existingAuction) {
+          // G7-05c：不得把他人拍品改写成我方；我方拍品若尚未托管扣库，必须先真实扣库
           if (!isPlayerParty(existingAuction.seller)) {
-            existingAuction.seller = '我方指挥部';
+            events.push({
+              light: '🟡',
+              layer: 'instruction',
+              path: 'economy.darknet.auctions',
+              message: `[暗网送拍阻断] 拍品「${existingAuction.name}」卖方为「${existingAuction.seller}」，不能以我方名义上架`,
+            });
+            continue;
+          }
+          if (existingAuction.consign_deducted !== true) {
+            const escrowMap =
+              existingAuction.resource_map ??
+              (resourceDeduct && resourceDeduct.qty > 0 ? resourceDeduct : resourceMap && resourceMap.qty > 0 ? resourceMap : undefined);
+            const escrow = escrowMap ? tryDeductResource(data, escrowMap) : { ok: false, reason: '未声明托管实物与数量' };
+            if (!escrow.ok) {
+              events.push({
+                light: '🟡',
+                layer: 'instruction',
+                path: 'economy.resources',
+                message: `[暗网送拍阻断] 送拍品「${existingAuction.name}」托管扣库失败：${escrow.reason}`,
+              });
+              continue;
+            }
+            if (escrowMap && !existingAuction.resource_map) existingAuction.resource_map = escrowMap;
           }
           existingAuction.status = 'bidding';
           existingAuction.consign_deducted = true;
@@ -2053,6 +2162,17 @@ export function applyDarknetBlockToState(
     }
     const dealPrice = Math.max(0, Math.round(a.current_price || a.start_price || 0));
     if (isPlayerParty(a.seller)) {
+      // G7-05a / G7-23：未真实托管扣库、或领先方就是我方（自买自卖）的拍品不得收款
+      if (a.consign_deducted !== true || isPlayerParty(a.leader)) {
+        events.push({
+          light: '🟡',
+          layer: 'instruction',
+          path: 'economy.darknet.auctions',
+          message: `[暗网收款阻断] 我方送拍「${a.name}」${a.consign_deducted !== true ? '未完成托管扣库' : '领先方为我方自身'}，不予成交入账`,
+        });
+        a.status = 'bidding';
+        continue;
+      }
       data.economy.credits = Math.round((data.economy.credits ?? 0) + dealPrice);
       recordSettleKeys(darknet.settled_auction_ids, a.id, a.name, 'name');
       appendLedgerRecord(darknet, {
@@ -2136,6 +2256,74 @@ function isBaseOperationalAndPowered(base: {
   return use <= gen;
 }
 
+export interface DarknetRelayBuildingLike {
+  name?: string;
+  state?: unknown;
+}
+
+export interface DarknetRelayBaseLike {
+  status?: string;
+  power?: { gen?: number; use?: number };
+  buildings?: ReadonlyArray<DarknetRelayBuildingLike | null | undefined> | null;
+}
+
+function isDarknetRelayName(name: unknown): boolean {
+  const cName = canon(String(name ?? ''));
+  return Boolean(cName) && cName.includes(canon('暗网中继站'));
+}
+
+export type DarknetRelayStatus = 'active' | 'offline' | 'building' | 'none';
+
+export interface DarknetRelayStatusResult {
+  status: DarknetRelayStatus;
+  /** offline 时的原因（所在基地失守/废弃、基地断电、建筑停机/受损） */
+  reason?: string;
+}
+
+/**
+ * G7-07 暗网中继状态唯一真源：active＝未失守/未废弃且供电充足的基地中已建成并运转的中继站；
+ * 多座中继取最优状态（active > offline > building > none）。解析结算、被动刷新与中控面板均经此判定。
+ */
+export function getDarknetRelayStatus(
+  bases: ReadonlyArray<DarknetRelayBaseLike | null | undefined> | null | undefined,
+): DarknetRelayStatusResult {
+  let offline: DarknetRelayStatusResult | undefined;
+  let building = false;
+  for (const base of Array.isArray(bases) ? bases : []) {
+    if (!base) continue;
+    const allBuildings: ReadonlyArray<DarknetRelayBuildingLike | null | undefined> = base.buildings ?? [];
+    const relays = allBuildings.filter(b => Boolean(b) && isDarknetRelayName(b!.name));
+    for (const b of relays) {
+      const state = String(b!.state ?? '').trim();
+      if (state === '建造中') {
+        building = true;
+        continue;
+      }
+      if (!isBuildingActive(b!.state)) {
+        offline ??= { status: 'offline', reason: `建筑${state}` };
+        continue;
+      }
+      if (!isBaseOperationalAndPowered(base)) {
+        const baseStatus = String(base.status ?? '').trim();
+        offline ??= {
+          status: 'offline',
+          reason: baseStatus === '失守' || baseStatus === '废弃' ? `所在基地${baseStatus}` : '基地断电',
+        };
+        continue;
+      }
+      return { status: 'active' };
+    }
+  }
+  return offline ?? { status: building ? 'building' : 'none' };
+}
+
+/** G7-07 暗网解锁门禁：仅运转中的中继算解锁 */
+export function hasActiveDarknetRelay(
+  bases: ReadonlyArray<DarknetRelayBaseLike | null | undefined> | null | undefined,
+): boolean {
+  return getDarknetRelayStatus(bases).status === 'active';
+}
+
 /**
  * 扫描各运转且未断电基地的多元被动产钱建筑（修复唯精炼厂单点）与贸易链净入：
  * - 矿石精炼厂：+5000 / 座 (refining)
@@ -2154,7 +2342,6 @@ export function computeBuildingPassiveDailyCredits(data: StatData): {
   let refining = 0;
   let recycling = 0;
   let petrochemical = 0;
-  let hasActiveDarknetRelay = false;
 
   const chainsList = Array.isArray(data?.economy?.chains) ? data.economy.chains : [];
   const bases = Array.isArray(data?.bases) ? data.bases : [];
@@ -2171,9 +2358,6 @@ export function computeBuildingPassiveDailyCredits(data: StatData): {
       const cName = canon(b.name);
       if (!cName) continue;
 
-      if (cName.includes(canon('超维暗网中继站')) || cName.includes(canon('暗网中继站'))) {
-        hasActiveDarknetRelay = true;
-      }
       if (cName.includes(canon('矿石精炼器'))) {
         hasOrePurifier = true;
       }
@@ -2242,7 +2426,7 @@ export function computeBuildingPassiveDailyCredits(data: StatData): {
     total,
   });
 
-  return { channelDaily, hasActiveDarknetRelay };
+  return { channelDaily, hasActiveDarknetRelay: hasActiveDarknetRelay(bases) };
 }
 
 /**
@@ -2282,6 +2466,14 @@ export function tickDarknetAndPassiveEconomy(
     const darknet = DarknetState.parse(data.economy.darknet ?? {});
     if (hasActiveDarknetRelay && darknet.market_status === '未接入') {
       darknet.market_status = '正常连接';
+    } else if (!hasActiveDarknetRelay && darknet.market_status !== '未接入') {
+      darknet.market_status = '未接入';
+      events.push({
+        light: '🟡',
+        layer: 'instruction',
+        path: 'economy.darknet.market_status',
+        message: '[跨维暗网] 无运转中的暗网中继站（拆除/停机/断电/基地失守），信道已断开（未接入）',
+      });
     }
     if (deltaMinutes > 0 && darknet.auction_status === 'closed') {
       darknet.next_auction_in_minutes = Math.max(0, darknet.next_auction_in_minutes - deltaMinutes);

@@ -392,3 +392,18 @@ describe('开场启动器 V2 生产级战术 HUD 契约校验', () => {
     expect(writtenStat.economy.credits).toBe(5600);
   });
 });
+
+describe('G1-08 · 接力导入后第二步不得静默覆盖存档资金/科技', () => {
+  it('Step2 以 importedStat + continuation 锁定非 custom 档位与科技整组快捷替换，保留逐项微调', () => {
+    expect(STEP2_SFC).toMatch(/const relayLocked = computed\(\s*\(\) => choices\.importedStat !== null && \(choices\.importMode \?\? 'continuation'\) === 'continuation'/);
+    expect(STEP2_SFC).toContain(":disabled=\"relayLocked && p.id !== 'custom'\"");
+    expect(STEP2_SFC).toContain('@click="selectPreset(p.id)"');
+    expect(STEP2_SFC).not.toContain('@click="choices.preset = p.id"');
+    for (const fn of ['selectOnlyPowerTech', 'selectAllT1Tech', 'clearT1Tech']) {
+      const body = STEP2_SFC.slice(STEP2_SFC.indexOf(`function ${fn}()`)).split('\n}')[0];
+      expect(body).toContain('if (relayLocked.value) return;');
+    }
+    // 逐项微调通道不锁（stageG 导入后手改 customCredits/customTech 仍生效）
+    expect(STEP2_SFC).toContain('<input v-model="choices.customTech" type="checkbox" :value="name" />');
+  });
+});

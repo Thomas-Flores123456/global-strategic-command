@@ -426,23 +426,13 @@ const AERO_PRE_SHA: Record<string, string> = {
 const AERO_UID35_POST_SHA = '69a84d1b6cc313e8c0afc39216f34ec5ddd8ba19b1b4ec6704b6a97f3add72ee';
 
 describe('V2-08 · uid35 退场（通用·航天工业_世界书.json）', () => {
-  it('uid35：building 块已升格为 project 块；叙事保留且指向仓段化工程立项', async () => {
+  it('uid35 重复的「空间站」工程定义已删除（D11：只保留《工程·通用》的 orbital_station）', async () => {
     const { aeroWb } = await loadCtx();
-    const e = aeroWb.entries['35'];
-    const content = e['content'] as string;
-    expect(content.includes('"type": "building"')).toBe(false);
-    expect(content.includes('"type": "project"')).toBe(true);
-    // 叙事保留（任务卡：叙事文字保留）
-    expect(content).toMatch(/^\[通用·航天工业 \| 空间站\]/);
-    expect(content).toContain('分模块发射、在轨交会对接组装的常驻天基设施');
-    expect(content).toContain('地月投送验证的前提');
-    // 建造句指向工程立项（D-C6）
-    expect(content).not.toContain('建造费为累计');
-    expect(content).toContain('仓段化工程立项');
-    // 元数据（key/comment 保持，disable 默认随工程系统关闭为 true）
-    expect(e['key']).toEqual(['空间站']);
-    expect(e['comment']).toBe('36·空间站');
-    expect(e['disable']).toBe(true);
+    expect(aeroWb.entries['35']).toBeUndefined();
+    const all = Object.values(aeroWb.entries)
+      .map(e => String(e['content'] ?? ''))
+      .join('\n');
+    expect(all).not.toContain('common.project.orbital_space_station');
   });
 
   it('round-trip：uid0..35 零诊断、buildings 桶无「空间站」机器块、研究项不受扰动', async () => {
@@ -453,9 +443,9 @@ describe('V2-08 · uid35 退场（通用·航天工业_世界书.json）', () =>
     expect(catalog.researches.some(r => r.id === '空间站建造工学')).toBe(true);
   });
 
-  it('其余条目逐字节零扰动：原 42 条（除 uid35 外）sha256 === 改前快照；新增制造装备条目 uid43..61 合法', async () => {
+  it('其余条目逐字节零扰动：原 42 条（除已删的 uid35 外）sha256 === 改前快照；新增制造装备条目 uid43..61 合法', async () => {
     const { aeroWb, sha256 } = await loadCtx();
-    expect(Object.keys(aeroWb.entries)).toHaveLength(62);
+    expect(Object.keys(aeroWb.entries)).toHaveLength(61);
     const diffsVsPre: string[] = [];
     for (const [k, e] of Object.entries(aeroWb.entries)) {
       const uidNum = Number(k);
@@ -464,15 +454,10 @@ describe('V2-08 · uid35 退场（通用·航天工业_世界书.json）', () =>
         continue;
       }
       const h = sha256(JSON.stringify(e));
-      if (k === '35') {
-        expect(e['disable']).toBe(true); // 随工程系统默认关闭
-        expect(h).not.toBe(AERO_PRE_SHA['35']); // 证明确实发生退场（改前值见快照）
-      } else {
-        expect(AERO_PRE_SHA[k], `uid${k} 未在改前快照登记`).toBeDefined();
-        if (h !== AERO_PRE_SHA[k]) diffsVsPre.push(k);
-      }
+      expect(AERO_PRE_SHA[k], `uid${k} 未在改前快照登记`).toBeDefined();
+      if (h !== AERO_PRE_SHA[k]) diffsVsPre.push(k);
     }
-    expect(diffsVsPre).toEqual([]); // 除 uid35 外零漂移
+    expect(diffsVsPre).toEqual([]); // 零漂移
   });
 });
 

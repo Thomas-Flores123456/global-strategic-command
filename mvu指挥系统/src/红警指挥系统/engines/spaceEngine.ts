@@ -6,6 +6,7 @@ import {
   SpaceCommercialOrder,
   SpaceContract,
 } from '../core/schema';
+import { availableNanites, deductEconomyNanites } from './naniteLedger';
 
 export const LAUNCHPAD_BUILDINGS = [
   '航天发射中心',
@@ -1751,6 +1752,38 @@ function consumeAndRecoverEquipmentStockOnLaunch(
  * 结算天基航天发射合同、多发射中心选址硬数值、助推器回收/复用、外部商业订单履约、
  * 航天装备库存扣减、暴露度脉冲、`completed_slots` 自动点亮与在轨资产入轨（FD-27）
  */
+/** 发射中心等级基础运力（t）：Tier-1=8 / Tier-2=35 / Tier-3=65（全复用星舰基地 80）——引擎/面板/弹窗唯一口径 */
+export function centerTierBaseCapacityT(centerTier: number, isFullReuse: boolean): number {
+  return centerTier >= 3 ? (isFullReuse ? 80 : 65) : centerTier === 2 ? 35 : 8;
+}
+
+/** 有效运力上限（G4-14 同源）：min(火箭, 中心等级) × 选址载荷乘数 */
+export function computeLaunchCapacityT(input: {
+  rocketBaseCapacityT: number;
+  centerTier: number;
+  isFullReuse: boolean;
+  hasExplicitCenterConstraint: boolean;
+  payloadMult: number;
+}): number {
+  const tierCap = centerTierBaseCapacityT(input.centerTier, input.isFullReuse);
+  const base = input.hasExplicitCenterConstraint
+    ? Math.min(input.rocketBaseCapacityT, tierCap)
+    : input.rocketBaseCapacityT;
+  return base * input.payloadMult;
+}
+
+/** 发射回款（G4-13 同源）：round(基础 × 选址乘数 × 航天城1.25) + 助推器实耗时 15% 基础复用奖励 */
+export function computeLaunchPayout(input: {
+  baseReward: number;
+  sitePayoutMult: number;
+  isSpaceportCity: boolean;
+  boosterConsumed: boolean;
+}): number {
+  const base = Math.max(0, input.baseReward || 0);
+  const reuseBonus = input.boosterConsumed ? Math.round(base * 0.15) : 0;
+  return Math.round(base * input.sitePayoutMult * (input.isSpaceportCity ? 1.25 : 1.0)) + reuseBonus;
+}
+
 export function settleSpaceOperations(
   state: Schema,
   incomingContracts: SpaceContract[] = [],
@@ -2047,11 +2080,13 @@ export function settleSpaceOperations(
 
     const payloadMassT = contract.mass_t ?? parseMassFromText(contract.payload);
     if (!isExplicitlyCompleted && payloadMassT !== undefined && payloadMassT > 0) {
-      const tierBaseCap =
-        centerTier >= 3 ? (isFullReuse ? 80 : 65) : centerTier === 2 ? 35 : 8;
-      const effectiveCap =
-        Math.min(rocketSpec.baseCapacityT, hasExplicitCenterConstraint ? tierBaseCap : rocketSpec.baseCapacityT) *
-        siteMods.payloadMult;
+      const effectiveCap = computeLaunchCapacityT({
+        rocketBaseCapacityT: rocketSpec.baseCapacityT,
+        centerTier,
+        isFullReuse,
+        hasExplicitCenterConstraint,
+        payloadMult: siteMods.payloadMult,
+      });
       if (payloadMassT > effectiveCap + 1e-6) {
         contract.status = 'pending';
         contract.weather_hold_reason = `有效载荷超重（载荷 ${payloadMassT}t 超出当前选址与火箭最大运力 ${Number(effectiveCap.toFixed(2))}t）`;
@@ -2061,19 +2096,27 @@ export function settleSpaceOperations(
     }
 
     // 发射成功：结算助推器复用折扣、选址乘数与航天城 +25% 加成
-    let reuseBonus = 0;
+    // G4-07：选址单次出射纳米消耗（轨道船坞无月面反哺时 50）：不足挂起，足额则与发射同步扣减
+    const naniteCost = siteMods.naniteCostPerLaunch;
+    if (naniteCost > 0 && !isExplicitlyCompleted && availableNanites(state) < naniteCost) {
+      contract.status = 'pending';
+      contract.weather_hold_reason = `纳米工料不足（在轨总装出射需 ${naniteCost}，可用 ${availableNanites(state)}）`;
+      heldIds.push(contract.id);
+      continue;
+    }
+    if (naniteCost > 0 && state.economy) {
+      state.economy = deductEconomyNanites(state.economy, naniteCost, state.economy.credits) as Schema['economy'];
+    }
+
+    // G4-11：15% 复用奖励只在本次发射真实消耗一枚库存可复用助推器时发放
+    let boosterConsumed = false;
     const shouldConsumeBooster =
       Boolean(options?.consumeBoosterForDiscount) ||
       contractMeta.use_stored_booster === true;
-    if (
-      (shouldConsumeBooster && state.space.reusable_boosters > 0) ||
-      isFullReuse
-    ) {
-      if (shouldConsumeBooster && state.space.reusable_boosters > 0) {
-        state.space.reusable_boosters -= 1;
-        boostersReused += 1;
-      }
-      reuseBonus = Math.round((contract.reward_credits || 0) * 0.15);
+    if (shouldConsumeBooster && state.space.reusable_boosters > 0) {
+      state.space.reusable_boosters -= 1;
+      boostersReused += 1;
+      boosterConsumed = true;
     }
 
     const hasExplicitSiteType =
@@ -2085,11 +2128,12 @@ export function settleSpaceOperations(
       ) ||
       siteType === 'orbital_dock' ||
       siteType === 'lunar_surface';
-    const effectivePayoutMult = hasExplicitSiteType ? siteMods.payoutMult : 1.0;
-    const isSpaceportCity = hasExplicitSiteType && Boolean(matchedCenter?.isSpaceportCity);
-    const spaceportMult = isSpaceportCity ? 1.25 : 1.0;
-    const baseReward = contract.reward_credits || 0;
-    const payout = Math.round(baseReward * effectivePayoutMult * spaceportMult) + reuseBonus;
+    const payout = computeLaunchPayout({
+      baseReward: contract.reward_credits || 0,
+      sitePayoutMult: hasExplicitSiteType ? siteMods.payoutMult : 1.0,
+      isSpaceportCity: hasExplicitSiteType && Boolean(matchedCenter?.isSpaceportCity),
+      boosterConsumed,
+    });
 
     contract.status = 'completed';
     delete contract.weather_hold_reason;
@@ -2127,12 +2171,10 @@ export function settleSpaceOperations(
         contract.asset_id || contract.payload || contract.title;
     }
 
-    // 注册在轨资产（按 id 或 name 去重）
+    // 注册在轨资产（G4-10：按合同实例 id 存储，同名载荷多次发射各自独立入轨，不按名合并）
     const assetId = `orb:${contract.id}`;
     const assetName = contract.payload || contract.title;
-    const existingAssetIdx = state.space.orbital_assets.findIndex(
-      a => a.id === assetId || (assetName && a.name === assetName),
-    );
+    const existingAssetIdx = state.space.orbital_assets.findIndex(a => a.id === assetId);
     const assetKind: OrbitalAsset['kind'] =
       contract.kind === 'constellation' ? 'comm' : contract.kind;
     const newAsset: OrbitalAsset = {

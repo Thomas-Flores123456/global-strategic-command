@@ -10,7 +10,7 @@
  *    - 当为 `false`（传统 SillyTavern）时：执行首次扫描并启动批次去重合并的 `MutationObserver`。
  */
 import { stripThinking } from '../../红警指挥系统/parse/floorSanitize';
-import { indexFloorProtocols, type FloorProtocolTag } from '../../红警指挥系统/parse/floorProtocolIndex';
+import { indexFloorProtocols } from '../../红警指挥系统/parse/floorProtocolIndex';
 import { SYSTEM_TAVERN_REGEX_REGISTRY } from '../../红警指挥系统/worldbook/tavernRegexPipeline';
 import { getHostDocument } from '../host/modalHost';
 import {
@@ -230,12 +230,16 @@ function findAncestorWithMesId(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-const INDEXED_CARD_TAGS: Readonly<Record<string, readonly FloorProtocolTag[]>> = {
-  'story-summary': ['摘要', 'summary', '中摘要', '大摘要'],
-  'chrono-step': ['timepast'],
-  'tactical-situation': ['态势'],
-  'tactical-event': ['事件'],
-};
+/**
+ * G1-04：走协议索引取载荷的卡类型。块归属一律以 floorProtocolIndex 的 cardType 为准（TAG_TO_CARD_TYPE 单一事实源），
+ * 不再在此重复维护标签列表（旧表漏掉 <战况>/<战区态势> 等别名，导致态势卡 missing-block）。
+ */
+const INDEXED_CARD_TYPES: ReadonlySet<string> = new Set([
+  'story-summary',
+  'chrono-step',
+  'tactical-situation',
+  'tactical-event',
+]);
 
 interface MesPayloadCacheEntry {
   rawMsg: string;
@@ -377,9 +381,8 @@ function resolvePayloadFromFloorMessage(
 
     if (!entry.rawMsg) return '';
 
-    const indexedTags = INDEXED_CARD_TAGS[cardType];
-    if (indexedTags) {
-      const indexed = indexFloorProtocols(entry.rawMsg).filter(b => indexedTags.includes(b.tag));
+    if (INDEXED_CARD_TYPES.has(cardType)) {
+      const indexed = indexFloorProtocols(entry.rawMsg).filter(b => b.cardType === cardType);
       if (cardType === 'story-summary') {
         if (indexed.length === 0) {
           hostEl.setAttribute?.('data-tw-payload-error', 'missing-block');
@@ -436,16 +439,15 @@ function resolvePayloadFromFloorMessage(
         ? (hostEl.parentNode as ParentNode)
         : null);
 
-    if (scopeRoot && typeof scopeRoot.querySelectorAll === 'function') {
-      const siblings = Array.from(
-        scopeRoot.querySelectorAll(`[data-tw-card="${cardType}"]`),
-      ).filter(el => el.tagName?.toLowerCase() !== 'iframe');
-      const idx = siblings.indexOf(hostEl);
-      if (idx >= 0 && idx < matches.length) {
-        return matches[idx];
-      }
+    const siblings = scopeRoot && scopeRoot !== hostEl && typeof scopeRoot.querySelectorAll === 'function'
+      ? Array.from(scopeRoot.querySelectorAll(`[data-tw-card="${cardType}"]`))
+        .filter(el => el.tagName?.toLowerCase() !== 'iframe') : [hostEl];
+    const idx = siblings.indexOf(hostEl);
+    if (idx >= 0 && idx < matches.length) {
+      return matches[idx];
     }
-    return matches[0];
+    hostEl.setAttribute?.('data-tw-payload-error', 'missing-block');
+    return '';
   } catch {
     return '';
   }
@@ -505,6 +507,12 @@ export function hydrateFloorCardHost(
   ).trim();
   if (!rawPayload) {
     rawPayload = resolvePayloadFromFloorMessage(hostEl, cardType, context);
+  }
+  if (
+    (cardType === 'space-contract' || cardType === 'aerospace-contract') &&
+    !rawPayload.replace(/<\/?(?:航天合同|航天|发射中心)(?:\s+[^>]*)?>/gi, '').trim()
+  ) {
+    hostEl.setAttribute?.('data-tw-payload-error', 'missing-block');
   }
   if (hostEl.getAttribute?.('data-tw-payload-error')) {
     hostEl.textContent = '协议载荷缺失或跨区损坏，已停止渲染默认卡片；请检查本楼原文。';

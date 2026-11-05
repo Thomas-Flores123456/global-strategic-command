@@ -18,6 +18,7 @@
 
 import type { EffectiveCatalog } from '../core/catalogEffective';
 import { findCatalogBuildingDef } from '../core/prerequisitesHelpers';
+import { isFeatureEnabled } from '../core/featureGates';
 import { EconomyResources, type ChainKind, type CommandHQ, type IncomeChain } from '../core/schema';
 import {
   canon,
@@ -31,6 +32,8 @@ import { advanceCalendar } from '../parse/timePastParser';
 import {
   applyChainEvent,
   calcDailyNet,
+  encodeStockPause,
+  isStockPaused,
   normalizeChainResourcePillar,
   settleChainsDeltaT,
   type ChainEventPayload,
@@ -920,7 +923,16 @@ export function settleFloor(
         c.duration_days > 0,
     ) ??
       false);
-  if (hasTimedSpaceContract && afterSpace.space?.contracts) {
+  const spaceEnabled = isFeatureEnabled('space');
+  if (hasTimedSpaceContract && !spaceEnabled) {
+    events.push({
+      light: '🟡',
+      layer: 'instruction',
+      message: '[航天] 玩法开发中（生产构建未开放），本楼跳过航天合同结算，存档数据保持不变',
+      path: 'space.contracts',
+    });
+  }
+  if (spaceEnabled && hasTimedSpaceContract && afterSpace.space?.contracts) {
     afterSpace = {
       ...afterSpace,
       economy: { ...afterSpace.economy },
@@ -964,7 +976,18 @@ export function settleFloor(
   // ④‴ 工程里程碑回写（ENG-PROJ-01 §3.3）：投影项 done/cancelled → 阶段状态/指针回写，
   // 全阶段完工 → 工程完工＋outcome{mark}；projects[] 缺席（旧档零注入）时 syncProjects 原样返回，
   // 逐字节零行为变化。位置在 ④″ 部署结算之后、R26/R27 只读校验之前（校验面对最终快照）。
-  const projSyncedRaw = syncProjects(afterSpace);
+  const engineeringEnabled = isFeatureEnabled('engineering');
+  if (!engineeringEnabled && (afterSpace.projects?.length ?? 0) > 0) {
+    events.push({
+      light: '🟡',
+      layer: 'instruction',
+      message: '[工程] 玩法开发中（生产构建未开放），本楼跳过工程里程碑结算，存档数据保持不变',
+      path: 'projects',
+    });
+  }
+  const projSyncedRaw = engineeringEnabled
+    ? syncProjects(afterSpace, catalog?.retrofits ?? [])
+    : { next: afterSpace, events: [] as ReturnType<typeof syncProjects>['events'] };
   for (const e of projSyncedRaw.events) {
     events.push({
       light: e.type === 'sync_warn' ? '🟡' : '🟢',
@@ -1093,8 +1116,23 @@ export function settleFloor(
       name: b.name,
       power: resolveEffectiveBasePower(b, projSynced.next),
       buildings: Array.isArray(b.buildings) ? b.buildings : [],
+      ...(Array.isArray(b.forces?.vehicles)
+        ? {
+            forces: {
+              vehicles: b.forces.vehicles
+                .map(v => (typeof v === 'string' ? v : (v?.name ?? v?.type ?? '')))
+                .filter(Boolean),
+            },
+          }
+        : {}),
     }));
-    const gridRes = applyGridConstraints({ chains, bases: basePowerViews, nowDay: gameDay });
+    const gridRes = applyGridConstraints({
+      chains,
+      bases: basePowerViews,
+      nowDay: gameDay,
+      vehicles: projSynced.next.forces?.vehicles ?? [],
+      factions: projSynced.next.factions ?? [],
+    });
     chains = gridRes.chains;
     for (const ev of gridRes.events) {
       events.push({
@@ -1167,25 +1205,22 @@ export function settleFloor(
         wallet: projSynced.next.economy.wallet,
         resources: projSynced.next.economy.resources,
       });
-      const persistedChains = settledChains.nextChains.map((sc, idx) =>
-        sc.status === 'exhausted' ||
-        (sc.status === 'distressed' && sc.eff === 0 && sc.reason.includes('上游原料/外币不足暂停'))
-          ? {
-              ...sc,
-              rate_daily: chains[idx]?.rate_daily ?? sc.rate_daily,
-              ...(chains[idx]?.wallet_daily !== undefined
-                ? { wallet_daily: chains[idx].wallet_daily }
-                : {}),
-            }
-          : {
-              ...sc,
-              eff: chains[idx]?.eff ?? sc.eff,
-              rate_daily: chains[idx]?.rate_daily ?? sc.rate_daily,
-              ...(chains[idx]?.wallet_daily !== undefined
-                ? { wallet_daily: chains[idx].wallet_daily }
-                : {}),
-            },
-      );
+      const persistedChains = settledChains.nextChains.map((sc, idx) => {
+        const orig = chains[idx];
+        const restoredTracks = {
+          rate_daily: orig?.rate_daily ?? sc.rate_daily,
+          ...(orig?.wallet_daily !== undefined ? { wallet_daily: orig.wallet_daily } : {}),
+        };
+        if (sc.status === 'exhausted') return { ...sc, ...restoredTracks };
+        if (isStockPaused(sc)) {
+          // G6-01：新暂停时以天候/士气前的持久 eff 编码原态，防恢复后复合衰减
+          const reason = orig && !isStockPaused(orig) ? encodeStockPause(orig.reason, orig.status, orig.eff) : sc.reason;
+          return { ...sc, ...restoredTracks, reason };
+        }
+        // 欠料恢复链保留引擎自后缀解出的原 eff；其余链还原天候前 eff
+        const eff = orig && isStockPaused(orig) ? sc.eff : (orig?.eff ?? sc.eff);
+        return { ...sc, ...restoredTracks, eff };
+      });
       for (const ex of settledChains.exhaustedEvents) {
         events.push({
           light: '🟡',

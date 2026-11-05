@@ -329,7 +329,8 @@ export function isMoraleEngaged(
   } | null,
   exposureValue = 0,
 ): boolean {
-  if (Number(exposureValue) >= 4.5) return true;
+  // G8-13：与 resolveExposureLevel 同口径取整，避免 4.496 时档位已到 EL-2 而民心未破冰
+  if (clampRange(Number(exposureValue), 0, 10) >= 4.5) return true;
   if (!morale || typeof morale !== 'object') return false;
   if (morale.engaged === true) return true;
   if (morale.engaged === false) return false;
@@ -362,7 +363,7 @@ export function resolveMoraleStage(
 ): MoraleStageInfo {
   const engaged =
     opts?.engaged !== undefined
-      ? opts.engaged || Number(opts?.exposureValue ?? 0) >= 4.5
+      ? opts.engaged || clampRange(Number(opts?.exposureValue ?? 0), 0, 10) >= 4.5
       : true;
 
   if (!engaged) {
@@ -734,6 +735,21 @@ export function computeExposureFloor(state: {
   return explainExposureFloor(state).totalFloor;
 }
 
+/**
+ * G8-18：生效中的阵营磨合「exposure_floor」代价作为冷却底线的一部分，
+ * 避免自然冷却先压到底线以下、再被 settleFloor 抬回而反复显示「下降」。
+ */
+export function activeBreakInExposureFloor(state: {
+  command?: { break_in_penalties?: ReadonlyArray<{ effect_kind?: string; magnitude?: number; remaining_minutes?: number }> };
+}): number {
+  let floor = 0;
+  for (const pen of state.command?.break_in_penalties ?? []) {
+    if (!pen || pen.effect_kind !== 'exposure_floor' || (Number(pen.remaining_minutes) || 0) <= 0) continue;
+    floor = Math.max(floor, Number(pen.magnitude) || 0);
+  }
+  return clampRange(floor, 0, 10);
+}
+
 export interface ExposureMoraleSettleInput {
   /** 显式绝对值（暴露度） */
   explicitExposure?: number | null;
@@ -784,6 +800,7 @@ export function settleExposureAndMorale(
   currentState: {
     exposure?: { value?: number; floor?: number; level?: string; trend?: string; last_change?: string };
     morale?: { value?: number; level?: string; engaged?: boolean; trend?: string; last_change?: string };
+    command?: Parameters<typeof activeBreakInExposureFloor>[0]['command'];
     bases?: ReadonlyArray<{
       id?: string;
       name?: string;
@@ -824,7 +841,7 @@ export function settleExposureAndMorale(
     typeof currentState.exposure?.value === 'number' && Number.isFinite(currentState.exposure.value)
       ? clampRange(currentState.exposure.value, 0, 10)
       : 0.0;
-  let floor = computeExposureFloor(currentState);
+  let floor = Math.max(computeExposureFloor(currentState), activeBreakInExposureFloor(currentState));
 
   const hasExplicitExp = typeof input.explicitExposure === 'number' && Number.isFinite(input.explicitExposure);
   const hasDeltaExp = typeof input.deltaExposure === 'number' && Number.isFinite(input.deltaExposure);

@@ -82,6 +82,7 @@ import type { Schema } from '../../红警指挥系统/core/schema';
 import { useFloatingStore } from '../../红警指挥系统/composables/useFloatingStore';
 import { ui } from '../../红警指挥系统/ui/ui';
 import { HUD_HOST_ID, syncHudHostGeometry } from '../host/modalHost';
+import { jumpToChatFloor } from '../host/chatJump';
 import { ttHostBridge } from '../host/ttHostBridge';
 import PdaBeaconButton from './PdaBeaconButton.vue';
 import PdaFanoutStack from './PdaFanoutStack.vue';
@@ -418,6 +419,8 @@ function onSaveMemo(text: string) {
 }
 
 function onFanoutSelect(item: PdaEventItem) {
+  // G6-10：通知带来源楼号时一键跳楼
+  void jumpToChatFloor(item.floor ?? item.floorId);
   emit('select-notification', item);
 }
 

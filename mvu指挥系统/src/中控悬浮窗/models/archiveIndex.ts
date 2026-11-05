@@ -701,6 +701,14 @@ export interface LoadGirlDossierOptions {
   model?: string;
 }
 
+/** 母板回填时不得拷入的首台身份字段（G8-05） */
+const GIRL_IDENTITY_DATA_KEYS: ReadonlySet<string> = new Set([
+  '编号', '出厂编号', '机体编号', 'serial',
+  '代号', '专属代号', '战术代号', 'callsign',
+  '序列', '机体序列', 'seq',
+  'preset_name', '预设名', 'name', '姓名', '名称', 'rename_from',
+]);
+
 async function defaultReadWorldbook(bookName: string): Promise<readonly ArchiveEntryLike[]> {
   try {
     const fn = (globalThis as Record<string, unknown>).getWorldbook;
@@ -783,7 +791,11 @@ export async function loadGirlDossierDetail(
     if (!parsed.temperament_spectrum && tplParsed.temperament_spectrum) {
       parsed.temperament_spectrum = tplParsed.temperament_spectrum;
     }
-    parsed.data = { ...tplParsed.data, ...parsed.data };
+    // G8-05：母板只回填能力字段，丢弃首台身份字段（编号/代号/序列/预设名），防止误判首台或已赐名
+    const tplCapabilityData = Object.fromEntries(
+      Object.entries(tplParsed.data).filter(([k]) => !GIRL_IDENTITY_DATA_KEYS.has(k)),
+    );
+    parsed.data = { ...tplCapabilityData, ...parsed.data };
   }
 
   const params: [string, string][] = [];

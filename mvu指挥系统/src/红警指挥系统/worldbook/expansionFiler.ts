@@ -495,7 +495,27 @@ export function buildStructuredExpansionDataObject(
   if (!STRUCTURED_DATA_EXPANSION_KINDS.has(kindStr)) {
     return undefined;
   }
-  if (!isExpansionBuildableBySystem(d.params, d.data)) {
+  const isBuildable = isExpansionBuildableBySystem(d.params, d.data);
+  const hasBuildingResearchOrComputeParams =
+    kindStr === '建筑' &&
+    Boolean(
+      pickExpansionParam(d.params, [
+        '科研加速',
+        '研发加速',
+        '研究加速',
+        '科研加成',
+        '研究加成',
+        'research_accel',
+        'research_bonus',
+        '算力',
+        '算力产出',
+        '并网算力',
+        '虚拟算力',
+        'compute',
+        'compute_output',
+      ]),
+    );
+  if (!isBuildable && !hasBuildingResearchOrComputeParams) {
     return undefined;
   }
   const name = String(d.name ?? '').trim();
@@ -654,6 +674,89 @@ export function buildStructuredExpansionDataObject(
     );
     const etaRaw = pickExpansionParam(params, ['工期', '建造周期', '周期', '耗时', '预计', 'eta']);
 
+    const rawAccelText = pickExpansionParam(params, [
+      '科研加速',
+      '研发加速',
+      '研究加速',
+      '科研加成',
+      '研究加成',
+      'research_accel',
+      'research_bonus',
+    ]);
+    const rawLinesText = pickExpansionParam(params, [
+      '加速领域',
+      '科研领域',
+      '研究领域',
+      '适用领域',
+      '研究方向',
+      '研究序列',
+      'research_lines',
+      'research_domains',
+    ]);
+    const rawComputeText = pickExpansionParam(params, [
+      '算力',
+      '算力产出',
+      '并网算力',
+      '虚拟算力',
+      'compute',
+      'compute_output',
+    ]);
+
+    let researchAccel: number | undefined;
+    let extractedLinesFromAccel: string[] = [];
+    if (rawAccelText) {
+      const parenMatch = rawAccelText.match(/[（(]([^（）()]+)[)）]/);
+      if (parenMatch && parenMatch[1] && !/\d/.test(parenMatch[1])) {
+        extractedLinesFromAccel = splitExpansionListParam(parenMatch[1]);
+      }
+      const pctMatch = rawAccelText.match(/([+-]?\d+(?:\.\d+)?)\s*%/);
+      const multMatch = rawAccelText.match(/(\d+(?:\.\d+)?)\s*[xX倍]/);
+      const numMatch = rawAccelText.match(/([+-]?\d+(?:\.\d+)?)/);
+      let rawVal = 0;
+      if (pctMatch) rawVal = Number(pctMatch[1]) / 100;
+      else if (multMatch) {
+        const m = Number(multMatch[1]);
+        rawVal = m > 1 ? m - 1 : m;
+      } else if (numMatch) {
+        const n = Number(numMatch[1]);
+        rawVal = n > 1 && n <= 3 && !rawAccelText.startsWith('+') ? n - 1 : n > 3 ? n / 100 : n;
+      }
+      if (Number.isFinite(rawVal) && rawVal > 0) {
+        researchAccel = Math.round(Math.min(0.35, rawVal) * 10000) / 10000;
+      }
+    }
+    const researchLines = rawLinesText ? splitExpansionListParam(rawLinesText) : extractedLinesFromAccel;
+
+    let computeOut: { tflops: number; tops: number } | undefined;
+    if (rawComputeText) {
+      const tfMatch =
+        rawComputeText.match(/(\d+(?:\.\d+)?)\s*(?:tflops|浮点)/i) ??
+        rawComputeText.match(/(?:tflops|浮点)\s*[:：=]?\s*(\d+(?:\.\d+)?)/i);
+      const tpMatch =
+        rawComputeText.match(/(\d+(?:\.\d+)?)\s*(?:tops|张量)/i) ??
+        rawComputeText.match(/(?:tops|张量)\s*[:：=]?\s*(\d+(?:\.\d+)?)/i);
+      let tf = tfMatch ? Math.round(Number(tfMatch[1])) : 0;
+      let tp = tpMatch ? Math.round(Number(tpMatch[1])) : 0;
+      if (!tfMatch && !tpMatch) {
+        const slashM = rawComputeText.match(/(\d+(?:\.\d+)?)\s*[/／,，]\s*(\d+(?:\.\d+)?)/);
+        if (slashM) {
+          tf = Math.round(Number(slashM[1]));
+          tp = Math.round(Number(slashM[2]));
+        } else {
+          const singleM = rawComputeText.match(/(\d+(?:\.\d+)?)/);
+          if (singleM) {
+            tf = Math.round(Number(singleM[1]));
+            tp = Math.round(Number(singleM[1]));
+          }
+        }
+      }
+      tf = Math.min(100, Math.max(0, Number.isFinite(tf) ? tf : 0));
+      tp = Math.min(150, Math.max(0, Number.isFinite(tp) ? tp : 0));
+      if (tf > 0 || tp > 0) {
+        computeOut = { tflops: tf, tops: tp };
+      }
+    }
+
     return {
       schema_version: 1,
       type: 'building',
@@ -662,6 +765,7 @@ export function buildStructuredExpansionDataObject(
       cost,
       power,
       tier,
+      ...(!isBuildable ? { buildable: false } : {}),
       research: prereqs.length > 0 ? prereqs.join('＋') : null,
       prereqs,
       ...(prereqs.length > 0 ? { need_tech: prereqs } : {}),
@@ -671,6 +775,9 @@ export function buildStructuredExpansionDataObject(
       ...(factionInfo.code ? { faction: factionInfo.code } : {}),
       scope: factionInfo.scope,
       ...(etaRaw ? { eta: etaRaw } : {}),
+      ...(researchAccel !== undefined ? { research_accel: researchAccel } : {}),
+      ...(researchLines.length > 0 ? { research_lines: researchLines } : {}),
+      ...(computeOut ? { outputs: { virtual: { compute: computeOut } } } : {}),
       tags: baseTags,
       desc: summaryDesc,
     };

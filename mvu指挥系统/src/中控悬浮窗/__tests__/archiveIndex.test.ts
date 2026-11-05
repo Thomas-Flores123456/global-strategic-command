@@ -279,6 +279,29 @@ describe('ARM-01 · 机娘跨世界书（含聊天绑定书 档案·{name} / 剧
     expect(res.detail.desc).toContain('[剧情·北坡纪事 | 苏离——F-47首台]');
   });
 
+  it('G8-05：母板回填只合并能力字段，不拷入首台编号/代号/预设名', async () => {
+    const books: Record<string, ArchiveEntryLike[]> = {
+      RA_ChatBook_Test: [{ name: '档案·铁砧·犀牛坦克', enabled: true, content: '[机娘·能力档案 | 铁砧——犀牛坦克]\n形态机制：重甲' }],
+      [DOSSIER_BOOK]: [
+        {
+          name: '档案·柳翠·犀牛坦克',
+          enabled: true,
+          content: '<数据>\n{"preset_name":"柳翠","serial":"RH-01","callsign":"翠羽","seq":"首台原型","special_skills":[{"name":"穿甲","kind":"核心权能","desc":"重击"}]}\n</数据>',
+        },
+      ],
+    };
+    const res = await loadGirlDossierDetail('铁砧', {
+      chatBook: 'RA_ChatBook_Test',
+      model: '犀牛坦克',
+      reader: { read: async (b: string) => books[b] ?? [] },
+    });
+    expect(res.special_skills.map(s => s.name)).toEqual(['穿甲']);
+    expect(res.data.preset_name).toBeUndefined();
+    expect(res.data.serial).toBeUndefined();
+    expect(res.data.callsign).toBeUndefined();
+    expect(res.data.seq).toBeUndefined();
+  });
+
   it('buildArchiveIndex 自动剔除混在 pending_lore 中的新势力条目，且机娘保障工程条目支持只读基线回退', () => {
     const rawCurrent = {
       codex: [],

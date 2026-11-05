@@ -16,7 +16,7 @@ import { isDebugBypassPrerequisitesActive } from '../../红警指挥系统/compo
 import { setHasEquivalentBuilding } from '../../红警指挥系统/core/prerequisites';
 import { isProjectV1, isProjectV2, type Project, type ProjectV2, type Schema } from '../../红警指挥系统/core/schema';
 import { alignEngineeringActionWithDispatchBus } from '../../红警指挥系统/engines/engOrderBridge';
-import { BUILTIN_RETROFIT_UPGRADE_SPECS } from '../../红警指挥系统/engines/projectEngineHelpers';
+import { resolveRetrofitUpgradeRules } from '../../红警指挥系统/engines/projectEngineHelpers';
 import type { UnifiedTask } from '../../红警指挥系统/engines/taskOrchestrator';
 import {
   ENG_COMMAND_COPY,
@@ -200,12 +200,8 @@ export function resolveRetrofitCategory(
   const preview = resolveRetrofitTargetPreview(def);
   if (preview?.isBuildingRetrofit) return 'facility';
 
-  const builtin =
-    BUILTIN_RETROFIT_UPGRADE_SPECS[def.name] ?? BUILTIN_RETROFIT_UPGRADE_SPECS[def.name.trim()];
-  const rawTargets =
-    def.kind === 'retrofit' ? (def.target_unit ?? builtin?.target_unit) : undefined;
-  const rawHosts =
-    def.kind === 'retrofit' ? (def.host_building ?? builtin?.host_building) : undefined;
+  const rawTargets = def.kind === 'retrofit' ? def.target_unit : undefined;
+  const rawHosts = def.kind === 'retrofit' ? def.host_building : undefined;
   const targetStr = Array.isArray(rawTargets) ? rawTargets.join(' ') : String(rawTargets ?? '');
   const hostStr = Array.isArray(rawHosts) ? rawHosts.join(' ') : String(rawHosts ?? '');
   const combined = `${def.name} ${targetStr} ${hostStr} ${def.desc ?? ''}`;
@@ -955,34 +951,11 @@ export function resolveRetrofitTargetPreview(
   snapshot?: Schema | null,
 ): RetrofitTargetPreview | null {
   if (!def || def.kind === 'project') return null;
-  const builtin = BUILTIN_RETROFIT_UPGRADE_SPECS[def.name] ?? BUILTIN_RETROFIT_UPGRADE_SPECS[def.name.trim()];
-  const rawTargets = def.target_unit ?? builtin?.target_unit;
-  const rawHosts = def.host_building ?? builtin?.host_building;
-  const targetList =
-    typeof rawTargets === 'string'
-      ? [rawTargets]
-      : Array.isArray(rawTargets)
-        ? rawTargets
-        : [];
-  const hostList =
-    typeof rawHosts === 'string'
-      ? [rawHosts]
-      : Array.isArray(rawHosts)
-        ? rawHosts
-        : [];
-  const isBuildingRetrofit = hostList.length > 0 && targetList.length === 0;
-  const effectiveTargets = targetList.length > 0 ? targetList : hostList;
-  if (effectiveTargets.length === 0) return null;
-
-  let upgradedLabel = '';
-  if (typeof def.upgraded_name === 'string') {
-    upgradedLabel = def.upgraded_name.trim();
-  } else if (def.upgraded_name && typeof def.upgraded_name === 'object') {
-    upgradedLabel = Object.values(def.upgraded_name).join(' / ');
-  } else if (builtin?.upgraded_name) {
-    upgradedLabel = builtin.upgraded_name;
-  }
-  if (!upgradedLabel) return null;
+  const rules = resolveRetrofitUpgradeRules(def);
+  if (rules.length === 0) return null;
+  const isBuildingRetrofit = rules[0].kind === 'building';
+  const effectiveTargets = rules.map(r => r.from);
+  const upgradedLabel = [...new Set(rules.map(r => r.to))].join(' / ');
 
   if (snapshot === undefined) {
     return {

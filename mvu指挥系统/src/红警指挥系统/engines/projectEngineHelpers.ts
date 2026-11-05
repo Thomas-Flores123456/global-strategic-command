@@ -250,80 +250,10 @@ export const V2_PROJECT_SLOT: EngineeringSlotDef =
 
 /* ═══════════════ 读数助手 ═══════════════ */
 
-/** 可用纳米库存（裁量 g：全小类有限数求和，兼容数值型 nanites；null=未探明按 0，不降级） */
-export function availableNanites(state: ProjectStateView): number {
-  const nanites = state.economy?.resources?.nanites as unknown;
-  if (typeof nanites === 'number') {
-    return Number.isFinite(nanites) ? Math.max(0, nanites) : 0;
-  }
-  if (!nanites || typeof nanites !== 'object') return 0;
-  return Object.values(nanites as Record<string, unknown>).reduce<number>(
-    (sum, v) => sum + (typeof v === 'number' && Number.isFinite(v) ? v : 0),
-    0,
-  );
-}
+/** 纳米读数/扣减已下沉至零依赖叶子模块 naniteLedger（供 spaceEngine 共用且不引入 parse 链循环） */
+import { availableNanites, deductEconomyNanites } from './naniteLedger';
+export { availableNanites, deductEconomyNanites };
 
-const NANITE_DEDUCT_PRIORITY: readonly string[] = [
-  '通用纳米工料',
-  '标准纳米工料',
-  '军工纳米工料',
-  '特种纳米工料',
-  '高精构造型纳米',
-  '高能纳米工料',
-  '机娘修复凝胶',
-];
-
-/** 真实从 economy.resources.nanites 扣减指定纳米数（SIM-NANITE-01，兼容数值与分小类对象，按低阶→高阶优先级扣减，绝不扣至负数） */
-export function deductEconomyNanites(
-  economy: ProjectStateView['economy'],
-  naniteCost: number,
-  nextCredits: number,
-): NonNullable<ProjectStateView['economy']> {
-  const baseEconomy = { ...(economy ?? {}), credits: nextCredits };
-  if (!Number.isFinite(naniteCost) || naniteCost <= 0 || !baseEconomy.resources) {
-    return baseEconomy;
-  }
-  const rawNanites = baseEconomy.resources.nanites as unknown;
-  if (typeof rawNanites === 'number' && Number.isFinite(rawNanites)) {
-    return {
-      ...baseEconomy,
-      resources: {
-        ...baseEconomy.resources,
-        nanites: Math.max(0, rawNanites - naniteCost) as unknown as NonNullable<
-          NonNullable<ProjectStateView['economy']>['resources']
-        >['nanites'],
-      },
-    };
-  }
-  if (!rawNanites || typeof rawNanites !== 'object') {
-    return baseEconomy;
-  }
-  const nextNanites: Record<string, number | null | undefined> = {
-    ...(rawNanites as Record<string, number | null | undefined>),
-  };
-  const prioritySet = new Set(NANITE_DEDUCT_PRIORITY);
-  const orderedKeys = [
-    ...NANITE_DEDUCT_PRIORITY.filter(k => Object.prototype.hasOwnProperty.call(nextNanites, k)),
-    ...Object.keys(nextNanites).filter(k => !prioritySet.has(k)),
-  ];
-  let remaining = naniteCost;
-  for (const k of orderedKeys) {
-    if (remaining <= 0) break;
-    const v = nextNanites[k];
-    if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
-      const take = Math.min(v, remaining);
-      nextNanites[k] = Math.max(0, v - take);
-      remaining -= take;
-    }
-  }
-  return {
-    ...baseEconomy,
-    resources: {
-      ...baseEconomy.resources,
-      nanites: nextNanites as Record<string, number | null>,
-    },
-  };
-}
 
 /** 系统资金（缺席按 0） */
 export function availableCredits(state: ProjectStateView): number {
@@ -405,7 +335,7 @@ export function checkPhaseGates(
   if (need > stock) {
     return {
       reason: 'nanites_gate',
-      message: `阶段「${phaseLabel}」纳米开工门未过：需求 ${need} ＞ 可用纳米库存 ${stock}——开工门是门槛不是抵扣（D8b/§3.5），库存不会被扣减；阶段保持未启动、工程保持在建，备齐纳米后重发注资令`,
+      message: `阶段「${phaseLabel}」纳米开工门未过：需求 ${need} ＞ 可用纳米库存 ${stock}——开工将实扣纳米，库存不足时不扣；阶段保持未启动、工程保持在建，备齐纳米后重发注资令`,
     };
   }
   return null;
@@ -532,270 +462,37 @@ export function evaluateRedStarHammerPayload(
 
 /* ═══════════════ ⑨ FD-22 现代化改装工程完工 ➔ 在役存量单位/建筑原位更名 ═══════════════ */
 
-export interface RetrofitUpgradeSpec {
-  research: string;
-  target_unit?: readonly string[];
-  host_building?: readonly string[];
-  upgraded_name: string;
+/** 单条升格规则：from（在役旧型号/母体建筑）→ to（upgraded_name） */
+export interface RetrofitUpgradeRule {
+  kind: 'unit' | 'building';
+  from: string;
+  to: string;
 }
 
-/** FD-22 内置 48 条现代化改装工程（46 条单位改装 + 2 条建筑改装）规格映射 */
-export const BUILTIN_RETROFIT_UPGRADE_SPECS: Readonly<Record<string, RetrofitUpgradeSpec>> = {
-  // ── 盟军 21 条单位现代化改装 + 2 条建筑改装 ──
-  'M1A2 SEPv3灰熊混动改装工程': { research: 'M1A2 SEPv3灰熊混动改装包', target_unit: ['M1A1灰熊主战坦克'], upgraded_name: 'M1A2 SEPv3混动灰熊主战坦克' },
-  M2A4布拉德利数字化改装工程: { research: 'M2A4布拉德利数字化改装包', target_unit: ['M2A3布拉德利步兵战车'], upgraded_name: 'M2A4布拉德利步兵战车' },
-  M3A4布拉德利CFV侦察强化工程: { research: 'M3A4布拉德利CFV侦察强化包', target_unit: ['M3布拉德利CFV装甲侦察车'], upgraded_name: 'M3A4布拉德利CFV装甲侦察车' },
-  M109A7帕拉丁自动化火炮改装工程: { research: 'M109A7帕拉丁自动化火炮改装包', target_unit: ['M109A6帕拉丁自行榴弹炮', 'M109A6帕拉丁自行火炮'], upgraded_name: 'M109A7帕拉丁自行榴弹炮' },
-  M1130A1斯特赖克数字指挥车改装工程: { research: 'M1130A1斯特赖克数字指挥车改装包', target_unit: ['M1130斯特赖克指挥车'], upgraded_name: 'M1130A1斯特赖克数字指挥车' },
-  M142海马斯增程火箭炮升级工程: { research: 'M142海马斯增程火箭炮升级包', target_unit: ['M142海马斯多管火箭车'], upgraded_name: 'M142海马斯增程多管火箭车' },
-  有源相控阵机动雷达车改装工程: { research: '有源相控阵机动雷达车改装包', target_unit: ['机动雷达车'], upgraded_name: '有源相控阵机动雷达车' },
-  'UH-60V黑鹰数字座舱改装工程': { research: 'UH-60V黑鹰数字座舱改装包', target_unit: ['UH-60M黑鹰通用直升机'], upgraded_name: 'UH-60V黑鹰数字化通用直升机' },
-  'F-16V战隼航电武器升级工程': { research: 'F-16V战隼航电武器升级包', target_unit: ['F-16C战隼多用途战斗机', 'F-16C战隼'], upgraded_name: 'F-16V战隼多用途战斗机' },
-  'F-15EX攻击鹰深度现代化改装工程': { research: 'F-15EX攻击鹰深度现代化改装包', target_unit: ['F-15E攻击鹰制空战斗轰炸机'], upgraded_name: 'F-15EX先进攻击鹰战斗轰炸机' },
-  阵风F4标准升级工程: { research: '阵风F4标准升级包', target_unit: ['阵风多用途战斗机'], upgraded_name: '阵风F4多用途战斗机' },
-  'AH-64E阿帕奇卫士升级工程': { research: 'AH-64E阿帕奇卫士升级包', target_unit: ['AH-64D阿帕奇长弓武装直升机'], upgraded_name: 'AH-64E阿帕奇卫士武装直升机' },
-  'MQ-9B死神蜂群协同改装工程': { research: 'MQ-9B死神蜂群协同改装包', target_unit: ['MQ-9B死神战略侦察打击无人机'], upgraded_name: 'MQ-9B死神协同蜂群指挥无人机' },
-  'XQ-58B女武神忠诚僚机升级工程': { research: 'XQ-58B女武神忠诚僚机升级包', target_unit: ['XQ-58A女武神无人协同战斗飞行器'], upgraded_name: 'XQ-58B女武神忠诚僚机' },
-  'CH-47F Block II支奴干升级工程': { research: 'CH-47F Block II支奴干升级包', target_unit: ['CH-47F支奴干重型战术运输直升机'], upgraded_name: 'CH-47F Block II支奴干重型运输直升机' },
-  'B-52J同温层堡垒延寿换发工程': { research: 'B-52J同温层堡垒延寿换发包', target_unit: ['B-52H同温层堡垒战略轰炸机'], upgraded_name: 'B-52J同温层堡垒战略轰炸机' },
-  'DDG-51阿利·伯克级SPY-6升级工程': { research: 'DDG-51阿利·伯克级SPY-6升级包', target_unit: ['DDG-51阿利·伯克级宙斯盾驱逐舰'], upgraded_name: 'DDG-51阿利·伯克级驱逐舰(SPY-6现代改)' },
-  'CG-47提康德罗加级宙斯盾基线9升级工程': { research: 'CG-47提康德罗加级宙斯盾基线9升级包', target_unit: ['CG-47提康德罗加级导弹巡洋舰'], upgraded_name: 'CG-47提康德罗加级巡洋舰(宙斯盾基线9)' },
-  'SSN-688I改进型洛杉矶级静音升级工程': { research: 'SSN-688I改进型洛杉矶级静音升级包', target_unit: ['SSN-688洛杉矶级核动力攻击潜艇'], upgraded_name: 'SSN-688I改进型洛杉矶级攻击核潜艇' },
-  'LHD-1黄蜂级F-35B甲板耐热改造工程': { research: 'LHD-1黄蜂级F-35B甲板耐热改造包', target_unit: ['LHD-1黄蜂级两栖攻击舰'], upgraded_name: 'LHD-1黄蜂级闪电航母(F-35B适配型)' },
-  爱国者阵地增强改装工程: { research: '爱国者阵地增强改装', host_building: ['爱国者防空阵地', '爱国者导弹阵地'], upgraded_name: '爱国者PAC-3增强防空阵地' },
-  电子战干扰站正式化改装工程: { research: '电子战体系研发', host_building: ['电子战干扰站'], upgraded_name: '全频谱电子战干扰站' },
-  '小鹰级／尼米兹级电磁弹射现代化改装工程': { research: '航母电磁弹射改装工程研发', target_unit: ['CV-63小鹰级常规动力航空母舰', 'CVN-68尼米兹级核动力航空母舰'], upgraded_name: 'CVN-68尼米兹级核动力航母(电弹现代改)' },
-  // ── 苏联 25 条单位现代化改装 ──
-  犀牛坦克现代改装套件工程: { research: '犀牛坦克现代改装套件研发', target_unit: ['犀牛主战坦克族'], upgraded_name: '犀牛主战坦克·接触-5现代改' },
-  天启坦克现代改装套件工程: { research: '天启坦克现代改装套件研发', target_unit: ['天启重型坦克'], upgraded_name: '天启决战型重型坦克' },
-  基洛夫空艇重装现代改装工程: { research: '基洛夫空艇重装现代改装研发', target_unit: ['基洛夫空中无人机武库母舰'], upgraded_name: '基洛夫重装蜂群武库母舰' },
-  无畏级导弹舰现代改装工程: { research: '无畏级导弹舰现代改装研发', target_unit: ['无畏级重型导弹支援舰'], upgraded_name: '无畏级重型通用垂发支援舰' },
-  '11442M基洛夫级巡洋舰现代改装工程': { research: '11442M基洛夫级巡洋舰现代改装研发', target_unit: ['基洛夫级核动力导弹巡洋舰'], upgraded_name: '11442M基洛夫级核动力导弹巡洋舰' },
-  '2S19M2自行火炮数字化改装工程': { research: '2S19M2自行火炮数字化改装研发', target_unit: ['2S3／2S19 Msta自行榴弹炮族'], upgraded_name: '2S19M2「姆斯塔-SM2」数字化自行榴弹炮' },
-  'T-72B3M重装反应装甲改装工程': { research: 'T-72B3M重装反应装甲改装研发', target_unit: ['T-72B3M主战坦克'], upgraded_name: 'T-72B3M重装反应装甲型主战坦克' },
-  'T-90M2主战坦克决战改装工程': { research: 'T-90M2主战坦克决战改装研发', target_unit: ['T-90M主战坦克'], upgraded_name: 'T-90M2「突破-3」决战主战坦克' },
-  'T-80BVM寒区突击改装工程': { research: 'T-80BVM寒区突击改装研发', target_unit: ['T-80BVM主战坦克', '寒区突击坦克族'], upgraded_name: 'T-80BVM改进型寒区突击主战坦克' },
-  'BMP-3M数字化步兵战车改装工程': { research: 'BMP-3M数字化步兵战车改装研发', target_unit: ['履带步兵战车族'], upgraded_name: 'BMP-3M「德拉贡」数字化步兵战车族' },
-  'BTR-EW全谱网电装甲车改装工程': { research: 'BTR-EW全谱网电装甲车改装研发', target_unit: ['BTR-EW战术网电装甲车'], upgraded_name: 'BTR-EW「火花-M」全谱网电装甲车' },
-  'TOS-1AM热压攻坚重装改装工程': { research: 'TOS-1AM热压攻坚重装改装研发', target_unit: ['TOS热压攻坚族（TOS-1A／TOS-2）'], upgraded_name: 'TOS-1AM重装甲热压攻坚族' },
-  'Su-30SM2航电火控升级工程': { research: 'Su-30SM2航电火控升级研发', target_unit: ['Su-30SM多任务战斗机'], upgraded_name: 'Su-30SM2多任务战斗机' },
-  'Su-34M防区外打击升级工程': { research: 'Su-34M防区外打击升级研发', target_unit: ['Su-34防区外打击战斗轰炸机'], upgraded_name: 'Su-34M防区外打击战斗轰炸机' },
-  'MiG-31BSM远程截击升级工程': { research: 'MiG-31BSM远程截击升级研发', target_unit: ['MiG-31BM高速截击机'], upgraded_name: 'MiG-31BSM数字化高速截击机' },
-  'Ka-52M／Mi-28NM旋翼机光电升级工程': { research: 'Ka-52M／Mi-28NM旋翼机光电升级研发', target_unit: ['旋翼机族'], upgraded_name: 'Ka-52M／Mi-28NM光电增强旋翼机族' },
-  '1155M型驱逐舰多用途改装工程': { research: '1155M型驱逐舰多用途改装研发', target_unit: ['1155M型反潜驱逐舰'], upgraded_name: '1155M「沙波什尼科夫元帅」级多用途驱逐舰' },
-  '971M型核潜艇静音与巡航导弹改装工程': { research: '971M型核潜艇静音与巡航导弹改装研发', target_unit: ['971型攻击核潜艇'], upgraded_name: '971M「猎豹」级静音多用途攻击核潜艇' },
-  '铠甲-SM／道尔-M2U伴随防空升级工程': { research: '铠甲-SM／道尔-M2U伴随防空升级研发', target_unit: ['战区机动与末端伴随防空族'], upgraded_name: '铠甲-SM／道尔-M2U自主伴随防空族' },
-  'BTR-82AT轮式装甲输送车数字化改装工程': { research: 'BTR-82AT轮式装甲输送车数字化改装研发', target_unit: ['轮式装甲输送车族'], upgraded_name: 'BTR-82AT数字化轮式步兵战车族' },
-  'Tornado-G火箭炮自动火控改装工程': { research: 'Tornado-G火箭炮自动火控改装研发', target_unit: ['Tornado-G火箭炮'], upgraded_name: 'Tornado-G自动火控模块化火箭炮' },
-  '恐怖机器人拆解/磁锁双模改装工程': { research: '恐怖机器人拆解/磁锁双模改装研发', target_unit: ['恐怖机器人·拆解爆破型'], upgraded_name: '恐怖机器人·拆解/磁锁双模战备型' },
-  '877型潜艇636.3静音与口径改装工程': { research: '877型潜艇636.3静音与口径改装研发', target_unit: ['877型常规潜艇'], upgraded_name: '636.3「华沙女人」级改进型静音潜艇' },
-  '海雕-10／30无人侦察体系数字升级工程': { research: '海雕-10／30无人侦察体系数字升级研发', target_unit: ['无人航空体系族'], upgraded_name: '海雕-30M数字火控校射无人机体系族' },
-  '赤星天锤3→6枚扩仓改装模块': { research: '常规轨道动能打击系统研发', target_unit: ['赤星天锤常规战略载荷'], upgraded_name: '赤星天锤常规战略载荷(6枚扩仓型)' },
-};
-
-function resolveUpgradedUnitNameForTarget(spec: RetrofitUpgradeSpec, matchedTarget: string): string {
-  if (
-    spec.research === '航母电磁弹射改装工程研发' &&
-    canon(matchedTarget) === canon('CV-63小鹰级常规动力航空母舰')
-  ) {
-    return 'CV-63小鹰级航空母舰(电弹现代改)';
-  }
-  return spec.upgraded_name;
-}
-
-function upgradeUnitTokenList(
-  list: ReadonlyArray<string> | undefined,
-  spec: RetrofitUpgradeSpec,
-): { list: string[]; changed: boolean } {
-  if (!list || !spec.target_unit?.length) return { list: list ? [...list] : [], changed: false };
-  let changed = false;
-  const next = list.map(token => {
-    const trimmed = token.trim();
-    for (const target of spec.target_unit!) {
-      if (canon(trimmed) === canon(target)) {
-        changed = true;
-        return resolveUpgradedUnitNameForTarget(spec, target);
-      }
-      if (trimmed.startsWith(target)) {
-        const rest = trimmed.slice(target.length);
-        if (!rest || /^[\s(（×xX*]/.test(rest)) {
-          changed = true;
-          return `${resolveUpgradedUnitNameForTarget(spec, target)}${rest}`;
-        }
-      }
-    }
-    return token;
-  });
-  return { list: next, changed };
-}
-
-function upgradeUnitRecord(
-  record: Readonly<Record<string, number>> | undefined,
-  spec: RetrofitUpgradeSpec,
-): { record: Record<string, number>; changed: boolean } {
-  if (!record || !spec.target_unit?.length) return { record: record ? { ...record } : {}, changed: false };
-  let changed = false;
-  const next: Record<string, number> = {};
-  for (const [k, count] of Object.entries(record)) {
-    const matched = spec.target_unit.find(t => canon(t) === canon(k));
-    if (matched) {
-      changed = true;
-      const newKey = resolveUpgradedUnitNameForTarget(spec, matched);
-      next[newKey] = (next[newKey] ?? 0) + count;
-    } else {
-      next[k] = (next[k] ?? 0) + count;
-    }
-  }
-  return { record: next, changed };
+function toNameList(raw: string | readonly string[] | undefined): string[] {
+  const list = typeof raw === 'string' ? [raw] : Array.isArray(raw) ? raw : [];
+  return list.map(s => s.trim()).filter(Boolean);
 }
 
 /**
- * 当现代化改装工程（ProjectV1）完工时，自动将 state.forces、state.bases[].forces 与 state.bases[].buildings
- * 中的存量旧型号单位/母体建筑原位更名为 upgraded_name（FD-22 · D-UNIT-MOD-02）。
+ * 升格规则唯一来源：世界书 retrofit 条目自身的 target_unit / host_building / upgraded_name。
+ * - 有 target_unit：单位改装（host_building 此时是施工厂房，不更名）；
+ * - 仅 host_building：建筑改装；
+ * - upgraded_name 为字符串时作用于全部目标，为映射表时按目标名取值（缺项不升格）。
+ * 引擎（applyRetrofitCompletionUpgrade）与 UI 预览共用本函数。
  */
-export function applyRetrofitCompletionUpgrade<S extends ProjectStateView>(
-  state: S,
-  completedRefs: ReadonlyArray<{ ref: string; lead_base: string }>,
-): S {
-  if (!completedRefs.length) return state;
-  let nextForces = state.forces;
-  let nextBases = state.bases;
-
-  for (const { ref, lead_base } of completedRefs) {
-    const spec = BUILTIN_RETROFIT_UPGRADE_SPECS[ref] ?? BUILTIN_RETROFIT_UPGRADE_SPECS[ref.trim()];
-    if (!spec) continue;
-
-    // 1. 升级全局 forces 中的在役存量单位
-    if (nextForces && spec.target_unit?.length) {
-      let forcesChanged = false;
-      const updatedForces: Record<string, unknown> = { ...nextForces };
-
-      if (Array.isArray(nextForces.vehicles)) {
-        const res = upgradeUnitTokenList(nextForces.vehicles, spec);
-        if (res.changed) {
-          updatedForces.vehicles = res.list;
-          forcesChanged = true;
-        }
-      }
-      if (Array.isArray(nextForces.aircraft)) {
-        const res = upgradeUnitTokenList(nextForces.aircraft, spec);
-        if (res.changed) {
-          updatedForces.aircraft = res.list;
-          forcesChanged = true;
-        }
-      }
-      if (nextForces.troops) {
-        const res = upgradeUnitRecord(nextForces.troops, spec);
-        if (res.changed) {
-          updatedForces.troops = res.record;
-          forcesChanged = true;
-        }
-      }
-      if (nextForces.infantry) {
-        const res = upgradeUnitRecord(nextForces.infantry, spec);
-        if (res.changed) {
-          updatedForces.infantry = res.record;
-          forcesChanged = true;
-        }
-      }
-      if (Array.isArray(nextForces.girls)) {
-        let girlsChanged = false;
-        const nextGirls = nextForces.girls.map(g => {
-          const model = typeof g.model === 'string' ? g.model.trim() : '';
-          const matched = spec.target_unit?.find(t => canon(t) === canon(model));
-          if (matched) {
-            girlsChanged = true;
-            return { ...g, model: resolveUpgradedUnitNameForTarget(spec, matched) };
-          }
-          return g;
-        });
-        if (girlsChanged) {
-          updatedForces.girls = nextGirls;
-          forcesChanged = true;
-        }
-      }
-      if (forcesChanged) {
-        nextForces = updatedForces as S['forces'];
-      }
-    }
-
-    // 2. 升级各基地驻军 forces 与建筑改装目标（如爱国者阵地增强改装工程、电子战干扰站正式化改装工程）
-    if (nextBases) {
-      let basesChanged = false;
-      const updatedBases = nextBases.map(base => {
-        let baseChanged = false;
-        let bBuildings = base.buildings;
-        let bForces = base.forces;
-
-        if (
-          spec.host_building?.length &&
-          bBuildings &&
-          (!lead_base || base.id === lead_base || canon(base.name ?? '') === canon(lead_base))
-        ) {
-          const nextBlds = bBuildings.map(bd => {
-            if (spec.host_building!.some(h => canon(h) === canon(bd.name))) {
-              baseChanged = true;
-              return { ...bd, name: spec.upgraded_name };
-            }
-            return bd;
-          });
-          if (baseChanged) bBuildings = nextBlds;
-        }
-
-        if (bForces && spec.target_unit?.length) {
-          let bfChanged = false;
-          const nextBf = { ...bForces };
-          if (Array.isArray(bForces.vehicles)) {
-            const res = upgradeUnitTokenList(bForces.vehicles, spec);
-            if (res.changed) {
-              nextBf.vehicles = res.list;
-              bfChanged = true;
-            }
-          }
-          if (Array.isArray(bForces.aircraft)) {
-            const res = upgradeUnitTokenList(bForces.aircraft, spec);
-            if (res.changed) {
-              nextBf.aircraft = res.list;
-              bfChanged = true;
-            }
-          }
-          if (bForces.troops) {
-            const res = upgradeUnitRecord(bForces.troops, spec);
-            if (res.changed) {
-              nextBf.troops = res.record;
-              bfChanged = true;
-            }
-          }
-          if (bForces.infantry) {
-            const res = upgradeUnitRecord(bForces.infantry, spec);
-            if (res.changed) {
-              nextBf.infantry = res.record;
-              bfChanged = true;
-            }
-          }
-          if (bfChanged) {
-            bForces = nextBf;
-            baseChanged = true;
-          }
-        }
-
-        if (!baseChanged) return base;
-        basesChanged = true;
-        return {
-          ...base,
-          ...(bBuildings !== base.buildings ? { buildings: bBuildings } : {}),
-          ...(bForces !== base.forces ? { forces: bForces } : {}),
-        };
-      });
-      if (basesChanged) nextBases = updatedBases;
-    }
+export function resolveRetrofitUpgradeRules(
+  def: Pick<RetrofitDef, 'target_unit' | 'host_building' | 'upgraded_name'> | null | undefined,
+): RetrofitUpgradeRule[] {
+  if (!def || !def.upgraded_name) return [];
+  const units = toNameList(def.target_unit);
+  const kind: RetrofitUpgradeRule['kind'] = units.length > 0 ? 'unit' : 'building';
+  const froms = units.length > 0 ? units : toNameList(def.host_building);
+  const upgraded = def.upgraded_name;
+  const rules: RetrofitUpgradeRule[] = [];
+  for (const from of froms) {
+    const to = (typeof upgraded === 'string' ? upgraded : (upgraded[from] ?? '')).trim();
+    if (to && canon(to) !== canon(from)) rules.push({ kind, from, to });
   }
-
-  if (nextForces === state.forces && nextBases === state.bases) return state;
-  return {
-    ...state,
-    ...(nextForces !== state.forces ? { forces: nextForces } : {}),
-    ...(nextBases !== state.bases ? { bases: nextBases } : {}),
-  };
+  return rules;
 }
-

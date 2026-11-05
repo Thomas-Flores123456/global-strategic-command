@@ -2,9 +2,9 @@
  * researchCompute：科研算力聚合（纯函数，零 store / 零解析协议）
  *
  * 口径（20 号裁决·静态口径）：
- * 1. 供给＝所有在役（status!=='废弃'）基地中、已建成（state!=='建造中'）建筑的
- *    outputs.virtual.compute（tflops/tops）逐建筑汇总；停机/受损建筑仍计入供给
- *    （供给面按名义容量口径，工况惩罚属实时引擎心事，不在此模块推算）；
+ * 1. 供给＝所有可用（非废弃/失守）基地中、运转建筑的
+ *    outputs.virtual.compute（tflops/tops）逐建筑汇总；建造中/停机/受损/被毁等非运转建筑不计入
+ *    （状态集合与 researchSlots.INACTIVE_RESEARCH_BUILDING_STATES 同源）；
  * 2. 消耗＝在研（type==='研究' && status!=='queued'）队列项在 catalog 中的 workload；
  * 3. 建筑/研究名匹配：先精确，再收窄 includes（唯一命中才认，防止「超算中心」误中「量子超算中心」）；
  * 4. 缺口仅展示，不拦截；无算力建筑时 sources 为空，由 UI 降级提示。
@@ -12,10 +12,16 @@
  * 裁决基线：不含 C1–C5 ×1.7 加速折算（那是运行引擎的事，面板只报静态名义值）。
  */
 
+import { INACTIVE_RESEARCH_BUILDING_STATES } from './researchSlots';
+import { inferDefaultResearchComputeWorkload } from '../../中控悬浮窗/models/worldbookCatalogHelpers';
+
 export interface ComputeBuildingLike {
   name: string;
   /** 在场口径与 researchSlots.anchorPresent 对齐：建造中不计入 */
   state?: string;
+  compute?: { tflops?: number; tops?: number };
+  research_accel?: number;
+  research_lines?: readonly string[];
 }
 
 export interface ComputeBaseLike {
@@ -28,16 +34,23 @@ export interface ComputeBaseLike {
 export interface ComputeCatalogBuilding {
   id: string;
   name?: string;
+  research_accel?: number;
+  research_lines?: readonly string[];
   outputs?: { virtual?: { compute?: { tflops?: number; tops?: number } } };
 }
 
 export interface WorkloadLike {
   tflops?: number;
   tops?: number;
+  days?: number;
+  min_days?: number;
 }
 
 export interface ComputeCatalogResearch {
   name: string;
+  cost?: number;
+  tier?: number;
+  line?: string;
   workload?: WorkloadLike;
 }
 
@@ -53,6 +66,8 @@ export interface ComputeSource {
   building: string;
   tflops: number;
   tops: number;
+  researchAccel?: number;
+  researchLines?: readonly string[];
 }
 
 export interface ComputeUsageRow {
@@ -91,7 +106,10 @@ function matchCatalogBuilding(name: string, catalog: ReadonlyArray<ComputeCatalo
   return hits.length === 1 ? hits[0] : undefined;
 }
 
-/** 供给侧：在役基地已建成建筑的 compute 汇总 */
+/** 非运转建筑状态与研究槽/协议锚点同源（G3-10） */
+const INACTIVE_COMPUTE_BUILDING_STATES = INACTIVE_RESEARCH_BUILDING_STATES;
+
+/** 供给侧：在役基地已建成建筑的 compute（及非标科研加速设施）汇总 */
 export function aggregateCompute(
   bases: ReadonlyArray<ComputeBaseLike>,
   catalogBuildings: ReadonlyArray<ComputeCatalogBuilding>,
@@ -100,23 +118,59 @@ export function aggregateCompute(
   for (const base of bases) {
     if (base.status === '废弃' || base.status === '失守') continue;
     for (const b of base.buildings ?? []) {
-      if ((b.state ?? '运转') !== '运转') continue;
+      const st = (b.state ?? '运转').trim();
+      if (st !== '运转' && INACTIVE_COMPUTE_BUILDING_STATES.has(st)) continue;
       const entry = matchCatalogBuilding(b.name, catalogBuildings);
-      const compute = entry?.outputs?.virtual?.compute;
-      if (!compute) continue;
-      const tflops = compute.tflops ?? 0;
-      const tops = compute.tops ?? 0;
-      if (tflops === 0 && tops === 0) continue;
+      const directCompute = b.compute;
+      const catCompute = entry?.outputs?.virtual?.compute;
+      const rawTflops =
+        typeof directCompute?.tflops === 'number' && Number.isFinite(directCompute.tflops) && directCompute.tflops > 0
+          ? directCompute.tflops
+          : (catCompute?.tflops ?? 0);
+      const rawTops =
+        typeof directCompute?.tops === 'number' && Number.isFinite(directCompute.tops) && directCompute.tops > 0
+          ? directCompute.tops
+          : (catCompute?.tops ?? 0);
+      const tflops = Math.max(0, rawTflops);
+      const tops = Math.max(0, rawTops);
+      const rawAccel =
+        typeof b.research_accel === 'number' && Number.isFinite(b.research_accel) && b.research_accel > 0
+          ? b.research_accel
+          : typeof entry?.research_accel === 'number' && Number.isFinite(entry.research_accel) && entry.research_accel > 0
+            ? entry.research_accel
+            : 0;
+      const researchLines =
+        Array.isArray(b.research_lines) && b.research_lines.length > 0
+          ? b.research_lines
+          : entry?.research_lines;
+      if (tflops === 0 && tops === 0 && rawAccel <= 0) continue;
       sources.push({
         baseId: base.id ?? '',
         baseName: base.name ?? '',
         building: b.name,
         tflops,
         tops,
+        ...(rawAccel > 0 ? { researchAccel: Math.min(0.35, rawAccel) } : {}),
+        ...(researchLines && researchLines.length > 0 ? { researchLines } : {}),
       });
     }
   }
   return sources;
+}
+
+function inferFallbackResearchCompute(r: ComputeCatalogResearch | undefined): { tflops: number; tops: number } | null {
+  if (!r) return null;
+  const wl = r.workload;
+  if ((wl?.tflops ?? 0) > 0 || (wl?.tops ?? 0) > 0) {
+    return { tflops: wl?.tflops ?? 0, tops: wl?.tops ?? 0 };
+  }
+  const hasCatalogMeta =
+    (typeof r.cost === 'number' && r.cost > 0) ||
+    (typeof r.tier === 'number' && r.tier > 0) ||
+    (typeof r.line === 'string' && r.line.trim().length > 0) ||
+    (typeof wl?.days === 'number' && wl.days > 0);
+  if (!hasCatalogMeta) return null;
+  return inferDefaultResearchComputeWorkload(r.cost, r.tier, r.line, r.name);
 }
 
 /** 消耗侧：在研研究项的 workload 汇总；未声明 workload 者计 0 但计入 undeclared */
@@ -130,12 +184,12 @@ export function computeUsage(
     if (q.type !== '研究') continue;
     if (q.status === 'queued') continue;
     const r = byName.get(q.item);
-    const wl = r?.workload;
+    const comp = inferFallbackResearchCompute(r);
     rows.push({
       item: q.item,
-      tflops: wl?.tflops ?? 0,
-      tops: wl?.tops ?? 0,
-      declared: wl !== undefined && ((wl.tflops ?? 0) > 0 || (wl.tops ?? 0) > 0),
+      tflops: comp?.tflops ?? 0,
+      tops: comp?.tops ?? 0,
+      declared: comp !== null && (comp.tflops > 0 || comp.tops > 0),
     });
   }
   return rows;

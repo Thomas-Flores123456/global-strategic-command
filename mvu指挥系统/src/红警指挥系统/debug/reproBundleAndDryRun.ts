@@ -282,7 +282,7 @@ export function runDryRunPipeline(input: DryRunPipelineInput): DryRunPipelineRes
       if (issue) allIssues.push(issue);
     }
     if (overrunCount === 0) {
-      const syncedAfterReconcile = syncProjects(s3Working);
+      const syncedAfterReconcile = syncProjects(s3Working, catalog?.retrofits ?? []);
       s3Working = syncedAfterReconcile.next;
       for (const ev of syncedAfterReconcile.events) {
         allEvents.push({

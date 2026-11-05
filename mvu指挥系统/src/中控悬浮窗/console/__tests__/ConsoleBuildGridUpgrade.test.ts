@@ -109,6 +109,10 @@ describe('FD-22 Track C (BLD-MOD-GRID-01): 右侧建造/生产面板纯挂件过
   });
 
   it('3. 生产面板现代化直产切换：解锁对应改装科技后自动切换为 upgraded_name 并标记现代改', () => {
+    const RETROFITS = [
+      { name: 'M1A2 SEPv3灰熊混动改装工程', research: 'M1A2 SEPv3灰熊混动改装包', target_unit: 'M1A1灰熊主战坦克', upgraded_name: 'M1A2 SEPv3混动灰熊主战坦克' },
+      { name: '天启坦克现代改装套件工程', research: '天启坦克现代改装套件研发', target_unit: '天启重型坦克', upgraded_name: '天启决战型重型坦克' },
+    ];
     const snapLocked = Schema.parse({
       tech: { done: ['复合装甲与主战坦克工程'] },
     });
@@ -116,6 +120,7 @@ describe('FD-22 Track C (BLD-MOD-GRID-01): 右侧建造/生产面板纯挂件过
       cleanName: 'M1A1灰熊主战坦克',
       rawName: 'M1A1灰熊主战坦克（量产体）',
       snapshot: snapLocked,
+      catalogRetrofits: RETROFITS,
     });
     expect(lockedRes.isModernized).toBe(false);
     expect(lockedRes.displayName).toBe('M1A1灰熊主战坦克');
@@ -127,6 +132,7 @@ describe('FD-22 Track C (BLD-MOD-GRID-01): 右侧建造/生产面板纯挂件过
       cleanName: 'M1A1灰熊主战坦克',
       rawName: 'M1A1灰熊主战坦克（量产体）',
       snapshot: snapUnlocked,
+      catalogRetrofits: RETROFITS,
     });
     expect(m1Res.isModernized).toBe(true);
     expect(m1Res.displayName).toBe('M1A2 SEPv3混动灰熊主战坦克');
@@ -137,6 +143,7 @@ describe('FD-22 Track C (BLD-MOD-GRID-01): 右侧建造/生产面板纯挂件过
       cleanName: '天启重型坦克',
       rawName: '天启重型坦克（量产体）',
       snapshot: snapUnlocked,
+      catalogRetrofits: RETROFITS,
     });
     expect(apocRes.isModernized).toBe(true);
     expect(apocRes.displayName).toBe('天启决战型重型坦克');
@@ -181,6 +188,9 @@ describe('FD-22 Track C (BLD-MOD-GRID-01): 右侧建造/生产面板纯挂件过
       rawName: 'M1A1灰熊主战坦克（量产体）',
       snapshot: snap,
       precomputedCompletedSet: precomputedSet,
+      catalogRetrofits: [
+        { name: 'M1A2 SEPv3灰熊混动改装工程', research: 'M1A2 SEPv3灰熊混动改装包', target_unit: 'M1A1灰熊主战坦克', upgraded_name: 'M1A2 SEPv3混动灰熊主战坦克' },
+      ],
     });
     expect(resWithPrecomputed.isModernized).toBe(true);
     expect(resWithPrecomputed.displayName).toBe('M1A2 SEPv3混动灰熊主战坦克');

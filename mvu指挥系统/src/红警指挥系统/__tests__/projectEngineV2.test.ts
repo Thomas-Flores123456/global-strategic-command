@@ -801,7 +801,7 @@ describe('⑥ D-TH-1 findProjectIndex（同 id 多实例不再劫持指令）', 
   it('FIX-P1-02 / FIX-P1-03：V2 工程支持战略协议前置、暂停模块释放单槽 eng.orbital 供其他模块注资、恢复时复验槽位容量', () => {
     const defWithProto: ProjectV2Def = {
       ...V2DEF,
-      requirements: { research: '高空无人侦察协定', building: '航天发射中心' },
+      requirements: { research: '欧洲联合防务协议', building: '航天发射中心' },
       modules: [
         { id: 'core', name: '核心舱', cost: 500, workload: { days: 3 }, prereqs: [] },
         { id: 'solar', name: '太阳能翼', cost: 400, workload: { days: 2 }, prereqs: [] },
@@ -809,7 +809,7 @@ describe('⑥ D-TH-1 findProjectIndex（同 id 多实例不再劫持指令）', 
     };
     const s0 = mkState({
       tech: { done: [] },
-      protocols: [{ ref: 'all.protocol.ra3.high_altitude_uav_pact', status: 'active' }],
+      protocols: [{ ref: 'all.research.t1.european_defense_agreement', status: 'active' }],
     } as Partial<TestState>);
     const started = startProjectV2(s0, defWithProto, { base: 'beipo' });
     expect(started.ok).toBe(true);

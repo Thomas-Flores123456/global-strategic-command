@@ -623,6 +623,33 @@ describe('PRT-EVT-01 · 验收 ②：settleFloor 协议结算齿轮端到端（�
     // 4.0 + 0.10(总部日产) - 1.0(单次实验) = 3.10
     expect(settledNoDouble.data.protocol_points).toBeCloseTo(3.1, 4);
   });
+
+  it('G3-07 / G3-22：目录未收录的协议声明被拒绝，不新建实例、不扣点', () => {
+    const catalog = mkCatalog([PROTO_SOV_T1_BUNKER]);
+    const state = mkStat({ protocol_points: 5, protocols: [] });
+    const settled = settleFloor(state, state, '<timePast>0 D 0 H 0 M</timePast>', {
+      catalog,
+      eventDeclarations: [
+        {
+          verb: '协议排程',
+          kind: 'protocol',
+          protocolAction: 'schedule',
+          protocolId: 'fake.protocol.unknown',
+          protocolName: '伪造协议',
+          scheduleAction: '加入候列',
+        },
+        {
+          verb: '协议实验',
+          kind: 'protocol',
+          protocolAction: 'experiment',
+          protocolId: 'fake.protocol.unknown',
+          protocolName: '伪造协议',
+        },
+      ] as never,
+    });
+    expect(settled.data.protocols?.some(p => p.ref === 'fake.protocol.unknown') ?? false).toBe(false);
+    expect(settled.data.protocol_points).toBe(5);
+  });
 });
 
 /* ═══════════════ 验收 ③：Swipe 重解析与同种子重算 100% 幂等断言 ═══════════════ */

@@ -170,13 +170,13 @@ describe('① 立项（§3.8 立项令：科技门＋容量门＋首期注资＋
 /* ═══════════════ ② 纳米开工门：不足→阶段不启动、工程不暴毙、不抵扣 ═══════════════ */
 
 describe('② 纳米开工门（D8b/§3.5：门槛非抵扣）', () => {
-  it('库存够首期不够次期：首期过门且库存分文未扣；次期注资 nanites_gate，工程保持在建、阶段未启动', () => {
-    // 可用纳米 25：首期需求 20 过门，次期需求 30 被门拦下
+  it('库存够首期不够次期：首期过门并实扣纳米；次期注资 nanites_gate，工程保持在建、阶段未启动', () => {
+    // 可用纳米 25：首期需求 20 过门并扣减→余 5，次期需求 30 被门拦下
     const state = mkState({ economy: { credits: 5000, resources: { nanites: { 标准纳米工料: 25 } } } });
     const started = startProject(state, DEF, { base: 'beipo' });
     if (!started.ok) throw new Error('setup failed');
-    // 开工门不抵扣：库存口径不变（D8b）
-    expect(availableNanites(started.next)).toBe(25);
+    // G4-20：V1 与 V2 一致，开工即扣纳米
+    expect(availableNanites(started.next)).toBe(5);
 
     // 首期完工（模拟投影项 done → 里程碑回写），再发次期注资令
     const s1 = syncProjects(markQueueDone(started.next as TestState, 0)).next as TestState;
@@ -187,7 +187,7 @@ describe('② 纳米开工门（D8b/§3.5：门槛非抵扣）', () => {
     if (r.ok) return;
     expect(r.reason).toBe('nanites_gate');
     expect(r.message).toContain('开工门');
-    expect(r.message).toContain('门槛不是抵扣');
+    expect(r.message).toContain('备齐纳米后重发注资令');
     // 工程不暴毙：保持在建、阶段未启动、投影队列不增、资金未扣
     expect(s1.projects![0].status).toBe('在建');
     expect(s1.projects![0].phases[1]).toEqual({ idx: 1, name: '总装与调校', status: '未启动', queue_index: null });
@@ -334,6 +334,8 @@ describe('⑤ 里程碑回写（§3.3；D13-A outcome mark 只记账不写 codex
     // 第二期注资 → done → 全完工：工程完工＋outcome mark
     const s2 = startPhase(s1, started.projectId, 1, DEF);
     if (!s2.ok) throw new Error('setup failed: ' + s2.message);
+    // G4-20：次期注资实扣纳米（100 − 首期 20 − 次期 30）
+    expect(availableNanites(s2.next)).toBe(50);
     expect((s2.next as TestState).queues[1]).toMatchObject({
       item: '灰熊坦克现代化改装工程·总装与调校',
       total_minutes: 4 * 1440,
@@ -433,6 +435,15 @@ describe('暂停/恢复（§3.3：投影项 hold 语义透传＋phase.status 同
     expect(rState.projects![0].status).toBe('在建');
     expect(rState.projects![0].phases[0].status).toBe('进行中');
     expect(rState.queues[0]).toMatchObject({ status: 'queued', hold: false, spent_minutes: 500 });
+
+    // G4-19：暂停期间槽位被其他工程占满 → 拒恢复（no_slot）
+    const occupied = {
+      ...pState,
+      queues: [...pState.queues, { ...pState.queues[0], item: '其他工程·阶段', hold: false, status: 'active' as const }],
+    };
+    const blocked = resumeProject(occupied, started.projectId);
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) expect(blocked.reason).toBe('no_slot');
   });
 
   it('状态门：在建才能暂停、暂停才能恢复（bad_status）', () => {

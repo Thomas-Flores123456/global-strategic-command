@@ -875,8 +875,13 @@ export function schedulePanelModel(
     const tasks = researchTasksByKey.get(view.laneKey) ?? [];
     const activeItems = tasks.filter(t => t.task.status === 'active').map(t => t.qView.item);
     const queuedCount = tasks.filter(t => t.task.status === 'queued' || t.task.status === 'held').length;
-    const rawTxns = buildTxnRows(tasks, effFor);
-    const slotEff = rawTxns.length > 0 && rawTxns[0].effectiveAccel !== undefined ? rawTxns[0].effectiveAccel : 1;
+    const slotBaseMult = view.accelMultiplier ?? 1;
+    const slotEffFor = (t: TransactionItem) => effFor(t) * slotBaseMult;
+    const rawTxns = buildTxnRows(tasks, slotEffFor);
+    const slotEff =
+      rawTxns.length > 0 && rawTxns[0].effectiveAccel !== undefined
+        ? Math.max(slotBaseMult, rawTxns[0].effectiveAccel)
+        : slotBaseMult;
     const trackResult = scheduleLaneSubTracks(rawTxns, limit, slotEff, clock, draftTasks);
     if (trackResult.maxEndOffsetMin > maxEndOffsetMin) {
       maxEndOffsetMin = trackResult.maxEndOffsetMin;

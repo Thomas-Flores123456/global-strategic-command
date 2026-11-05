@@ -332,6 +332,10 @@ export interface WorldbookBuildingData extends WorldbookDataBase {
   outputs?: EntityOutputs;
   storage?: EntityStorage;
   recipes?: ProductionRecipe[];
+  /** 非自身体系/特许科研建筑提供的科研加速增量（0.0 ~ 0.35，即 +0% ~ +35%） */
+  research_accel?: number;
+  /** 非自身体系科研建筑适用的科研领域/序列（缺省或含“全领域/通用”代表全槽加速） */
+  research_lines?: string[];
 }
 
 export const WorldbookBuildingDataSchema = z
@@ -369,6 +373,8 @@ export const WorldbookBuildingDataSchema = z
     outputs: EntityOutputsSchema.optional(),
     storage: EntityStorageSchema.optional(),
     recipes: z.array(ProductionRecipeSchema).optional(),
+    research_accel: z.number().min(0).max(0.5).optional(),
+    research_lines: z.array(z.string()).optional(),
     requirements: z.any().optional(),
   })
   .passthrough();
@@ -1201,6 +1207,34 @@ export function inferDefaultResearchDuration(
 }
 
 /**
+ * 当科技词条未显式声明 workload.tflops / workload.tops 时，按 Tier、经费与领域推导标准科研算力占用
+ */
+export function inferDefaultResearchComputeWorkload(
+  cost?: unknown,
+  tier?: unknown,
+  line?: unknown,
+  name?: unknown,
+): { tflops: number; tops: number } {
+  const c = typeof cost === 'number' && Number.isFinite(cost) && cost > 0 ? cost : 300;
+  const t = tier === 3 ? 3 : tier === 2 ? 2 : 1;
+  const text = `${typeof line === 'string' ? line : ''} ${typeof name === 'string' ? name : ''}`;
+  const isAiOrMechaOrElec = /机娘|神经|心灵|脑波|意识|电子|信息|态势|无人|自动化|火控|制导|通信|光学/.test(text);
+  if (t === 1) {
+    if (c <= 250) return isAiOrMechaOrElec ? { tflops: 8, tops: 10 } : { tflops: 8, tops: 6 };
+    if (c <= 400) return isAiOrMechaOrElec ? { tflops: 10, tops: 14 } : { tflops: 12, tops: 8 };
+    if (c <= 600) return isAiOrMechaOrElec ? { tflops: 14, tops: 18 } : { tflops: 16, tops: 12 };
+    return isAiOrMechaOrElec ? { tflops: 18, tops: 22 } : { tflops: 20, tops: 15 };
+  }
+  if (t === 2) {
+    if (c <= 800) return isAiOrMechaOrElec ? { tflops: 22, tops: 28 } : { tflops: 25, tops: 16 };
+    if (c <= 1200) return isAiOrMechaOrElec ? { tflops: 30, tops: 36 } : { tflops: 35, tops: 22 };
+    return isAiOrMechaOrElec ? { tflops: 40, tops: 45 } : { tflops: 45, tops: 30 };
+  }
+  if (c <= 1800) return isAiOrMechaOrElec ? { tflops: 55, tops: 65 } : { tflops: 65, tops: 40 };
+  return isAiOrMechaOrElec ? { tflops: 75, tops: 85 } : { tflops: 85, tops: 55 };
+}
+
+/**
  * 预处理原始数据对象，保证 id 与 name 双向对称填充，以及 research 工期字段双向互推
  */
 export function preprocessRawData(raw: unknown): unknown {
@@ -1251,6 +1285,21 @@ export function preprocessRawData(raw: unknown): unknown {
         ...(rawWl ?? {}),
         days: inferred.days,
         min_days: hasMinDays ? rawWl!.min_days : inferred.min_days,
+      };
+    }
+
+    const nextWl =
+      typeof obj.workload === 'object' && obj.workload !== null && !Array.isArray(obj.workload)
+        ? (obj.workload as Record<string, unknown>)
+        : {};
+    const hasTflops = typeof nextWl.tflops === 'number' && Number.isFinite(nextWl.tflops) && nextWl.tflops > 0;
+    const hasTops = typeof nextWl.tops === 'number' && Number.isFinite(nextWl.tops) && nextWl.tops > 0;
+    if (!hasTflops && !hasTops) {
+      const inferredComp = inferDefaultResearchComputeWorkload(obj.cost, obj.tier, obj.line, obj.name);
+      obj.workload = {
+        ...nextWl,
+        tflops: inferredComp.tflops,
+        tops: inferredComp.tops,
       };
     }
   }

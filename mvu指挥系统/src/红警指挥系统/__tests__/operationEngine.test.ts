@@ -176,4 +176,63 @@ describe('FIX-P1-04 · operationEngine 资金链电网恢复受挫态保留与�
     expect(restored.chains[0].reason).toBe('长期矿石供货合同');
     expect(restored.events[0].kind).toBe('grid_restore');
   });
+
+  it('10 [叙事据点同义与子串建筑匹配]：依赖「行政调度楼」可匹配「水泥厂行政调度楼与预热塔观察哨」，依赖「驿站旅馆」可匹配「三十八号道班客栈（地面伪装驿站与川菜馆）」', () => {
+    const escortChain = mkChain({
+      id: 'chain_aldecados_escort',
+      name: '阿尔达纳氏族恶土东段货运专线常态化武装护航（每周三趟）',
+      rate_daily: 1200,
+      status: 'distressed',
+      eff: 0,
+      reason: '因基地电网断供（依赖建筑「行政调度楼」受损/停机），依赖设施停机停产[原状态:active,eff:1]',
+      deps: { base_id: 'base_3', buildings: ['行政调度楼'], world_resource: '5号公路东段货运走廊' },
+    });
+    const innChain = mkChain({
+      id: 'chain_mile38_inn_repair',
+      name: '三十八号道班客栈与战地汽车维修所商业营收',
+      rate_daily: 500,
+      status: 'distressed',
+      eff: 0,
+      reason:
+        '因基地电网断供（依赖建筑「驿站旅馆」受损/停机），依赖设施停机停产（原：排除38号矿坑外围碉堡施工引发的B相过载跳闸，恢复道班客栈与战地维修所正常供电营业）[原状态:active,eff:1]',
+      deps: { base_id: 'base_2', buildings: ['战地维修所', '驿站旅馆'], world_resource: '里程碑38号公路节点' },
+    });
+
+    const bases: BasePowerView[] = [
+      {
+        id: 'base_2',
+        name: '三十八号矿坑前哨（道班客栈）',
+        power: { gen: 200, use: 60 },
+        buildings: [
+          { name: '发电厂', state: '运转' },
+          { name: '战地维修所', state: '运转' },
+          { name: '三十八号道班客栈（地面伪装驿站与川菜馆）', state: '运转' },
+        ],
+      },
+      {
+        id: 'base_3',
+        name: '罗基里奇水泥厂总部（Corp-Bud）',
+        power: { gen: 200, use: 5 },
+        buildings: [
+          { name: '发电厂', state: '运转' },
+          { name: '水泥厂行政调度楼与预热塔观察哨', state: '运转' },
+        ],
+      },
+    ];
+
+    const res = applyGridConstraints({ chains: [escortChain, innChain], bases, nowDay: 193 });
+    expect(res.chains[0]).toMatchObject({
+      id: 'chain_aldecados_escort',
+      status: 'active',
+      eff: 1,
+      reason: GRID_RESTORE_NOTE,
+    });
+    expect(res.chains[1]).toMatchObject({
+      id: 'chain_mile38_inn_repair',
+      status: 'active',
+      eff: 1,
+      reason: '排除38号矿坑外围碉堡施工引发的B相过载跳闸，恢复道班客栈与战地维修所正常供电营业',
+    });
+  });
 });
+

@@ -236,8 +236,7 @@ import type { TechTreeObserverView } from '../../红警指挥系统/engines/engO
 import PanelTech from '../../红警指挥系统/ui/panels/PanelTech.vue';
 import { filterDynamicCodexResearches } from '../../红警指挥系统/ui/panels/panelTechHelpers';
 import type { ProtocolDefinitionLike } from '../../红警指挥系统/engines/protocolEngine';
-import { DEFAULT_PROTOCOL_CATALOG as BASE_DEFAULT_PROTOCOL_CATALOG, mergeDefaultProtocolCatalog } from '../../红警指挥系统/engines/protocolCatalogIndex';
-import { DEFAULT_YURI_PROTOCOL_CATALOG } from '../panels/panelProtocolHelpers';
+import { FULL_DEFAULT_PROTOCOL_CATALOG, mergeDefaultProtocolCatalog } from '../../红警指挥系统/engines/protocolCatalogIndex';
 import type { Schema } from '../../红警指挥系统/core/schema';
 import { useDataStore } from '../../红警指挥系统/composables/store';
 import { useCatalogStore } from '../../红警指挥系统/composables/useCatalog';
@@ -245,6 +244,11 @@ import { isDebugUnlockAllFactionsActive } from '../../红警指挥系统/composa
 import { useTacticalModalMotion } from '../../红警指挥系统/ui/motion/useGsapMotion';
 import { countAutoQueuedProtocols, countExperimentableProtocols } from '../models/protocolCommands';
 import { inferDefaultBuildingCompute } from '../models/worldbookCatalogHelpers';
+import {
+  parseBuildingCompute,
+  parseBuildingResearchAccel,
+  parseBuildingResearchLines,
+} from '../../红警指挥系统/parse/parseDomainAppliers';
 import type {
   ProtocolCommandStagedEvent,
   ProtocolCommandStateView,
@@ -442,10 +446,72 @@ const catalogAllResearches = computed(() => {
   const dyn = source.dynamicCatalog?.researches ?? [];
   return dyn.length > 0 ? [...(catalog.researches ?? []), ...dyn] : (catalog.researches ?? []);
 });
+function extractExpansionBuildingSpecMap(
+  pendingExpansions: ReadonlyArray<{
+    name?: string;
+    kind?: string;
+    params?: Readonly<Record<string, unknown>>;
+  }> | undefined,
+): Map<
+  string,
+  {
+    compute?: { tflops: number; tops: number };
+    research_accel?: number;
+    research_lines?: string[];
+  }
+> {
+  const map = new Map<
+    string,
+    {
+      compute?: { tflops: number; tops: number };
+      research_accel?: number;
+      research_lines?: string[];
+    }
+  >();
+  for (const exp of pendingExpansions ?? []) {
+    if (!exp || exp.kind !== '建筑' || typeof exp.name !== 'string' || !exp.name.trim()) continue;
+    const p = exp.params ?? {};
+    const accel = parseBuildingResearchAccel(
+      p['科研加速'] ?? p['研发加速'] ?? p['研究加速'] ?? p['科研加成'] ?? p['research_accel'],
+    );
+    const lines = parseBuildingResearchLines(
+      p['加速领域'] ?? p['科研领域'] ?? p['研究领域'] ?? p['研究方向'] ?? p['科技线'] ?? p['research_lines'],
+    );
+    const compute = parseBuildingCompute(
+      p['算力'] ?? p['算力产出'] ?? p['并网算力'] ?? p['科研算力'] ?? p['compute'],
+      p['tflops'] ?? p['TFLOPS'],
+      p['tops'] ?? p['TOPS'],
+    );
+    if (accel !== undefined || lines !== undefined || compute !== undefined) {
+      map.set(exp.name.trim(), {
+        ...(compute ? { compute } : {}),
+        ...(accel !== undefined ? { research_accel: accel } : {}),
+        ...(lines ? { research_lines: lines } : {}),
+      });
+    }
+  }
+  return map;
+}
+
 function ensureComputeFacilitiesInCatalog(
   rawBases: ReadonlyArray<{
-    buildings?: ReadonlyArray<{ name: string; state?: string; status?: string }>;
+    buildings?: ReadonlyArray<{
+      name: string;
+      state?: string;
+      status?: string;
+      compute?: { tflops?: number; tops?: number };
+      research_accel?: number;
+      research_lines?: readonly string[];
+    }>;
   }> | undefined,
+  expansionSpecs?: ReadonlyMap<
+    string,
+    {
+      compute?: { tflops: number; tops: number };
+      research_accel?: number;
+      research_lines?: string[];
+    }
+  >,
 ): void {
   const catSource = catalog as unknown as {
     buildings?: Array<Record<string, unknown>>;
@@ -480,37 +546,65 @@ function ensureComputeFacilitiesInCatalog(
     for (const base of rawBases ?? []) {
       for (const b of base?.buildings ?? []) {
         if (!b?.name) continue;
-        const bComp = inferDefaultBuildingCompute(b.name);
-        if (!bComp) continue;
+        const expSpec = expansionSpecs?.get(b.name.trim());
+        const directComp =
+          b.compute && ((b.compute.tflops ?? 0) > 0 || (b.compute.tops ?? 0) > 0)
+            ? { tflops: b.compute.tflops ?? 0, tops: b.compute.tops ?? 0 }
+            : expSpec?.compute;
+        const bComp = directComp ?? inferDefaultBuildingCompute(b.name);
+        const bAccel =
+          typeof b.research_accel === 'number' && b.research_accel > 0
+            ? b.research_accel
+            : expSpec?.research_accel;
+        const bLines =
+          Array.isArray(b.research_lines) && b.research_lines.length > 0
+            ? b.research_lines
+            : expSpec?.research_lines;
+        if (!bComp && !bAccel) continue;
         const found = pool.find(c => (c.name ?? c.id) === b.name || c.id === b.name);
         if (found) {
-          const existingOut = found.outputs as
-            | { virtual?: { compute?: { tflops?: number; tops?: number } } }
-            | undefined;
-          if (!existingOut?.virtual?.compute) {
-            found.outputs = {
-              ...(existingOut ?? {}),
-              virtual: {
-                ...(existingOut?.virtual ?? {}),
-                compute: bComp,
-              },
-            };
+          if (bComp) {
+            const existingOut = found.outputs as
+              | { virtual?: { compute?: { tflops?: number; tops?: number } } }
+              | undefined;
+            if (!existingOut?.virtual?.compute) {
+              found.outputs = {
+                ...(existingOut ?? {}),
+                virtual: {
+                  ...(existingOut?.virtual ?? {}),
+                  compute: bComp,
+                },
+              };
+            }
+          }
+          if (typeof bAccel === 'number' && bAccel > 0 && typeof found.research_accel !== 'number') {
+            found.research_accel = bAccel;
+          }
+          if (bLines && bLines.length > 0 && !Array.isArray(found.research_lines)) {
+            found.research_lines = [...bLines];
           }
         } else {
           pool.push({
             id: b.name,
             name: b.name,
-            cost: 2500,
-            power: 80,
+            cost: 0,
+            power: 30,
+            buildable: false,
             research: null,
             prereqs: [],
             need_buildings: [],
             desc: '',
-            outputs: {
-              virtual: {
-                compute: bComp,
-              },
-            },
+            ...(typeof bAccel === 'number' && bAccel > 0 ? { research_accel: bAccel } : {}),
+            ...(bLines && bLines.length > 0 ? { research_lines: [...bLines] } : {}),
+            ...(bComp
+              ? {
+                  outputs: {
+                    virtual: {
+                      compute: bComp,
+                    },
+                  },
+                }
+              : {}),
           });
         }
       }
@@ -522,10 +616,28 @@ const activeSnapshot = computed(() => {
   const raw = activeState.value;
   if (!raw) return raw;
 
+  const expansionSpecs = extractExpansionBuildingSpecMap(
+    (raw as unknown as {
+      pending_expansions?: ReadonlyArray<{
+        name?: string;
+        kind?: string;
+        params?: Readonly<Record<string, unknown>>;
+      }>;
+    }).pending_expansions,
+  );
+
   ensureComputeFacilitiesInCatalog(
     raw.bases as ReadonlyArray<{
-      buildings?: ReadonlyArray<{ name: string; state?: string; status?: string }>;
+      buildings?: ReadonlyArray<{
+        name: string;
+        state?: string;
+        status?: string;
+        compute?: { tflops?: number; tops?: number };
+        research_accel?: number;
+        research_lines?: readonly string[];
+      }>;
     }>,
+    expansionSpecs,
   );
 
   let basesMutated = false;
@@ -534,7 +646,14 @@ const activeSnapshot = computed(() => {
         if (!Array.isArray(base.buildings)) return base;
         let bldMutated = false;
         const nextBuildings = base.buildings.map(b => {
-          const bRec = b as unknown as { name: string; state?: string; status?: string };
+          const bRec = b as unknown as {
+            name: string;
+            state?: string;
+            status?: string;
+            compute?: { tflops: number; tops: number };
+            research_accel?: number;
+            research_lines?: string[];
+          };
           const rawState = typeof bRec.state === 'string' ? bRec.state.trim() : '';
           const rawStatus = typeof bRec.status === 'string' ? bRec.status.trim() : '';
           const effectiveState = rawState || rawStatus || '运转';
@@ -546,11 +665,21 @@ const activeSnapshot = computed(() => {
             effectiveState === '在线'
               ? '运转'
               : effectiveState;
-          if (bRec.state !== normalizedState) {
+          const expSpec = expansionSpecs.get(bRec.name?.trim() ?? '');
+          const needStatePatch = bRec.state !== normalizedState;
+          const needAccelPatch =
+            expSpec?.research_accel !== undefined && typeof bRec.research_accel !== 'number';
+          const needLinesPatch =
+            expSpec?.research_lines !== undefined && !Array.isArray(bRec.research_lines);
+          const needComputePatch = expSpec?.compute !== undefined && !bRec.compute;
+          if (needStatePatch || needAccelPatch || needLinesPatch || needComputePatch) {
             bldMutated = true;
             return {
               ...b,
               state: normalizedState as typeof b.state,
+              ...(needAccelPatch ? { research_accel: expSpec!.research_accel } : {}),
+              ...(needLinesPatch ? { research_lines: expSpec!.research_lines } : {}),
+              ...(needComputePatch ? { compute: expSpec!.compute } : {}),
             };
           }
           return b;
@@ -733,10 +862,7 @@ function handleScheduleDispatch(payload: ProtocolScheduleDispatchEvent): void {
   emit('schedule-dispatch', payload);
 }
 
-const DEFAULT_PROTOCOL_CATALOG: readonly ProtocolDefinitionLike[] = [
-  ...BASE_DEFAULT_PROTOCOL_CATALOG,
-  ...DEFAULT_YURI_PROTOCOL_CATALOG,
-];
+const DEFAULT_PROTOCOL_CATALOG: readonly ProtocolDefinitionLike[] = FULL_DEFAULT_PROTOCOL_CATALOG;
 
 const mergedCatalogProtocols = computed<readonly ProtocolDefinitionLike[]>(() => {
   const source = catalog as unknown as {

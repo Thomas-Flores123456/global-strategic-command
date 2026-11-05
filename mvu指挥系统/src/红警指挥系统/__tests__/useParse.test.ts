@@ -4,6 +4,7 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import { Schema } from '../core/schema';
+import { getSwipeSlot, readTimelineLedger, resetMemoryTimelineLedgerForTest } from '../core/timelineLedger';
 import {
   buildAuthority,
   codexNamesOf,
@@ -404,7 +405,7 @@ describe('E3b 部署双槽接线（runParseFor：deployIndex 注入 → deployOr
       expect(await runParseFor(1)).toBe('parsed');
       const stat = await s.writtenStat();
       expect(stat.pending_deployments).toBeUndefined();
-      expect((stat.economy as { credits: number }).credits).toBe(100); // 常规增量不受接线影响
+      expect((stat.economy as { credits: number }).credits).not.toBe(100); // G7-01：真实 runParseFor 非首楼 <战况> 裸改资金被拦截
       expect((stat.forces as { vehicles: string[] }).vehicles).toContain(VEHICLE);
       expect(parseState.reports[0].events.some(e => e.message.includes('部署'))).toBe(false);
     } finally {
@@ -861,6 +862,8 @@ describe('G01-01 · runParseFor 串联 <排产计划>：拒绝/待批时不遗�
       expect(stat.economy.credits).toBe(200);
       expect(stat.economy.resources.nanites).toEqual({ 标准纳米工料: 30 });
     } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
       g.getChatMessages = saved.gcm;
       g.getVariables = saved.gv;
       g.updateVariablesWith = saved.uvw;
@@ -966,6 +969,10 @@ describe('G01-01 · runParseFor 串联 <排产计划>：拒绝/待批时不遗�
     const g = globalThis as Globals;
     const saved = { gcm: g.getChatMessages, gv: g.getVariables, uvw: g.updateVariablesWith, st: g.SillyTavern };
     let chatVars: Record<string, unknown> = {};
+    resetMemoryTimelineLedgerForTest();
+    let failWrite = false;
+    let drift = false;
+    let reads = 0;
     const msgStore: Record<number, Record<string, unknown>> = { 0: { stat_data: baseline } };
     const uvwMock = vi.fn(
       async (
@@ -977,13 +984,18 @@ describe('G01-01 · runParseFor 串联 <排产计划>：拒绝/待批时不遗�
           return chatVars;
         }
         const mid = opts?.message_id ?? 0;
+        if (failWrite && mid === 12) throw new Error('W2 stat_data write failed');
         msgStore[mid] = updater(msgStore[mid] ?? {});
         return msgStore[mid];
       },
     );
     g.getChatMessages = (id: number) => {
       if (id === 10) return [{ role: 'assistant', is_hidden: false, message: rawUnapproved, swipe_id: 0 }];
-      if (id === 11) return [{ role: 'assistant', is_hidden: false, message: rawApproved, swipe_id: 0 }];
+      if (id === 11 || id === 12 || id === 13) return [{ role: 'assistant', is_hidden: false,
+        message: id === 11 ? rawApproved : rawApproved
+          .replace('req-bug-live-02-approved', `req-w2-${id}`)
+          .replace('数量: 1', `数量: ${id - 10}`),
+        swipe_id: drift && id === 13 && ++reads > 1 ? 3 : 2 }];
       return [{ role: 'assistant', is_hidden: false, message: '<战况>\n</战况>', swipe_id: 0 }];
     };
     g.getVariables = (o: { type: string; message_id?: number }) =>
@@ -991,6 +1003,7 @@ describe('G01-01 · runParseFor 串联 <排产计划>：拒绝/待批时不遗�
     g.updateVariablesWith = uvwMock;
     delete g.SillyTavern;
 
+    const commitSpy = vi.spyOn(await import('../planning/planningReceipt'), 'commitPlanningIntent');
     try {
       const { runParseFor } = await import('../composables/useParse');
       expect(await runParseFor(10)).toBe('parsed');
@@ -1002,6 +1015,20 @@ describe('G01-01 · runParseFor 串联 <排产计划>：拒绝/待批时不遗�
       expect(await runParseFor(11)).toBe('parsed');
       const stat2 = msgStore[11].stat_data as import('../core/schema').StatData;
       expect(stat2.planning.latest_receipt?.status).toBe('committed');
+      const slot = getSwipeSlot(readTimelineLedger(), 11, 2)!;
+      expect(slot.textHash).toBe(hashText(rawApproved));
+      expect(slot.opLog).toMatchObject([{ kind: 'COMMIT_PLANNING', planId: 'req-bug-live-02-approved' }]);
+      expect(getSwipeSlot(readTimelineLedger(), 11, 0)?.opLog ?? []).toEqual([]);
+      failWrite = true;
+      await expect(runParseFor(12)).rejects.toThrow('W2 stat_data write failed');
+      expect(commitSpy.mock.results.at(-1)?.value).toMatchObject({ committed: true, receipt: { request_ref: 'req-w2-12' } });
+      expect(getSwipeSlot(readTimelineLedger(), 12, 2)?.opLog ?? []).toEqual([]);
+      failWrite = false;
+      drift = true;
+      vi.useFakeTimers();
+      expect(await runParseFor(13)).toBe('swipe-drifted');
+      expect(commitSpy.mock.results.at(-1)?.value).toMatchObject({ committed: true, receipt: { request_ref: 'req-w2-13' } });
+      expect(getSwipeSlot(readTimelineLedger(), 13, 2)?.opLog ?? []).toEqual([]);
       expect(stat2.queues).toHaveLength(2);
       expect(stat2.queues.map(q => ({ item: q.item, status: q.status, spent: q.spent_minutes }))).toEqual([
         { item: '战地急救学', status: 'active', spent: 0 },
@@ -1013,6 +1040,9 @@ describe('G01-01 · runParseFor 串联 <排产计划>：拒绝/待批时不遗�
       g.updateVariablesWith = saved.uvw;
       g.SillyTavern = saved.st;
       deploySnapshotSlot.override = undefined;
+      commitSpy.mockRestore();
+      if (vi.isFakeTimers()) vi.clearAllTimers();
+      vi.useRealTimers();
     }
   });
 });

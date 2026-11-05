@@ -102,6 +102,20 @@ describe('CMD-ENGINE-01: 联席参谋部结算引擎与终生唯一首发 MCV �
     expect(thirdLogs.some(l => l.includes('[防刷拦截]'))).toBe(true);
     expect(data.forces.vehicles).toEqual([]);
   });
+  it('G8-09/16/17：别名写入的 mcv_granted_factions 仍拦截二次发放；不污染浅拷贝快照的 girls；新发机娘带好感/服从初值', () => {
+    const data = createBaseStat();
+    data.command.mcv_granted_factions = ['苏联'];
+    const logs = applyFactionUnlockSettlement(data, [parseFactionUnlockPayload('阵营: 苏联')!]);
+    expect(logs.some(l => l.includes('[防刷拦截]'))).toBe(true);
+    expect(data.forces.vehicles).toEqual([]);
+
+    const prev = createBaseStat();
+    const shallow = { ...prev, command: { ...prev.command, unlocked_factions: [...prev.command.unlocked_factions], mcv_granted_factions: [] as string[] }, forces: { ...prev.forces, vehicles: [] as string[] } } as StatData;
+    applyFactionUnlockSettlement(shallow, [parseFactionUnlockPayload('阵营: 苏联')!]);
+    expect(prev.forces.girls).toEqual([]);
+    expect(shallow.forces.girls[0]).toMatchObject({ name: '喀秋莎', affection: 50, obedience: 50 });
+  });
+
 
   it('<事件> 副官指派 入账、人类副官日薪折算扣费、以及 15 日（21600 分钟）磨合期代价随 settleFloor 归零自动清除', () => {
     const raw = `

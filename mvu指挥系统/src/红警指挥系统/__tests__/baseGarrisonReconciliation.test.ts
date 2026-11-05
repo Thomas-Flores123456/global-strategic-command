@@ -337,7 +337,13 @@ describe('FD-37 PKG-C: 分基地产线入驻、母体扩建挂载与现代化改
       ],
     };
 
-    const synced = syncProjects(state);
+    const rf = (name: string, target_unit: string, upgraded_name: string) =>
+      ({ kind: 'retrofit' as const, name, research: 'x', grade: '中改' as const, desc: '', target_unit, upgraded_name });
+    const synced = syncProjects(state, [
+      rf('M1A2 SEPv3灰熊混动改装工程', 'M1A1灰熊主战坦克', 'M1A2 SEPv3混动灰熊主战坦克'),
+      rf('恐怖机器人拆解/磁锁双模改装工程', '恐怖机器人·拆解爆破型', '恐怖机器人·拆解/磁锁双模战备型'),
+      rf('赤星天锤3→6枚扩仓改装模块', '赤星天锤常规战略载荷', '赤星天锤常规战略载荷(6枚扩仓型)'),
+    ]);
     expect(synced.next.projects?.every(p => p.status === '完工')).toBe(true);
 
     // 全局 forces 原位升格并合并同名新键、删除旧键

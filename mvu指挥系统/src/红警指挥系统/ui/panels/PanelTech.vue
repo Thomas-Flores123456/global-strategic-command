@@ -90,6 +90,24 @@
                   class="flex-none"
                 />
                 <span class="truncate text-[12px] text-[var(--rac-hi)]">{{ formatSlotDisplayName(s.name) }}</span>
+                <span
+                  v-if="s.accelMultiplier && s.accelMultiplier > 1.001"
+                  class="num ob-num flex-none rounded-[2px] border px-1.5 py-0.2 text-[10.5px] font-semibold"
+                  :style="{
+                    color: 'var(--rac-ok)',
+                    borderColor: 'color-mix(in srgb, var(--rac-ok) 45%, transparent)',
+                    background: 'color-mix(in srgb, var(--rac-ok) 14%, transparent)',
+                  }"
+                  :title="
+                    s.accelSources?.length
+                      ? `科研加速来源：${s.accelSources.map(x => `${x.name} (+${Math.round(x.accel * 100)}%)`).join('、')}`
+                      : `科研加速 ${s.accelMultiplier.toFixed(2)}x`
+                  "
+                  data-slot-accel-badge
+                  :data-slot-accel="s.accelMultiplier.toFixed(2)"
+                >
+                  ⚡ +{{ Math.round((s.accelMultiplier - 1) * 100) }}% ({{ s.accelMultiplier.toFixed(2) }}x)
+                </span>
                 <span v-if="!s.unlocked" class="num ob-num flex-none truncate text-[11px] text-[var(--rac-muted)]"
                   >需建筑: {{ anchorOf(s.slotId) }}</span
                 >
@@ -103,9 +121,34 @@
                 <template v-if="s.queued"> · 排队 {{ s.queued }}</template>
               </span>
             </div>
+            <div
+              v-if="s.accelSources && s.accelSources.length"
+              class="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--rac-ok)]/90"
+            >
+              <span v-for="src in s.accelSources" :key="src.name" class="truncate">
+                ◆ 并网设施：{{ src.name }} (+{{ Math.round(src.accel * 100) }}%)
+              </span>
+            </div>
             <!-- 在研项实时条令 -->
             <div v-for="item in s.active" :key="item" class="mt-1 flex items-center gap-1.5">
               <span class="min-w-0 flex-1 truncate text-[12px] text-[var(--rac-text)]">{{ item }}</span>
+              <span
+                v-if="researchAccelTagOf(item)"
+                class="num ob-num flex-none rounded-[2px] border px-1 py-0.2 text-[10px] font-semibold"
+                :style="{
+                  color: researchAccelTagOf(item)!.activeNow ? 'var(--rac-ok)' : 'var(--rac-accent)',
+                  borderColor: researchAccelTagOf(item)!.activeNow
+                    ? 'color-mix(in srgb, var(--rac-ok) 45%, transparent)'
+                    : 'color-mix(in srgb, var(--rac-accent) 45%, transparent)',
+                  background: researchAccelTagOf(item)!.activeNow
+                    ? 'color-mix(in srgb, var(--rac-ok) 15%, transparent)'
+                    : 'color-mix(in srgb, var(--rac-accent) 14%, transparent)',
+                }"
+                :title="researchAccelTagOf(item)!.tooltip"
+                data-research-accel-pill
+              >
+                {{ researchAccelTagOf(item)!.shortLabel }}
+              </span>
               <span class="num ob-num flex-none text-[11px] text-[var(--rac-warn)]">{{ progressOf(item) }}%</span>
               <span class="seg" style="width: 44px"
                 ><i :style="{ width: progressOf(item) + '%', background: 'var(--rac-warn)' }"
@@ -144,6 +187,17 @@
                   class="flex-none"
                 />
                 <span class="truncate text-[12px] text-[var(--rac-hi)]">{{ formatSlotDisplayName(s.name) }}</span>
+                <span
+                  v-if="s.accelMultiplier && s.accelMultiplier > 1.001"
+                  class="num ob-num flex-none rounded-[2px] border px-1.5 py-0.2 text-[10.5px] font-semibold"
+                  :style="{
+                    color: 'var(--rac-ok)',
+                    borderColor: 'color-mix(in srgb, var(--rac-ok) 45%, transparent)',
+                    background: 'color-mix(in srgb, var(--rac-ok) 14%, transparent)',
+                  }"
+                >
+                  ⚡ +{{ Math.round((s.accelMultiplier - 1) * 100) }}% ({{ s.accelMultiplier.toFixed(2) }}x)
+                </span>
                 <span v-if="!s.unlocked" class="num ob-num flex-none truncate text-[11px] text-[var(--rac-muted)]"
                   >需建筑: {{ anchorOf(s.slotId) }}</span
                 >
@@ -231,16 +285,31 @@
             <Icon :name="showComputeDetail ? 'chevron-up' : 'chevron-down'" :size="11" class="text-[var(--rac-muted)]" />
           </button>
           <div v-if="showComputeDetail" class="mt-1 flex max-h-[140px] flex-col overflow-y-auto">
-            <div class="micro py-0.5 text-[11px] text-[var(--rac-muted)]">算力来源设施</div>
+            <div class="micro py-0.5 text-[11px] text-[var(--rac-muted)]">算力与科研加速并网设施</div>
             <div
               v-for="s in compute.sources"
-              :key="s.baseName + s.buildingName"
-              class="flex items-center justify-between gap-1.5 py-0.5 text-[12px]"
+              :key="s.baseName + s.building"
+              class="flex flex-wrap items-center justify-between gap-1.5 py-0.5 text-[12px]"
+              data-compute-source-row
             >
-              <span class="min-w-0 truncate text-[var(--rac-text)]">{{ s.baseName }} · {{ s.buildingName }}</span>
-              <span class="num ob-num flex-none text-[11px] text-[var(--rac-ok)]"
-                >+{{ s.tflops }}T / +{{ s.tops }}Top</span
+              <span class="min-w-0 truncate text-[var(--rac-text)]"
+                >{{ s.baseName }} · {{ s.building }}</span
               >
+              <span class="num ob-num flex flex-none items-center gap-1.5 text-[11px] text-[var(--rac-ok)]">
+                <span v-if="s.tflops > 0 || s.tops > 0">+{{ s.tflops }}T / +{{ s.tops }}Top</span>
+                <span
+                  v-if="s.researchAccel && s.researchAccel > 0"
+                  class="rounded-[2px] border px-1 py-0.2 text-[10.5px]"
+                  :style="{
+                    borderColor: 'color-mix(in srgb, var(--rac-ok) 45%, transparent)',
+                    background: 'color-mix(in srgb, var(--rac-ok) 14%, transparent)',
+                  }"
+                >
+                  ⚡ 科研+{{ Math.round(s.researchAccel * 100) }}%{{
+                    s.researchLines?.length ? ` (${s.researchLines.join('/')})` : ''
+                  }}
+                </span>
+              </span>
             </div>
             <div class="micro mt-1 border-t border-dashed border-[var(--rac-dim)] pt-1 text-[11px] text-[var(--rac-muted)]">
               当前算力占用
@@ -250,8 +319,25 @@
               :key="u.item"
               class="flex items-center justify-between gap-1.5 py-0.5 text-[12px]"
             >
-              <span class="min-w-0 truncate text-[var(--rac-text)]">
-                {{ u.item }}<span v-if="!u.declared" class="text-[var(--rac-muted)]"> · 固定工时</span>
+              <span class="flex min-w-0 items-center gap-1.5 truncate text-[var(--rac-text)]">
+                <span class="truncate">{{ u.item }}</span>
+                <span v-if="!u.declared" class="flex-none text-[var(--rac-muted)]">· 固定工时</span>
+                <span
+                  v-else-if="researchAccelTagOf(u.item)"
+                  class="num ob-num flex-none rounded-[2px] border px-1 py-0.2 text-[10px] font-semibold"
+                  :style="{
+                    color: researchAccelTagOf(u.item)!.activeNow ? 'var(--rac-ok)' : 'var(--rac-accent)',
+                    borderColor: researchAccelTagOf(u.item)!.activeNow
+                      ? 'color-mix(in srgb, var(--rac-ok) 45%, transparent)'
+                      : 'color-mix(in srgb, var(--rac-accent) 45%, transparent)',
+                    background: researchAccelTagOf(u.item)!.activeNow
+                      ? 'color-mix(in srgb, var(--rac-ok) 15%, transparent)'
+                      : 'color-mix(in srgb, var(--rac-accent) 14%, transparent)',
+                  }"
+                  :title="researchAccelTagOf(u.item)!.tooltip"
+                >
+                  {{ researchAccelTagOf(u.item)!.shortLabel }}
+                </span>
               </span>
               <span class="num ob-num flex-none text-[11px] text-[var(--rac-muted)]"
                 >{{ u.tflops }}Tfl · {{ u.tops }}Top</span
@@ -544,24 +630,66 @@
               v-if="stateOf(r) === 'active'"
               class="mt-2 flex flex-col gap-1 rounded-[2px] border border-[var(--rac-warn)]/40 bg-[var(--rac-warn)]/12 p-1.5"
             >
-              <div class="flex items-center justify-between text-[11px]">
-                <span class="font-medium text-[var(--rac-warn)]">研发进度</span>
+              <div class="flex items-center justify-between gap-1 text-[11px]">
+                <span class="flex items-center gap-1.5 font-medium text-[var(--rac-warn)]">
+                  <span>研发进度</span>
+                  <span
+                    v-if="researchAccelTagOf(r.name)"
+                    class="num ob-num inline-flex items-center gap-0.5 rounded-[2px] border px-1.5 py-0.2 text-[10.5px] font-bold"
+                    :style="{
+                      color: researchAccelTagOf(r.name)!.activeNow ? 'var(--rac-ok)' : 'var(--rac-accent)',
+                      borderColor: researchAccelTagOf(r.name)!.activeNow
+                        ? 'color-mix(in srgb, var(--rac-ok) 50%, transparent)'
+                        : 'color-mix(in srgb, var(--rac-accent) 50%, transparent)',
+                      background: researchAccelTagOf(r.name)!.activeNow
+                        ? 'color-mix(in srgb, var(--rac-ok) 18%, transparent)'
+                        : 'color-mix(in srgb, var(--rac-accent) 16%, transparent)',
+                    }"
+                    :title="researchAccelTagOf(r.name)!.tooltip"
+                    data-card-accel-badge
+                  >
+                    {{ researchAccelTagOf(r.name)!.cardLabel }}
+                  </span>
+                </span>
                 <span class="num ob-num font-bold text-[var(--rac-warn)]">{{ progressOf(r.name) }}%</span>
               </div>
               <div class="seg w-full">
                 <i :style="{ width: progressOf(r.name) + '%', background: 'var(--rac-warn)' }" />
               </div>
-              <div v-if="etaOf(r.name)" class="num ob-num text-right text-[11px] text-[var(--rac-muted)]">
-                预估: {{ etaOf(r.name) }}
+              <div class="flex items-center justify-between gap-1 text-[11px]">
+                <span
+                  v-if="researchAccelTagOf(r.name)?.computeDemandText"
+                  class="num ob-num text-[10.5px] text-[var(--rac-ok)]/90"
+                >
+                  算力占用: {{ researchAccelTagOf(r.name)!.computeDemandText }}
+                </span>
+                <span v-else />
+                <span v-if="etaOf(r.name)" class="num ob-num text-right text-[var(--rac-muted)]">
+                  预估: {{ etaOf(r.name) }}
+                </span>
               </div>
             </div>
             <!-- 排队中提示 -->
             <div
               v-else-if="stateOf(r) === 'queued'"
-              class="mt-2 flex items-center justify-between rounded-[2px] border border-[var(--rac-warn)]/35 bg-[var(--rac-warn)]/10 px-1.5 py-1 text-[11px]"
+              class="mt-2 flex flex-wrap items-center justify-between gap-1 rounded-[2px] border border-[var(--rac-warn)]/35 bg-[var(--rac-warn)]/10 px-1.5 py-1 text-[11px]"
               data-test="tech-queued-banner"
             >
-              <span class="font-medium text-[var(--rac-warn)]">排队中 · 第 {{ queueOrderOf(r.name) }} 位</span>
+              <span class="flex items-center gap-1.5 font-medium text-[var(--rac-warn)]">
+                <span>排队中 · 第 {{ queueOrderOf(r.name) }} 位</span>
+                <span
+                  v-if="researchAccelTagOf(r.name)"
+                  class="num ob-num inline-flex items-center gap-0.5 rounded-[2px] border px-1 py-0.2 text-[10px] font-semibold"
+                  :style="{
+                    color: 'var(--rac-ok)',
+                    borderColor: 'color-mix(in srgb, var(--rac-ok) 45%, transparent)',
+                    background: 'color-mix(in srgb, var(--rac-ok) 15%, transparent)',
+                  }"
+                  :title="researchAccelTagOf(r.name)!.tooltip"
+                >
+                  {{ researchAccelTagOf(r.name)!.shortLabel }}
+                </span>
+              </span>
               <span v-if="etaOf(r.name)" class="num ob-num text-[11px] text-[var(--rac-muted)]">
                 预估: {{ etaOf(r.name) }}
               </span>
@@ -724,7 +852,14 @@ import { useCatalogStore } from '../../composables/useCatalog';
 import { useDataStore } from '../../composables/store';
 import { openLookup } from '../../composables/useDetail';
 import { inferDefaultResearchDuration } from '../../../中控悬浮窗/models/worldbookCatalogHelpers';
-import { lineIndexFromCatalog, slotBoard, SLOT_REGISTRY, type SlotId } from '../../engines/researchSlots';
+import {
+  lineIndexFromCatalog,
+  researchSpecIndexFromCatalog,
+  slotBoard,
+  slotForResearch,
+  SLOT_REGISTRY,
+  type SlotId,
+} from '../../engines/researchSlots';
 import { deployIndexFromCatalog } from '../../engines/productionLanes';
 import { computeOverview } from '../../engines/researchCompute';
 
@@ -756,12 +891,43 @@ const deployOf = computed(() =>
     retrofits: catalog.retrofits,
   }),
 );
+const researchSpecOf = computed(() =>
+  researchSpecIndexFromCatalog(
+    catalog.buildings as ReadonlyArray<{
+      name?: string;
+      id?: string;
+      research_accel?: number;
+      research_lines?: readonly string[];
+    }>,
+  ),
+);
 const slotView = computed(() => ({ bases: data.value.bases, queues: data.value.queues }));
-const board = computed(() => slotBoard(slotView.value, lineOf.value, undefined, { deployOf: deployOf.value }));
+const board = computed(() =>
+  slotBoard(slotView.value, lineOf.value, undefined, {
+    deployOf: deployOf.value,
+    researchSpecOf: researchSpecOf.value,
+  }),
+);
 
 const MAIN_SLOTS: ReadonlySet<SlotId> = new Set(['slot.main', 'slot.faction', 'slot.mecha']);
-const mainSlots = computed(() => board.value.filter(s => MAIN_SLOTS.has(s.slotId)));
-const derivedSlots = computed(() => board.value.filter(s => !MAIN_SLOTS.has(s.slotId)));
+const mainSlots = computed(() =>
+  board.value.filter(
+    s =>
+      MAIN_SLOTS.has(s.slotId) ||
+      s.active.length > 0 ||
+      s.queued > 0 ||
+      Boolean(s.accelMultiplier && s.accelMultiplier > 1.001),
+  ),
+);
+const derivedSlots = computed(() =>
+  board.value.filter(
+    s =>
+      !MAIN_SLOTS.has(s.slotId) &&
+      s.active.length === 0 &&
+      s.queued === 0 &&
+      !(s.accelMultiplier && s.accelMultiplier > 1.001),
+  ),
+);
 const unlockedCount = computed(() => board.value.filter(s => s.unlocked).length);
 function anchorOf(slotId: SlotId): string {
   return SLOT_REGISTRY.find(s => s.slotId === slotId)?.anchorNames[0] ?? '?';
@@ -784,11 +950,174 @@ function queueOrderOf(item: string): number {
   const idx = data.value.queues.filter(q => q.type === '研究' && q.status === 'queued').findIndex(q => q.item === item);
   return idx >= 0 ? idx + 1 : 1;
 }
+function computeSpeedupForResearchItem(item: string): { slotMult: number; computeMult: number } {
+  const resolvedSlotId = slotForResearch(item, lineOf.value).slotId;
+  const slotEntry = board.value.find(s => s.slotId === resolvedSlotId);
+  const slotMult = slotEntry?.accelMultiplier && slotEntry.accelMultiplier > 1.001 ? slotEntry.accelMultiplier : 1;
+
+  const usageRow = compute.value.usage.find(u => u.item === item);
+  let reqTf = usageRow?.tflops ?? 0;
+  let reqTp = usageRow?.tops ?? 0;
+  if (reqTf === 0 && reqTp === 0) {
+    const catEntry = catalog.researches.find(r => r.name === item) as
+      | { workload?: { tflops?: number; tops?: number } }
+      | undefined;
+    reqTf = catEntry?.workload?.tflops ?? 0;
+    reqTp = catEntry?.workload?.tops ?? 0;
+  }
+  const availTf = compute.value.tflops;
+  const availTp = compute.value.tops;
+
+  let computeMult = 1;
+  if ((availTf > 0 || availTp > 0) && (reqTf > 0 || reqTp > 0)) {
+    const fSat = reqTf > 0 ? Math.min(1, Math.max(0, availTf) / reqTf) : 0;
+    const tSat = reqTp > 0 ? Math.min(1, Math.max(0, availTp) / reqTp) : 0;
+    computeMult = Math.round((1 + 0.7 * fSat + 0.3 * tSat) * 100) / 100;
+  }
+  return { slotMult, computeMult };
+}
+
+function formatWallMinutesToEta(minutes: number, prefix = '余'): string {
+  if (!Number.isFinite(minutes) || minutes <= 0) return '即将结项';
+  const totalHours = Math.max(1, Math.round(minutes / 60));
+  if (totalHours < 24) {
+    return `${prefix}${totalHours}小时`;
+  }
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  return hours > 0 ? `${prefix}${days}日${hours}时` : `${prefix}${days}日`;
+}
+
 function progressOf(item: string): number {
-  return queueOf(item)?.progress ?? 0;
+  return Math.round((queueOf(item)?.progress ?? 0) * 10) / 10;
 }
 function etaOf(item: string): string {
-  return queueOf(item)?.eta ?? '';
+  const q = queueOf(item);
+  if (!q) return '';
+  const total = typeof q.total_minutes === 'number' && Number.isFinite(q.total_minutes) ? q.total_minutes : 0;
+  if (total <= 0) {
+    return q.eta ?? '';
+  }
+  const rawSpent =
+    typeof q.spent_minutes === 'number' && Number.isFinite(q.spent_minutes) && q.spent_minutes > 0
+      ? q.spent_minutes
+      : ((q.progress ?? 0) / 100) * total;
+  const spent = Math.min(total, Math.max(0, rawSpent));
+  if (spent >= total) return '即将结项';
+
+  const { slotMult, computeMult } = computeSpeedupForResearchItem(item);
+  const phase1End = total * 0.5;
+  const lockMin =
+    typeof q.min_days_lock === 'number' && Number.isFinite(q.min_days_lock) && q.min_days_lock > 0
+      ? q.min_days_lock * 1440
+      : 0;
+  const roomMin = lockMin - phase1End;
+  const effComputeMult =
+    lockMin > 0 && roomMin > 0 ? Math.min(computeMult, Math.max(1, (total - phase1End) / roomMin)) : computeMult;
+
+  const remWallMin =
+    spent < phase1End
+      ? (phase1End - spent) / slotMult + (total - phase1End) / (slotMult * effComputeMult)
+      : (total - spent) / (slotMult * effComputeMult);
+
+  return formatWallMinutesToEta(remWallMin, q.status === 'queued' ? '约' : '余');
+}
+
+export interface ResearchAccelTagInfo {
+  /** 当前时刻是否正处于加速生效态（阶段二算力冲刺中 或 科研槽建筑全程加速中） */
+  activeNow: boolean;
+  /** 紧凑短标签（供课题组/算力明细行内胶囊展示） */
+  shortLabel: string;
+  /** 卡片内显眼标签（供科技网格卡片展示） */
+  cardLabel: string;
+  /** 算力占用文案（如 "10T / 14Top"） */
+  computeDemandText: string;
+  /** 悬停说明 */
+  tooltip: string;
+}
+
+function researchAccelTagOf(item: string): ResearchAccelTagInfo | null {
+  const q = queueOf(item);
+  if (!q || q.status === 'done' || q.status === 'cancelled') return null;
+
+  const resolvedSlotId = slotForResearch(item, lineOf.value).slotId;
+  const slotEntry = board.value.find(s => s.slotId === resolvedSlotId);
+  const slotMult = slotEntry?.accelMultiplier && slotEntry.accelMultiplier > 1.001 ? slotEntry.accelMultiplier : 1;
+
+  if (q.status === 'queued') {
+    if (slotMult > 1.001) {
+      return {
+        activeNow: true,
+        shortLabel: `⚡ 领域加速 ${slotMult.toFixed(2)}x`,
+        cardLabel: `⚡ 领域加速 ${slotMult.toFixed(2)}x`,
+        computeDemandText: '',
+        tooltip: `所属研究组享科研设施 ${slotMult.toFixed(2)}x 加速加成`,
+      };
+    }
+    return null;
+  }
+
+  const usageRow = compute.value.usage.find(u => u.item === item);
+  const reqTf = usageRow?.tflops ?? 0;
+  const reqTp = usageRow?.tops ?? 0;
+  const availTf = compute.value.tflops;
+  const availTp = compute.value.tops;
+
+  let computeMult = 1;
+  if ((availTf > 0 || availTp > 0) && (reqTf > 0 || reqTp > 0)) {
+    const fSat = reqTf > 0 ? Math.min(1, Math.max(0, availTf) / reqTf) : 0;
+    const tSat = reqTp > 0 ? Math.min(1, Math.max(0, availTp) / reqTp) : 0;
+    computeMult = Math.round((1 + 0.7 * fSat + 0.3 * tSat) * 100) / 100;
+  }
+
+  const prog = q.progress ?? 0;
+  const inPhase2 = prog >= 50;
+  const peakMult = Math.round(computeMult * slotMult * 100) / 100;
+  const currentMult = inPhase2 ? peakMult : slotMult;
+  const computeDemandText = reqTf > 0 || reqTp > 0 ? `${reqTf}T / ${reqTp}Top` : '';
+
+  if (computeMult <= 1.001 && slotMult <= 1.001) {
+    return null;
+  }
+
+  if (inPhase2 && computeMult > 1.001) {
+    return {
+      activeNow: true,
+      shortLabel: `⚡ 算力加速 ${currentMult.toFixed(2)}x`,
+      cardLabel: `⚡ 算力加速 ${currentMult.toFixed(2)}x`,
+      computeDemandText,
+      tooltip: `当前已进入阶段二（≥50%）算力解算冲刺：算力加速 ${computeMult.toFixed(2)}x${
+        slotMult > 1.001 ? ` × 科研设施 ${slotMult.toFixed(2)}x = ${currentMult.toFixed(2)}x` : ''
+      }（占用 ${reqTf} TFLOPS / ${reqTp} TOPS）`,
+    };
+  }
+
+  if (!inPhase2 && computeMult > 1.001) {
+    if (slotMult > 1.001) {
+      return {
+        activeNow: true,
+        shortLabel: `⚡ ${slotMult.toFixed(2)}x · 二阶${peakMult.toFixed(2)}x`,
+        cardLabel: `⚡ 加速 ${slotMult.toFixed(2)}x (50%后 ${peakMult.toFixed(2)}x)`,
+        computeDemandText,
+        tooltip: `当前阶段一（<50%）享科研设施 ${slotMult.toFixed(2)}x 加速；进度达 50% 进入阶段二后叠加算力冲刺至 ${peakMult.toFixed(2)}x`,
+      };
+    }
+    return {
+      activeNow: false,
+      shortLabel: `⚡ 算力就绪 · 50%后${peakMult.toFixed(2)}x`,
+      cardLabel: `⚡ 算力并网 · 50%后 ${peakMult.toFixed(2)}x`,
+      computeDemandText,
+      tooltip: `算力已并网配给（${reqTf} TFLOPS / ${reqTp} TOPS）：当前处于阶段一基础准备期（<50%），进度达到 50% 后自动激活 ${peakMult.toFixed(2)}x 算力冲刺加速`,
+    };
+  }
+
+  return {
+    activeNow: true,
+    shortLabel: `⚡ 设施加速 ${slotMult.toFixed(2)}x`,
+    cardLabel: `⚡ 设施加速 ${slotMult.toFixed(2)}x`,
+    computeDemandText,
+    tooltip: `科研设施领域加速 ${slotMult.toFixed(2)}x 生效中`,
+  };
 }
 /** 未归入任何槽的在研项（旧数据/未知 line 兜底，保证信息不丢） */
 const orphanActives = computed(() => {
@@ -804,7 +1133,7 @@ const compute = computed(() =>
 );
 
 const showDerived = ref(false);
-const showComputeDetail = ref(false);
+const showComputeDetail = ref(true);
 
 /** 检索与过滤控制状态 */
 const searchQuery = ref('');

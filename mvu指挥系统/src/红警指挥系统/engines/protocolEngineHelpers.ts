@@ -702,7 +702,27 @@ export function areProtocolRequirementsMet(
 }
 
 /**
- * 判定协议在同轨道中的前序协议是否已处于 active 状态（首节点无前序恒为 true）
+ * 同轨协议的推进顺序：按 tier 升序，同 tier 再按显式 order，最后按目录出现序（稳定排序）。
+ * 前序判定与面板轨道节点排序共用此口径，不依赖世界书条目物理顺序。
+ */
+export function sortProtocolsByTrackOrder<T extends Pick<ProtocolDefinitionLike, 'tier' | 'order'>>(
+  defs: readonly T[],
+): T[] {
+  return defs
+    .map((def, index) => ({ def, index }))
+    .sort((a, b) => {
+      const tierDiff = normalizeProtocolTier(a.def.tier) - normalizeProtocolTier(b.def.tier);
+      if (tierDiff !== 0) return tierDiff;
+      const orderA = typeof a.def.order === 'number' && Number.isFinite(a.def.order) ? a.def.order : Infinity;
+      const orderB = typeof b.def.order === 'number' && Number.isFinite(b.def.order) ? b.def.order : Infinity;
+      if (orderA !== orderB) return orderA < orderB ? -1 : 1;
+      return a.index - b.index;
+    })
+    .map(entry => entry.def);
+}
+
+/**
+ * 判定协议在同轨道中的前序协议是否已处于 active 状态（首节点无前序恒为 true；前序按 sortProtocolsByTrackOrder 口径）
  */
 export function isProtocolTrackPredecessorActive(
   state: ProtocolEngineStateView | null | undefined,
@@ -713,7 +733,7 @@ export function isProtocolTrackPredecessorActive(
     return true;
   }
   const targetId = canonicalizeProtocolRef(protocolDef.id || protocolDef.name || '');
-  const sameTrack = catalogProtocols.filter(p => p.track === protocolDef.track);
+  const sameTrack = sortProtocolsByTrackOrder(catalogProtocols.filter(p => p.track === protocolDef.track));
   const idx = sameTrack.findIndex(p => canonicalizeProtocolRef(p.id || p.name || '') === targetId);
   if (idx <= 0) return true;
 

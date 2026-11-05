@@ -78,6 +78,17 @@ export const Building = z.object({
   accel_scope: z.enum(['global', 'base']).optional(),
   /** 已挂载于本母体建筑上的原位扩建模块名称列表（FD-22 / FD-37，如 ["智能电网潮流调度中心"]；可选惰性缺省，旧档零新增键） */
   addons: z.array(z.string()).optional(),
+  /** 非自身体系/特许科研建筑提供的科研加速增量（如 0.15 代表 +15%；可选惰性缺省，旧档零新增键） */
+  research_accel: z.number().min(0).max(0.5).optional(),
+  /** 非自身体系科研建筑定向加速的科研领域/序列（如 ["工业基础", "装备"]；缺省或含 "全领域"/"通用" 代表全槽加速） */
+  research_lines: z.array(z.string()).optional(),
+  /** 非自身体系算力/科研建筑直接声明的并网算力产出（TFLOPS / TOPS；可选惰性缺省，旧档零新增键） */
+  compute: z
+    .object({
+      tflops: z.number().min(0).default(0),
+      tops: z.number().min(0).default(0),
+    })
+    .optional(),
 });
 
 /** 基地地理/天体选址类型（FD-26 / FD-27） */
@@ -1030,6 +1041,7 @@ export const DarknetState = z.object({
   sold_intel_ids: z.array(z.string()).default([]),
   completed_bounty_ids: z.array(z.string()).default([]),
   settled_auction_ids: z.array(z.string()).default([]),
+  settled_tx_ids: z.array(z.string()).default([]),
   ledger: z.array(DarknetSettlementRecord).default([]),
 });
 export type DarknetState = z.output<typeof DarknetState>;

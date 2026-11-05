@@ -1248,20 +1248,11 @@ export function autoSettleCompletedQueues<S extends ReconcileStateShape>(
     });
   }
 
-  let next = { ...state, queues } as S;
+  const next = { ...state, queues } as S;
   if (tech !== state.tech) (next as ReconcileStateShape).tech = tech;
   if (bases !== state.bases) (next as ReconcileStateShape).bases = bases;
   if (forces !== state.forces) (next as ReconcileStateShape).forces = forces;
   if (space !== state.space) (next as ReconcileStateShape).space = space;
-
-  if (options?.autoSettleRemaining) {
-    const autoRes = autoSettleCompletedQueues(next, { skipIndices: blockedSettlingIndices });
-    if (autoRes.events.length > 0) {
-      next = autoRes.next;
-      events.push(...autoRes.events);
-      verdicts.push(...autoRes.verdicts);
-    }
-  }
 
   return { next, events, verdicts };
 }
@@ -1671,11 +1662,22 @@ export function reconcileProduction<S extends ReconcileStateShape>(
     });
   }
 
-  const next = { ...state, queues } as S;
+  let next = { ...state, queues } as S;
   if (tech !== state.tech) (next as ReconcileStateShape).tech = tech;
   if (bases !== state.bases) (next as ReconcileStateShape).bases = bases;
   if (forces !== state.forces) (next as ReconcileStateShape).forces = forces;
   if (space !== state.space) (next as ReconcileStateShape).space = space;
+
+  // BUG-R2-20 / G1-02：显式 <生产> 声明裁决完毕后，再把剩余满工时 settling 项自动交割；
+  // 同楼已被声明判为 OVERRUN/REJECTED 的项保持原地等门。
+  if (options?.autoSettleRemaining) {
+    const autoRes = autoSettleCompletedQueues(next, { skipIndices: blockedSettlingIndices });
+    if (autoRes.events.length > 0) {
+      next = autoRes.next;
+      events.push(...autoRes.events);
+      verdicts.push(...autoRes.verdicts);
+    }
+  }
   return { next, events, verdicts };
 }
 

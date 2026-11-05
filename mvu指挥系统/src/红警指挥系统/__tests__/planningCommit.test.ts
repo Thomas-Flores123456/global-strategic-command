@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { getSwipeSlot, readTimelineLedger, replayFloorProcessOps, resetMemoryTimelineLedgerForTest } from '../core/timelineLedger';
 import type { EffectiveCatalog } from '../core/catalogEffective';
 import { computePlanFingerprint, type ParsedPlanningIntent } from '../planning/planningParser';
 import { buildApprovalCommandText, commitPlanningIntent } from '../planning/planningReceipt';
@@ -714,6 +715,50 @@ describe('PLAN-COMMIT-01 · commitPlanningIntent 排产回执与零时间边界�
         },
       ]);
     });
+  });
+});
+
+describe('G1-03 / G1-06 · COMMIT_PLANNING 过程量按真实 swipe 落账、planId 非常量、重放不追加', () => {
+  beforeEach(() => resetMemoryTimelineLedgerForTest());
+
+  it('提交记在 (floor, swipe) 槽并带哈希；重放路径不再追加日志', () => {
+    const catalog = createTestCatalog();
+    const intent = makeIntent({ mode: 'delegate_once', request_ref: 'plan-g103', budget_cap_credits: 1000 });
+    const res = commitPlanningIntent(createBaseState(), intent, catalog, {
+      floor: 30,
+      swipe: 2,
+      textHash: 'h30',
+      forceApprove: true,
+    });
+    expect(res.committed).toBe(true);
+    expect(getSwipeSlot(readTimelineLedger(), 30, 0)).toBeUndefined();
+    const slot = getSwipeSlot(readTimelineLedger(), 30, 2)!;
+    expect(slot.textHash).toBe('h30');
+    expect(slot.opLog).toHaveLength(1);
+    const ts = slot.opLog[0].ts;
+
+    replayFloorProcessOps(createBaseState() as unknown as Record<string, unknown>, slot.opLog, { catalog, floorId: 30 });
+    const after = getSwipeSlot(readTimelineLedger(), 30, 2)!;
+    expect(after.opLog).toHaveLength(1);
+    expect(after.opLog[0].ts).toBe(ts);
+  });
+
+  it('request_ref 与 fingerprint 缺省时 planId 由动作指纹派生，同楼不同方案不互相覆盖', () => {
+    const catalog = createTestCatalog();
+    const a = makeIntent({ mode: 'delegate_once', request_ref: '', fingerprint: '', budget_cap_credits: 1000 });
+    const b = makeIntent({
+      mode: 'delegate_once',
+      request_ref: '',
+      fingerprint: '',
+      budget_cap_credits: 1000,
+      actions: [{ op: 'enqueue', base_ref: 'base_north', catalog_ref: '动员兵', quantity: 1 }],
+    });
+    const s1 = commitPlanningIntent(createBaseState(), a, catalog, { floor: 31, forceApprove: true });
+    commitPlanningIntent(s1.next, b, catalog, { floor: 31, forceApprove: true });
+    const planIds = getSwipeSlot(readTimelineLedger(), 31, 0)!.opLog.map(op => (op as { planId: string }).planId);
+    expect(planIds).toHaveLength(2);
+    expect(new Set(planIds).size).toBe(2);
+    expect(planIds).not.toContain('排产计划');
   });
 });
 

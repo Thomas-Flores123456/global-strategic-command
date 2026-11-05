@@ -8,6 +8,7 @@ import {
   phase2Multiplier,
   phaseSplit,
   rawSpeedup,
+  RESEARCH_TOTAL_ACCEL_CAP,
   SATISFACTION_CAP,
   settleWithTwoStage,
   WEIGHT_SIMULATION,
@@ -228,6 +229,19 @@ describe('CTRL-2STAGE-PROD-01 · 双算力加权（Q3=B · 验收二）', () => 
     expect(effFor(txn({ spent_minutes: 0 }))).toBe(1); // 阶段一
     expect(effFor(txn({ spent_minutes: 499 }))).toBe(1); // 阶段一末端
     expect(effFor(txn({ spent_minutes: 500 }))).toBeCloseTo(2, 10); // 阶段二起点（生产权重满配）
+  });
+
+  it('G3-03：研究事务算力加速 × 科研建筑加速合并后统一封顶 2×', () => {
+    const effFor = makeTwoStageEffFor({
+      effFor: () => 0.5,
+      accelFor: () => 2,
+      assemblyFor: () => ({ t_mat: 500, t_asm: 500, tflops: 10, tops: 10 }),
+      computeFor: () => ({ tflops: 10000, tops: 10000 }),
+    });
+    const research = txn({ type: '研究', spent_minutes: 500 });
+    expect(effFor(research)).toBeCloseTo(0.5 * RESEARCH_TOTAL_ACCEL_CAP, 10); // 非 0.5×2×2
+    expect(effFor(txn({ type: '研究', spent_minutes: 0 }))).toBe(1); // 阶段一：工况 × 建筑加速
+    expect(phase2Multiplier(research, { tflops: 10, tops: 10 }, { tflops: 1e9, tops: 1e9 }, 2)).toBe(2);
   });
 });
 

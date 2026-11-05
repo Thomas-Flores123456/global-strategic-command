@@ -152,6 +152,32 @@ function findMatchingStockKey(record: Record<string, number>, targetKey: string)
   return Object.keys(record).find(k => k.trim().toLowerCase().replace(/\s+/g, '') === norm) ?? targetKey;
 }
 
+/** 欠料停机标记：`[上游原料/外币不足暂停:原状态:<status>,eff:<eff>]`；旧档无原态段时按 active/1 恢复 */
+const STOCK_PAUSE_RE = /\s*\[上游原料\/外币不足暂停(?::原状态:(active|distressed),eff:([0-9.]+))?\]$/;
+
+export function encodeStockPause(reason: string, status: ChainStatus, eff: number): string {
+  const base = reason.replace(STOCK_PAUSE_RE, '');
+  const suffix = `[上游原料/外币不足暂停:原状态:${status === 'distressed' ? 'distressed' : 'active'},eff:${eff}]`;
+  return base ? `${base} ${suffix}` : suffix;
+}
+
+export function isStockPaused(chain: Pick<IncomeChain, 'status' | 'eff' | 'reason'>): boolean {
+  return chain.status === 'distressed' && chain.eff === 0 && STOCK_PAUSE_RE.test(chain.reason);
+}
+
+export function readStockPause(
+  chain: Pick<IncomeChain, 'status' | 'eff' | 'reason'>,
+): { status: 'active' | 'distressed'; eff: number; reason: string } | null {
+  if (!isStockPaused(chain)) return null;
+  const m = chain.reason.match(STOCK_PAUSE_RE)!;
+  const eff = Number(m[2]);
+  return {
+    status: m[1] === 'distressed' ? 'distressed' : 'active',
+    eff: Number.isFinite(eff) && eff > 0 && eff <= 2 ? eff : 1,
+    reason: chain.reason.replace(STOCK_PAUSE_RE, ''),
+  };
+}
+
 const parsedChainEventEffRegistry = new Map<string, number>();
 
 export function registerParsedChainEventEff(
@@ -354,7 +380,13 @@ export function settleChainsDeltaT(
     }
 
     const safeRate = Number.isFinite(c.rate_daily) && c.rate_daily > 0 ? c.rate_daily : 0;
-    const safeEff = Number.isFinite(c.eff) && c.eff >= 0 ? Math.min(2, Math.max(0, c.eff)) : 0;
+    // G6-01：欠料暂停链按暂停前原 eff 重新核验库存，充足即自动复工
+    const paused = stockView ? readStockPause(c) : null;
+    const safeEff = paused
+      ? paused.eff
+      : Number.isFinite(c.eff) && c.eff >= 0
+        ? Math.min(2, Math.max(0, c.eff))
+        : 0;
     const chainTimeRatio = timeRatio * safeEff;
 
     // FD-51 欠料/欠费停机守卫：当传入 stockView 且链条存在负向消耗时，先核验库存是否足以支付本轮消耗
@@ -394,17 +426,12 @@ export function settleChainsDeltaT(
       }
 
       if (hasShortage) {
-        const pauseReason = c.reason.includes('上游原料/外币不足暂停')
-          ? c.reason
-          : c.reason
-            ? `${c.reason} [上游原料/外币不足暂停]`
-            : '[上游原料/外币不足暂停]';
         nextChains.push({
           ...cloneIncomeChain(c),
           status: 'distressed',
           eff: 0,
-          reason: pauseReason,
-          updated_at_day: currentDay,
+          reason: paused ? c.reason : encodeStockPause(c.reason, c.status, safeEff),
+          updated_at_day: paused ? c.updated_at_day : currentDay,
         });
         continue;
       }
@@ -416,10 +443,10 @@ export function settleChainsDeltaT(
     const currentExtracted = c.capacity?.extracted ?? 0;
 
     let actualYield = theoreticalYield;
-    let nextStatus: ChainStatus = c.status;
+    let nextStatus: ChainStatus = paused ? paused.status : c.status;
     let nextEff = safeEff;
     let nextExtracted: number;
-    let nextReason = c.reason;
+    let nextReason = paused ? paused.reason : c.reason;
 
     // 有限矿脉/合同资源开采上限判定（仅对收入向链条适用枯竭判定）
     if (totalYield !== null && c.flow !== '支出' && (safeRate > 0 || totalYield <= currentExtracted)) {
@@ -489,7 +516,7 @@ export function settleChainsDeltaT(
       status: nextStatus,
       eff: nextEff,
       reason: nextReason,
-      updated_at_day: nextStatus === 'exhausted' ? currentDay : c.updated_at_day,
+      updated_at_day: nextStatus === 'exhausted' || paused ? currentDay : c.updated_at_day,
       capacity: {
         ...(c.capacity?.total !== undefined ? { total: c.capacity.total } : {}),
         total_yield: totalYield,

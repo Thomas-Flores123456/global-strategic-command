@@ -25,6 +25,8 @@ import {
   BUILDABLE_AERO_EQUIPMENT_CATALOG,
   LAUNCH_SITE_MODIFIERS,
   LAUNCHPAD_BUILDINGS,
+  centerTierBaseCapacityT,
+  computeLaunchPayout,
   deriveLaunchCentersFromState,
   evaluateLaunchSiteModifiers,
   findBuildableAeroEquipmentSpec,
@@ -650,12 +652,13 @@ export function buildOrbitalAssetCards(snapshot: Schema | null | undefined): Orb
 }
 
 /**
- * 计算基础报酬与可复用助推器 +15% 奖金预览
+ * 回款预览（G4-13：与引擎 computeLaunchPayout 同源；传入发射中心视图则叠加选址与航天城乘数）
  */
 export function computeContractPayoutPreview(
   rewardCredits: number,
   useStoredBooster: boolean,
   availableBoosters: number,
+  center?: Pick<SpaceLaunchCenterView, 'payoutMultiplier' | 'isSpaceportCity'> | null,
 ): ContractPayoutPreview {
   const baseReward = Math.max(0, Math.round(Number(rewardCredits) || 0));
   const boosterApplied = Boolean(useStoredBooster && Number(availableBoosters) > 0);
@@ -664,7 +667,12 @@ export function computeContractPayoutPreview(
     baseReward,
     boosterApplied,
     reuseBonus,
-    totalPayout: baseReward + reuseBonus,
+    totalPayout: computeLaunchPayout({
+      baseReward,
+      sitePayoutMult: center?.payoutMultiplier ?? 1,
+      isSpaceportCity: Boolean(center?.isSpaceportCity),
+      boosterConsumed: boosterApplied,
+    }),
   };
 }
 
@@ -870,8 +878,7 @@ export function deriveSpaceLaunchCentersView(
           hasAllWeatherTech || hasLocalWeatherTower,
         );
     const { localTimeText, tzLabel } = formatLaunchCenterLocalTime(metaTime, rec.tz_offset);
-    const baseCapByTier =
-      rec.tier >= 3 ? (rec.isFullReuseStarbase ? 80 : 65) : rec.tier === 2 ? 35 : 8;
+    const baseCapByTier = centerTierBaseCapacityT(rec.tier, Boolean(rec.isFullReuseStarbase));
     const maxPayloadTons = Math.round(baseCapByTier * orbitMod.payloadMult * 100) / 100;
 
     return {

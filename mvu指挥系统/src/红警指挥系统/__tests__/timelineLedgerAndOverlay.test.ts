@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BUILDINGS, PRODUCTIONS, RESEARCHES } from '../core/catalog';
 import { dataPatchesToDlcOverlay, mergeEffectiveCatalog } from '../core/catalogEffective';
 import { Schema, type DataPatch } from '../core/schema';
@@ -7,6 +7,7 @@ import {
   appendFloorProcessOp,
   appendWorldbookMutation,
   getSwipeSlot,
+  getReplayableFloorOps,
   makeFloorKey,
   makeSwipeKey,
   makeSwipeScopedKey,
@@ -14,6 +15,7 @@ import {
   parseSwipeScopedKey,
   pruneTimelineAboveFloor,
   readTimelineLedger,
+  remapTimelineAfterMidDeletion,
   replayFloorProcessOps,
   resetMemoryTimelineLedgerForTest,
 } from '../core/timelineLedger';
@@ -124,11 +126,11 @@ describe('timelineLedger · appendFloorProcessOp & replayFloorProcessOps 四类�
     });
   });
 
-  it('replayFloorProcessOps 在重算后 100% 幂等恢复 COMMIT_PLANNING / CHRONO_RESOLVE / SUBMIT_FIX / PATCH_DECISION', () => {
+  it('replayFloorProcessOps 不恢复旧整份快照，保留新结算并按当前补丁目标回放裁决', () => {
     const rawStatData = {
       economy: { credits: 5000 },
       queues: [{ type: '建造', item: '发电厂', progress: 50 }],
-      bases: [{ id: '一号基地', buildings: [{ name: '建造厂核心', count: 1 }] }],
+      bases: [{ id: '一号基地', name: '一号基地', buildings: [{ name: '建造厂核心', count: 1 }] }],
       forces: { troops: { 动员兵: 10 } },
       planning: { pending_plan: { id: 'plan_1' } },
       pending_data_patches: [
@@ -230,10 +232,10 @@ describe('timelineLedger · appendFloorProcessOp & replayFloorProcessOps 四类�
     const replayedOnce = replayFloorProcessOps(rawStatData, ops, { floorId: 3 });
     const replayedTwice = replayFloorProcessOps(replayedOnce, ops, { floorId: 3 });
 
-    expect(replayedOnce.economy.credits).toBe(2800);
-    expect(replayedOnce.queues).toEqual([{ type: '建造', item: '战车工厂', progress: 0 }]);
-    expect(replayedOnce.bases[0].buildings).toHaveLength(2);
-    expect(replayedOnce.forces.troops.动员兵).toBe(20);
+    expect(replayedOnce.economy.credits).toBe(5000);
+    expect(replayedOnce.queues).toMatchObject(rawStatData.queues);
+    expect(replayedOnce.bases[0].buildings).toHaveLength(1);
+    expect(replayedOnce.forces.troops.动员兵).toBe(10);
     expect(replayedOnce.pending_data_patches).toHaveLength(1);
     expect(replayedOnce.pending_data_patches[0]).toMatchObject({ id: 'p_defer', status: 'deferred' });
     expect(replayedOnce.applied_data_patches).toHaveLength(1);
@@ -245,6 +247,28 @@ describe('timelineLedger · appendFloorProcessOp & replayFloorProcessOps 四类�
 
     // 重复重放完全幂等
     expect(replayedTwice).toEqual(replayedOnce);
+  });
+
+  it('W2 补丁精确 ID 优先于前置同目标项，已应用精确 ID 不抢 pending', () => {
+    const op = { kind: 'PATCH_DECISION' as const, ts: 1, patchId: 'exact', patchTarget: '厂', decision: 'approve' as const };
+    const first = { id: 'other', target: '厂', status: 'pending' };
+    const exact = { id: 'exact', target: '厂', status: 'pending' };
+    const result = replayFloorProcessOps({ pending_data_patches: [first, exact], applied_data_patches: [] }, [op]);
+    expect(result.pending_data_patches).toEqual([first]);
+    expect(result.applied_data_patches).toMatchObject([{ id: 'exact', status: 'applied' }]);
+    expect(replayFloorProcessOps(result, [op])).toEqual(result);
+  });
+
+  it('W2 补丁唯一 fallback 可回放，多候选或身份不足逐条跳过', () => {
+    const op = { kind: 'PATCH_DECISION' as const, ts: 1, patchId: 'old', patchTarget: '厂', decision: 'defer' as const };
+    const one = { id: 'new', target: '厂', status: 'pending' };
+    expect(replayFloorProcessOps({ pending_data_patches: [one] }, [op]).pending_data_patches)
+      .toMatchObject([{ id: 'new', status: 'deferred' }]);
+    const ambiguous = { pending_data_patches: [one, { ...one, id: 'another' }], applied_data_patches: [] };
+    const onSkip = vi.fn();
+    expect(replayFloorProcessOps(ambiguous, [op, { ...op, patchTarget: undefined }], { onSkip })).toEqual(ambiguous);
+    expect(onSkip).toHaveBeenCalledTimes(2);
+    expect(onSkip.mock.calls[0][1]).toContain('歧义');
   });
 
   it('pruneTimelineAboveFloor 裁剪高楼层并按时间逆序返回世界书变更日志', () => {
@@ -276,6 +300,58 @@ describe('timelineLedger · appendFloorProcessOp & replayFloorProcessOps 四类�
     expect(Object.keys(nextLedger.floors)).toEqual(['f_2']);
     expect(nextLedger.maxFloorWatermark).toBe(2);
     expect(removedWbMutations.map(m => m.entryName)).toEqual(['扩展·重装试验场', '机娘·赤瞳']);
+  });
+
+  it('G9-01 remapTimelineAfterMidDeletion 只回滚被删楼，高楼键与 floorId 整体减 1', () => {
+    const mk = (floor: number, swipe: number, ts: number, entryName: string) =>
+      appendWorldbookMutation(floor, swipe, { ts, bookName: 'B', entryName, op: 'create', beforeEntry: null });
+    mk(1, 0, 100, '低楼');
+    mk(2, 0, 200, '被删楼·甲');
+    mk(2, 1, 250, '被删楼·乙');
+    mk(4, 1, 300, '高楼');
+
+    const { nextLedger, removedWbMutations } = remapTimelineAfterMidDeletion(readTimelineLedger(), 2);
+
+    expect(removedWbMutations.map(m => m.entryName)).toEqual(['被删楼·乙', '被删楼·甲']);
+    expect(Object.keys(nextLedger.floors).sort()).toEqual(['f_1', 'f_3']);
+    const moved = nextLedger.floors.f_3;
+    expect(moved.floorId).toBe(3);
+    expect(moved.swipes.s_1.floorId).toBe(3);
+    expect(moved.swipes.s_1.wbJournal.map(m => [m.entryName, m.floorId])).toEqual([['高楼', 3]]);
+    expect(nextLedger.floors.f_1.swipes.s_0.wbJournal[0].floorId).toBe(1);
+    expect(nextLedger.maxFloorWatermark).toBe(3);
+  });
+});
+
+describe('G1-01 / G1-05 · 内存兜底按聊天隔离、原文哈希变化作废旧过程量', () => {
+  const g = globalThis as { SillyTavern?: { getCurrentChatId?: () => string } };
+  let chatId = 'chat_A';
+  beforeEach(() => {
+    resetMemoryTimelineLedgerForTest();
+    chatId = 'chat_A';
+    g.SillyTavern = { getCurrentChatId: () => chatId };
+  });
+  afterEach(() => {
+    delete g.SillyTavern;
+  });
+
+  it('切换聊天后不再读到上一聊天的 originChatId 与楼层账本', () => {
+    appendFloorProcessOp(4, 0, { kind: 'PATCH_DECISION', ts: 1, patchId: 'p1', decision: 'defer' });
+    expect(readTimelineLedger().originChatId).toBe('chat_A');
+    chatId = 'chat_B';
+    const ledger = readTimelineLedger();
+    expect(ledger.originChatId).toBe('');
+    expect(ledger.floors).toEqual({});
+  });
+
+  it('同槽原文哈希变化时保留 opLog，并更新记录所属 hash', () => {
+    appendFloorProcessOp(4, 1, { kind: 'SUBMIT_FIX', ts: 1, blockType: '战况', fixedYaml: 'x' }, 'hash_old');
+    expect(getReplayableFloorOps(readTimelineLedger(), 4, 1, 'hash_old')).toHaveLength(1);
+    expect(getReplayableFloorOps(readTimelineLedger(), 4, 1, 'hash_new')).toHaveLength(1);
+    appendFloorProcessOp(4, 1, { kind: 'PATCH_DECISION', ts: 2, patchId: 'p2', decision: 'reject' }, 'hash_new');
+    const slot = getSwipeSlot(readTimelineLedger(), 4, 1);
+    expect(slot?.textHash).toBe('hash_new');
+    expect(slot?.opLog.map(op => op.kind)).toEqual(['SUBMIT_FIX', 'PATCH_DECISION']);
   });
 });
 

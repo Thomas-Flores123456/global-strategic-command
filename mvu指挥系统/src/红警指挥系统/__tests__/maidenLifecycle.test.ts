@@ -681,4 +681,27 @@ keys: [白霜, Chrono-01, CM-A01, 相位折跃回流]
   });
 });
 
+describe('G8-06 同型号多台待授名赐名歧义', () => {
+  it('仅凭型号无法定位时隔离，不新建重复档案', () => {
+    const baseline = Schema.parse({
+      pending_lore: [
+        { name: '待授名·犀牛-02', serial: '犀牛-02', model: '犀牛主战坦克' },
+        { name: '待授名·犀牛-03', serial: '犀牛-03', model: '犀牛主战坦克' },
+      ],
+    });
+    const res = parseMessageText('<机娘档案>\n名称: 赤星\n原型: 犀牛主战坦克\n</机娘档案>', baseline);
+    expect(res.data.pending_lore).toHaveLength(2);
+    expect(res.quarantine.some(q => String(q.error).includes('赐名对象不明'))).toBe(true);
+  });
+
+  it('G8-07：同型号已有首台原型时，新档案强制次生', () => {
+    const baseline = Schema.parse({
+      pending_lore: [{ name: '铁壁', serial: '犀牛-01', model: '犀牛主战坦克', seq: '首台原型' }],
+    });
+    const res = parseMessageText('<机娘档案>\n名称: 赤星\n编号: 犀牛-05\n原型: 犀牛主战坦克\n序列: 首台原型\n</机娘档案>', baseline);
+    const hit = res.data.pending_lore.find(e => e.name === '赤星');
+    expect(hit?.seq).toBe('次生机');
+  });
+});
+
 

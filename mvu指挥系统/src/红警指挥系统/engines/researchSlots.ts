@@ -72,10 +72,28 @@ export interface SlotResolution {
 }
 
 /** 本模块消费的最小状态视图（与 schema.ts StatData 结构兼容，不 import 保持零依赖） */
+export interface SlotBuildingView {
+  name: string;
+  state?: string;
+  research_accel?: number;
+  research_lines?: readonly string[];
+}
+
 export interface SlotStateView {
-  bases?: ReadonlyArray<{ buildings?: ReadonlyArray<{ name: string; state?: string }> }>;
+  bases?: ReadonlyArray<{
+    status?: string;
+    buildings?: ReadonlyArray<SlotBuildingView>;
+  }>;
   queues?: ReadonlyArray<{ type: string; item: string; base?: string; status?: string; hold?: boolean }>;
 }
+
+/** 建筑目录科研加速规格（供 <扩展档案> 落盘 <数据> 块后由 catalog 注入） */
+export interface ResearchBuildingSpec {
+  accel?: number;
+  lines?: readonly string[];
+}
+
+export type ResearchBuildingSpecOf = (buildingName: string) => ResearchBuildingSpec | undefined;
 
 /** 裁决器消费的最小事务视图（与 transactionEngine TransactionItem 结构兼容） */
 export interface SlotTxnView {
@@ -87,6 +105,11 @@ export interface SlotTxnView {
 /** 研究名 → line 的查找回调（通常由 catalog RESEARCHES 构建，见 lineIndexFromCatalog） */
 export type LineOf = (researchName: string) => string | undefined;
 
+export interface SlotAccelSource {
+  name: string;
+  accel: number;
+}
+
 /** slotBoard 派生只读视图条目（§5.3，供 UI/前馈日程消费） */
 export interface SlotBoardEntry {
   slotId: SlotId;
@@ -97,6 +120,10 @@ export interface SlotBoardEntry {
   active: string[];
   /** 排队数（status==='queued'） */
   queued: number;
+  /** 非标/特许科研建筑对该槽的综合推进倍率（默认 1） */
+  accelMultiplier?: number;
+  /** 提供加速的在役建筑明细 */
+  accelSources?: SlotAccelSource[];
 }
 
 /* ═══════════════ 注册表（§3.1 全表 · 冻结） ═══════════════ */
@@ -273,7 +300,7 @@ export function slotFor(lineOrName: string): SlotResolution {
  * 研究事务 → 槽归属：先经 lineOf 查 line 再入表；查无 line 时用研究名自身走 slotFor
  * （覆盖机娘名单枚举与兜底）。
  */
-function slotForResearch(item: string, lineOf: LineOf): SlotResolution {
+export function slotForResearch(item: string, lineOf: LineOf): SlotResolution {
   const line = lineOf(item);
   if (line !== undefined) {
     const byLine = slotFor(line);
@@ -292,9 +319,171 @@ export function lineIndexFromCatalog(researches: ReadonlyArray<{ name: string; l
   return name => index.get(name);
 }
 
+/** 从 catalog BUILDINGS 形状的数组构建科研加速查找回调 */
+export function researchSpecIndexFromCatalog(
+  buildings?: ReadonlyArray<{
+    name?: string;
+    id?: string;
+    research_accel?: number;
+    research_lines?: readonly string[];
+  }>,
+): ResearchBuildingSpecOf {
+  const map = new Map<string, ResearchBuildingSpec>();
+  for (const b of buildings ?? []) {
+    if (!b || typeof b.research_accel !== 'number' || b.research_accel <= 0) continue;
+    const spec: ResearchBuildingSpec = {
+      accel: Math.min(0.35, Math.max(0, b.research_accel)),
+      lines: b.research_lines,
+    };
+    if (typeof b.name === 'string' && b.name.trim()) map.set(b.name.trim(), spec);
+    if (typeof b.id === 'string' && b.id.trim()) map.set(b.id.trim(), spec);
+  }
+  return name => map.get(name.trim());
+}
+
+/** 单座非标科研建筑加速上限（+35%）与单槽总加速倍率硬上限（2.00x） */
+export const MAX_SINGLE_RESEARCH_BUILDING_ACCEL = 0.35;
+export const RESEARCH_ACCEL_CAP = 2.0;
+
+const WILDCARD_RESEARCH_LINE_RE = /^(?:全领域|全序列|通用|全部|全局|综合|all|\*)$/i;
+
+const SLOT_SEMANTIC_LINE_PATTERNS: Readonly<Record<SlotId, RegExp>> = {
+  'slot.main': /主建筑|建造|工程|地下|结构/,
+  'slot.industry': /工业|材料|冶金|化工|精炼|能源|电力|电子/,
+  'slot.defense': /防御|工事|掩体|防空|雷达|警戒/,
+  'slot.vehicle': /载具|装甲|战车|车辆|底盘|航空|空军|飞行|舰艇|海军|船舶/,
+  'slot.personnel': /人员|步兵|训练|医疗|生物|基因|人体/,
+  'slot.equipment': /装备|单兵|武器|枪械|火控|外骨骼|护具|弹药/,
+  'slot.agri': /农|畜|水培|副食|生态副食|育种|种植|食品|粮食/,
+  'slot.eco': /环保|水循环|净水|环境|废物|回收|公共设施/,
+  'slot.aerospace': /航天|轨道|火箭|空间|天基|卫星|推进/,
+  'slot.faction': /特色|阵营/,
+  'slot.mecha': /机娘|心智|神经|纳米医疗|机魂/,
+};
+
+/**
+ * 判定建筑声明的 `research_lines` 是否匹配指定科研槽：
+ * - `mode === 'accelerate'` 时：未声明 `lines` 或含 `全领域/通用` 视为全槽通用加速；
+ * - `mode === 'unlock'` 时：仅当显式声明了具体领域且命中该槽时才视为可开通该槽（防通用加速意外全开 11 槽）。
+ */
+export function buildingResearchLinesMatchSlot(
+  lines: readonly string[] | undefined,
+  slot: SlotDef,
+  mode: 'accelerate' | 'unlock' = 'accelerate',
+): boolean {
+  if (!lines || lines.length === 0) {
+    return mode === 'accelerate';
+  }
+  const hasWildcard = lines.some(l => WILDCARD_RESEARCH_LINE_RE.test(l.trim()));
+  if (hasWildcard) {
+    return mode === 'accelerate';
+  }
+  const slotShortId = slot.slotId.replace(/^slot\./, '').toLowerCase();
+  const slotCleanName = slot.name.replace(/槽$/, '');
+  const semanticRe = SLOT_SEMANTIC_LINE_PATTERNS[slot.slotId];
+
+  return lines.some(rawLine => {
+    const token = rawLine.trim();
+    if (!token) return false;
+    const lower = token.toLowerCase();
+    if (lower === slot.slotId.toLowerCase() || lower === slotShortId) return true;
+    if (token === slot.name || token === slotCleanName || slot.name.includes(token) || token.includes(slotCleanName)) {
+      return true;
+    }
+    if (slot.lines.some(l => l === token || l.includes(token) || token.includes(l))) {
+      return true;
+    }
+    if (semanticRe && semanticRe.test(token)) {
+      return true;
+    }
+    return false;
+  });
+}
+
+function resolveBuildingResearchSpec(
+  building: SlotBuildingView,
+  researchSpecOf?: ResearchBuildingSpecOf,
+): { accel: number; lines?: readonly string[] } | null {
+  const fromCatalog = researchSpecOf?.(building.name);
+  const rawAccel =
+    typeof building.research_accel === 'number' && Number.isFinite(building.research_accel)
+      ? building.research_accel
+      : fromCatalog?.accel;
+  if (typeof rawAccel !== 'number' || !Number.isFinite(rawAccel) || rawAccel <= 0) {
+    return null;
+  }
+  const accel = Math.min(MAX_SINGLE_RESEARCH_BUILDING_ACCEL, Math.max(0, rawAccel));
+  const lines =
+    Array.isArray(building.research_lines) && building.research_lines.length > 0
+      ? building.research_lines
+      : fromCatalog?.lines;
+  return { accel, lines };
+}
+
+export function resolveResearchSlotAccelSources(
+  state: SlotStateView,
+  slot: SlotDef,
+  researchSpecOf?: ResearchBuildingSpecOf,
+): SlotAccelSource[] {
+  const sources: SlotAccelSource[] = [];
+  for (const base of state.bases ?? []) {
+    if (!isResearchBaseUsable(base)) continue;
+    for (const building of base.buildings ?? []) {
+      if (!isResearchBuildingActive(building)) continue;
+      const spec = resolveBuildingResearchSpec(building, researchSpecOf);
+      if (!spec) continue;
+      if (buildingResearchLinesMatchSlot(spec.lines, slot, 'accelerate')) {
+        sources.push({ name: building.name, accel: spec.accel });
+      }
+    }
+  }
+  return sources;
+}
+
+/**
+ * 计算指定科研槽在当前在役非标/特许科研建筑加持下的综合推进倍率（1.00 ~ 2.00x）：
+ * - 按单建筑 accel 降序排列后采用递减叠加：第 1 座 100%、第 2 座 75%、第 3 座起 50%；
+ * - 总倍率封顶 RESEARCH_ACCEL_CAP (2.00x)。
+ */
+export function resolveResearchSlotAccelMultiplier(
+  state: SlotStateView,
+  slot: SlotDef,
+  researchSpecOf?: ResearchBuildingSpecOf,
+): number {
+  const matchedAccels = resolveResearchSlotAccelSources(state, slot, researchSpecOf).map(s => s.accel);
+  if (matchedAccels.length === 0) return 1;
+  matchedAccels.sort((a, b) => b - a);
+  let bonus = 0;
+  for (let i = 0; i < matchedAccels.length; i++) {
+    const weight = i === 0 ? 1.0 : i === 1 ? 0.75 : 0.5;
+    bonus += matchedAccels[i] * weight;
+  }
+  return Math.min(RESEARCH_ACCEL_CAP, Math.round((1 + bonus) * 100) / 100);
+}
+
+/** 生成研究事务的科研建筑加速系数回调（非研究事务恒返回 1） */
+export function makeResearchAccelEffFor(
+  state: SlotStateView,
+  lineOf: LineOf,
+  options: { researchSpecOf?: ResearchBuildingSpecOf } = {},
+): (txn: SlotTxnView) => number {
+  const accelBySlot = new Map<SlotId, number>(
+    SLOT_REGISTRY.map(slot => [
+      slot.slotId,
+      resolveResearchSlotAccelMultiplier(state, slot, options.researchSpecOf),
+    ]),
+  );
+  return txn => {
+    if (txn.type !== '研究') return 1;
+    const resolution = slotForResearch(txn.item, lineOf);
+    return accelBySlot.get(resolution.slotId) ?? 1;
+  };
+}
+
 /* ═══════════════ 锚定建筑在场判定（§2 混合开通制） ═══════════════ */
 
-const INACTIVE_RESEARCH_BUILDING_STATES = new Set([
+/** 非运转建筑状态集合（研究槽与协议锚点 protocolAnchors 共用，G3-10） */
+export const INACTIVE_RESEARCH_BUILDING_STATES: ReadonlySet<string> = new Set([
   '建造中',
   '停机',
   '受损',
@@ -312,17 +501,32 @@ function isResearchBuildingActive(building: { state?: string }): boolean {
   return !s || !INACTIVE_RESEARCH_BUILDING_STATES.has(s);
 }
 
+/** 基地是否参与科研判定（失守/废弃基地的建筑不计入开通、加速、科技 tier 与超算兜底） */
+function isResearchBaseUsable(base: { status?: string }): boolean {
+  return base.status !== '失守' && base.status !== '废弃';
+}
+
 /** 锚定建筑在场＝任一基地存在名称「包含」任一 anchorName 的建筑，且非建造中/受损/停机（建成且运转才开通）
  *  E2b 通道B：或建筑名命中 deploy 目标且被授予能力面覆盖本槽所需（SLOT_DEPLOY_CAPABILITY）；
  *  未注入 deployOf 时通道B恒不命中，行为与现状逐字节一致。 */
-function anchorPresent(state: SlotStateView, slot: SlotDef, deployOf?: DeployOf): boolean {
+function anchorPresent(
+  state: SlotStateView,
+  slot: SlotDef,
+  deployOf?: DeployOf,
+  researchSpecOf?: ResearchBuildingSpecOf,
+): boolean {
   for (const base of state.bases ?? []) {
+    if (!isResearchBaseUsable(base)) continue;
     for (const building of base.buildings ?? []) {
       if (!isResearchBuildingActive(building)) continue;
       if (slot.anchorNames.some(anchor => building.name.includes(anchor))) return true;
       const required = SLOT_DEPLOY_CAPABILITY[slot.slotId];
       if (required !== undefined && deployOf !== undefined) {
         if ((deployOf(building.name) ?? []).some(granted => capabilityCovers(granted, required))) return true;
+      }
+      const spec = resolveBuildingResearchSpec(building, researchSpecOf);
+      if (spec && buildingResearchLinesMatchSlot(spec.lines, slot, 'unlock')) {
+        return true;
       }
     }
   }
@@ -367,6 +571,7 @@ export const TECH_TIER_T3_ANCHORS: readonly string[] = [
 export function techTier(state: SlotStateView): 1 | 2 | 3 {
   let maxTier: 1 | 2 | 3 = 1;
   for (const base of state.bases ?? []) {
+    if (!isResearchBaseUsable(base)) continue;
     for (const building of base.buildings ?? []) {
       if (!isResearchBuildingActive(building)) continue;
       if (TECH_TIER_T3_ANCHORS.some(anchor => building.name.includes(anchor))) {
@@ -413,12 +618,16 @@ export function makeParallelLimitFor(
     baseLimitFor?: (txn: SlotTxnView) => number;
     warnSink?: (warn: SlotWarn) => void;
     deployOf?: DeployOf;
+    researchSpecOf?: ResearchBuildingSpecOf;
   } = {},
 ): (txn: SlotTxnView) => number {
   const baseLimitFor = options.baseLimitFor ?? (() => 1);
   // 开通状态在工厂时一次性快照（结算是纯函数，state 在单次结算内不变）
   const unlockedBySlot = new Map<SlotId, number>(
-    SLOT_REGISTRY.map(slot => [slot.slotId, anchorPresent(state, slot, options.deployOf) ? slot.capacity : 0]),
+    SLOT_REGISTRY.map(slot => [
+      slot.slotId,
+      anchorPresent(state, slot, options.deployOf, options.researchSpecOf) ? slot.capacity : 0,
+    ]),
   );
   return txn => {
     if (txn.type !== '研究') return baseLimitFor(txn);
@@ -428,8 +637,10 @@ export function makeParallelLimitFor(
     if (cap > 0) return cap;
     if ((state.bases?.length ?? 0) === 0) return 1;
     if (!txn.base && resolution.matched === 'fallback') {
-      const hasSupercomputer = (state.bases ?? []).some(b =>
-        (b.buildings ?? []).some(bd => (bd.state ?? '运转') === '运转' && bd.name.includes('超算中心')),
+      const hasSupercomputer = (state.bases ?? []).some(
+        b =>
+          isResearchBaseUsable(b) &&
+          (b.buildings ?? []).some(bd => isResearchBuildingActive(bd) && bd.name.includes('超算中心')),
       );
       if (hasSupercomputer) return 1;
     }
@@ -463,19 +674,25 @@ export function slotBoard(
   state: SlotStateView,
   lineOf: LineOf,
   warnSink?: (warn: SlotWarn) => void,
-  options: { deployOf?: DeployOf } = {},
+  options: { deployOf?: DeployOf; researchSpecOf?: ResearchBuildingSpecOf } = {},
 ): SlotBoardEntry[] {
   const entries = new Map<SlotId, SlotBoardEntry>(
-    SLOT_REGISTRY.map(slot => [
-      slot.slotId,
-      {
-        slotId: slot.slotId,
-        name: slot.name,
-        unlocked: anchorPresent(state, slot, options.deployOf),
-        active: [],
-        queued: 0,
-      },
-    ]),
+    SLOT_REGISTRY.map(slot => {
+      const accelSources = resolveResearchSlotAccelSources(state, slot, options.researchSpecOf);
+      const accelMultiplier = resolveResearchSlotAccelMultiplier(state, slot, options.researchSpecOf);
+      return [
+        slot.slotId,
+        {
+          slotId: slot.slotId,
+          name: slot.name,
+          unlocked: anchorPresent(state, slot, options.deployOf, options.researchSpecOf),
+          active: [],
+          queued: 0,
+          ...(accelMultiplier > 1.001 ? { accelMultiplier } : {}),
+          ...(accelSources.length > 0 ? { accelSources } : {}),
+        },
+      ];
+    }),
   );
   for (const txn of state.queues ?? []) {
     if (txn.type !== '研究') continue;

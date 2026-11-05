@@ -152,21 +152,24 @@ describe('PKG-D · <排产计划> 科研扩充、<战况> 旁路收口与世界�
   });
 
   describe('3. <战况> 资金旁路收口与存量向后兼容', () => {
-    it('默认向后兼容模式下保留 <战况> 资金入账，并在非首楼留下旁路提示事件', () => {
-      const raw = '<战况>\n资金: 5000\n</战况>';
-      const r = parseMessageText(raw, { economy: { credits: 1000, credits_daily: 0, chains: [], wallet: {} } });
-      expect(r.data.economy.credits).toBe(5000);
-      expect(
-        r.events.some(e => e.path === 'economy.credits' && e.message.includes('遗产资金旁路兼容入账')),
-      ).toBe(true);
+    it('G7-01：默认（真实运行未传任何开关）即拦截非首楼 <战况>/<态势> 资金写入', () => {
+      for (const tag of ['战况', '态势']) {
+        const r = parseMessageText(
+          `<${tag}>\n资金: 999999\n</${tag}>`,
+          { economy: { credits: 1000, credits_daily: 0, chains: [], wallet: {} } },
+          { isFirstFloor: false, floorId: 5 },
+        );
+        expect(r.data.economy.credits).toBe(1000);
+        expect(r.events.some(e => e.light === '🟡' && e.path === 'economy.credits')).toBe(true);
+      }
     });
 
-    it('开启 disallowLegacyWarStatCredits 时拦截非首楼 <战况> 资金/经费旁路写入，首楼照常放行', () => {
+    it('拦截非首楼 <战况> 资金/经费旁路写入，首楼照常放行', () => {
       const raw = '<战况>\n资金: 8888\n经费变化: +500\n</战况>';
       const nonFirst = parseMessageText(
         raw,
         { economy: { credits: 1200, credits_daily: 0, chains: [], wallet: {} } },
-        { isFirstFloor: false, disallowLegacyWarStatCredits: true },
+        { isFirstFloor: false },
       );
       expect(nonFirst.data.economy.credits).toBe(1200);
       expect(nonFirst.quarantine).toHaveLength(0);
@@ -177,7 +180,7 @@ describe('PKG-D · <排产计划> 科研扩充、<战况> 旁路收口与世界�
       const firstFloor = parseMessageText(
         '<战况>\n资金: 8888\n</战况>',
         { economy: { credits: 1200, credits_daily: 0, chains: [], wallet: {} } },
-        { isFirstFloor: true, disallowLegacyWarStatCredits: true },
+        { isFirstFloor: true },
       );
       expect(firstFloor.data.economy.credits).toBe(8888);
     });

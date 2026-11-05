@@ -19,6 +19,11 @@ import {
 import { settleFloor } from '../engines/settleFloor';
 import { parseMessageText } from '../parse/parsePipeline';
 
+/** G7-07：暗网结算需要已建成并运转的中继站；交割类用例的基线统一挂载此基地 */
+const RELAY_BASES = [
+  { id: 'relay_base', name: '暗网中继基地', buildings: [{ name: '超维暗网中继站', state: '运转' }] },
+];
+
 describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引擎', () => {
   describe('1. 旧档向后兼容与 Schema 默认值契约', () => {
     it('Schema.parse({}) 零报错向后兼容，且归零态不注入冗余可选键', () => {
@@ -81,6 +86,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
         sold_intel_ids: [],
         completed_bounty_ids: [],
         settled_auction_ids: [],
+        settled_tx_ids: [],
         ledger: [],
       });
       expect(EconomyChannelDaily.parse({})).toEqual({
@@ -141,7 +147,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
       const blocks = extractDarknetBlocks(rawFloor);
       expect(blocks).toHaveLength(1);
 
-      const parsed = parseMessageText(rawFloor, { economy: { credits: 5000 } });
+      const parsed = parseMessageText(rawFloor, { bases: RELAY_BASES, economy: { credits: 5000 } });
       expect(parsed.applied).toBe(true);
       expect(parsed.quarantine).toHaveLength(0);
 
@@ -187,6 +193,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
   describe('3. 售出实物：六柱库存扣减与不足刚性阻断', () => {
     it('六柱库存充足时正常扣减库存并增加 credits，库存不足时阻断交割（绝不扣成负数或凭空加钱）', () => {
       const base = Schema.parse({
+        bases: RELAY_BASES,
         economy: {
           credits: 1000,
           resources: {
@@ -242,7 +249,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
     说明: 首次上传跨位面灵脉测绘数据。
 </暗网>
 `;
-      const floor1 = parseMessageText(floor1Raw, { economy: { credits: 500 } });
+      const floor1 = parseMessageText(floor1Raw, { bases: RELAY_BASES, economy: { credits: 500 } });
       expect(floor1.data.economy.credits).toBe(2000);
       expect(floor1.data.economy.darknet?.sold_intel_ids).toContain('intel_beipo_spirit_vein_map');
 
@@ -276,6 +283,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
   describe('5. 多轮慢节奏拍卖会、黑市直购与求购悬赏闭环', () => {
     it('竞拍出价只更新价格/领先方/轮次而不扣款；拍卖竞得落槌一次性扣款并入库 resource_map；拍卖送拍成交正常收款', () => {
       const init = Schema.parse({
+        bases: RELAY_BASES,
         economy: {
           credits: 12000,
           resources: {
@@ -393,6 +401,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
     编号: retry_auc
 </暗网>`;
       const failed = parseMessageText(raw, Schema.parse({
+        bases: RELAY_BASES,
         economy: { credits: 500, resources: { materials: { 黑匣子: 0 } } },
       }));
       expect(failed.data.economy.credits).toBe(500);
@@ -425,6 +434,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
     资源扣减: {柱: materials, 键: 样本, 数量: 2}
 </暗网>`;
       const failed = parseMessageText(raw, Schema.parse({
+        bases: RELAY_BASES,
         economy: { credits: 500, resources: { materials: { 样本: 1 } } },
       }));
       expect(failed.data.economy.credits).toBe(500);
@@ -461,6 +471,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
     资源扣减: {柱: minerals, 键: 玄铁, 数量: 3}
 </暗网>`;
       const first = parseMessageText(raw, Schema.parse({
+        bases: RELAY_BASES,
         economy: { credits: 500, resources: { minerals: { 玄铁: 10 } } },
       }));
       expect(first.data.economy.resources!.minerals['玄铁']).toBe(7);
@@ -477,6 +488,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
   - {动作: 上架送拍, 编号: consign_1, 标的: 玄铁, 资源扣减: {柱: minerals, 键: 玄铁, 数量: 3}}
   - {动作: 上架送拍, 编号: consign_2, 标的: 玄铁, 资源扣减: {柱: minerals, 键: 玄铁, 数量: 3}}
 </暗网>`, Schema.parse({
+        bases: RELAY_BASES,
         economy: { resources: { minerals: { 玄铁: 10 } } },
       }));
       expect(result.data.economy.resources!.minerals['玄铁']).toBe(4);
@@ -488,6 +500,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
 本轮交割:
   - {动作: 上架送拍, 编号: consign_1, 标的: 玄铁, 资源扣减: {柱: minerals, 键: 玄铁, 数量: 3}}
 </暗网>`, Schema.parse({
+        bases: RELAY_BASES,
         economy: { credits: 500, resources: { minerals: { 玄铁: 2 } } },
       }));
       expect(result.data.economy.resources!.minerals['玄铁']).toBe(2);
@@ -501,6 +514,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
   describe('G10-F05 显式入库映射无效时拒收且不发生扣款或终态变更', () => {
     it('直购与落槌含非法资源柱、非正数量或空显式映射时拒收，余额、库存、拍品状态与流水均不变', () => {
       const init = Schema.parse({
+        bases: RELAY_BASES,
         economy: {
           credits: 5000,
           resources: {
@@ -558,6 +572,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
 
     it('合法显式入库映射与无显式映射的奇物/装备交割均正常成功', () => {
       const init = Schema.parse({
+        bases: RELAY_BASES,
         economy: {
           credits: 5000,
           resources: {
@@ -623,7 +638,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
   - {动作: 完成悬赏, 编号: b_settled_01, 标的: 高阶妖兽灵核}
   - {动作: 拍卖竞得落槌, 编号: a_won_01, 标的: 轨道火控黑匣子, 出价: 2000}
   - {动作: 拍卖送拍成交, 编号: a_sold_01, 标的: 紫幽玄铁精粹, 资金变动: +1500}
-</暗网>`, Schema.parse({ economy: { credits: 5000 } }));
+</暗网>`, Schema.parse({ bases: RELAY_BASES, economy: { credits: 5000 } }));
 
       // 5000 + 1000 - 2000 + 1500 = 5500
       expect(floor1.data.economy.credits).toBe(5500);
@@ -631,7 +646,7 @@ describe('DARKNET-CORE-01 · 暗网 Schema、解析门与多元经济结算引�
       // 第二楼清空悬赏与拍卖目录，并刷入 22 笔普通交易使 ledger 滚动截断超过 20 条上限
       const fillerLines = Array.from(
         { length: 22 },
-        (_, i) => `  - {动作: 售出实物, 编号: tx_fill_${i}, 标的: 零散废铁_${i}, 资金变动: +10}`,
+        (_, i) => `  - {动作: 售出信息, 编号: tx_fill_${i}, 标的: 零散情报_${i}, 资金变动: +10}`,
       ).join('\n');
       const floor2 = parseMessageText(`<暗网>
 求购悬赏: []
@@ -646,6 +661,8 @@ ${fillerLines}
 
       // 第三楼重传已结清的同 ID 悬赏与拍品交割，必须全部幂等拦截；同时提交同名但不同 ID 的新实例，应合法成交
       const floor3 = parseMessageText(`<暗网>
+当期拍卖:
+  - {编号: a_won_02, 拍品: 轨道火控黑匣子, 当前最高价: 1200}
 本轮交割:
   - {动作: 完成悬赏, 编号: b_settled_01, 标的: 高阶妖兽灵核, 资金变动: +1000}
   - {动作: 拍卖竞得落槌, 编号: a_won_01, 标的: 轨道火控黑匣子, 出价: 2000}
@@ -660,6 +677,7 @@ ${fillerLines}
 
     it('已进入 sold/expired 终态的拍品与已 completed/expired 的悬赏在列表刷新或竞拍出价时不会复活', () => {
       const init = Schema.parse({
+        bases: RELAY_BASES,
         economy: {
           credits: 5000,
           darknet: {
@@ -714,6 +732,43 @@ ${fillerLines}
       expect(aExp.status).toBe('passed');
       expect(aExp.current_price).toBe(1000);
       expect(res.data.economy.darknet!.ledger).toHaveLength(0);
+    });
+  });
+
+  describe('G7-07 暗网解锁门禁收口到结算侧', () => {
+    const sellRaw = `<暗网>
+本轮交割:
+  - 动作: 售出实物
+    编号: g707_sell
+    标的: 玄铁
+    资源扣减: {柱: minerals, 键: 玄铁, 数量: 2}
+    资金变动: +900
+</暗网>`;
+    const mk = (buildings: { name: string; state: string }[]) =>
+      Schema.parse({
+        bases: [{ id: 'b1', name: '主基地', buildings }],
+        economy: { credits: 1000, resources: { minerals: { 玄铁: 10 } } },
+      });
+
+    it('无中继/中继建造中时整块不结算并给黄灯，缺市场状态也不自动接入；运转中继正常结算', () => {
+      for (const buildings of [[], [{ name: '超维暗网中继站', state: '建造中' }]]) {
+        const r = parseMessageText(sellRaw, mk(buildings));
+        expect(r.data.economy.credits).toBe(1000);
+        expect(r.data.economy.resources?.minerals?.玄铁).toBe(10);
+        expect(r.data.economy.darknet?.market_status ?? '未接入').toBe('未接入');
+        expect(r.events.some(e => e.light === '🟡' && e.path === 'economy.darknet')).toBe(true);
+      }
+      const ok = parseMessageText(sellRaw, mk([{ name: '超维暗网中继站', state: '运转' }]));
+      expect(ok.data.economy.credits).toBe(1900);
+      expect(ok.data.economy.resources?.minerals?.玄铁).toBe(8);
+      expect(ok.data.economy.darknet?.market_status).toBe('正常连接');
+    });
+
+    it('中继失效后被动刷新把信道写回「未接入」', () => {
+      const state = mk([{ name: '超维暗网中继站', state: '停机' }]);
+      state.economy.darknet = DarknetState.parse({ market_status: '正常连接' });
+      tickDarknetAndPassiveEconomy(state, 60);
+      expect(state.economy.darknet?.market_status).toBe('未接入');
     });
   });
 
@@ -911,6 +966,7 @@ ${fillerLines}
 
     it('BUG-LIVE-09：当期拍卖整表刷新后，对已托管的同 ID 我方送拍品再次执行「上架送拍」改价不二次扣减六柱实物库存', () => {
       const state = Schema.parse({
+        bases: RELAY_BASES,
         economy: {
           credits: 5000,
           resources: {
@@ -964,6 +1020,7 @@ ${fillerLines}
 
     it('BUG-LIVE-20b（#58楼实机复现）：支持 <暗网订单>/<暗网采购>/<黑市订单> 顶层块与列表直采结构，按幂等 ID 扣减 credits、入账高能纳米工料并记入 ledger', () => {
       const base58 = Schema.parse({
+        bases: RELAY_BASES,
         economy: {
           credits: 50000,
           resources: {
@@ -1006,6 +1063,7 @@ ${fillerLines}
 
     it('BUG-R2-10：① 主动撤拍与当期拍卖流拍/下架自动退回我方托管库存且防重复退还；② 防低价出价篡改最高价与领先方；③ 防 NPC 抬价误报验资预警；④ 卖方成交归属校验拦截非我方拍品', () => {
       const init = Schema.parse({
+        bases: RELAY_BASES,
         economy: {
           credits: 5000,
           resources: {
@@ -1112,6 +1170,7 @@ ${fillerLines}
     it('BUG-R2-22 & BUG-R2-23（#48~#50楼实机复现）：① IncomeChain.eff=1.2 基线通过 Schema 校验；② <暗网> 行情/悬赏/拍卖顶层与子项中文同义键映射；③ 我方寄售拍品自动实扣库存及后续送拍成交/外部竞得入库/流拍撤拍退回双路径闭环', () => {
       // #48 楼基线：含 eff: 1.2 的超负荷资金链，以及特种合金 500、电子元件 500
       const baseline48 = {
+        bases: RELAY_BASES,
         economy: {
           credits: 10000,
           chains: [

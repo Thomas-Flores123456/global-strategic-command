@@ -17,6 +17,7 @@
  * - 🔴 纯函数：零 IO / 零 DOM / 零 vue·pinia / 零酒馆 API；不原地修改入参。
  */
 import type { EconomyResources } from '../../红警指挥系统/core/schema';
+import { getDarknetRelayStatus } from '../../红警指挥系统/engines/darknetEngine';
 
 /* ═══════════════ 六柱注册表（schema 声明序；名/副标＝schema.ts 注释同源，实现裁量登记） ═══════════════ */
 
@@ -138,6 +139,7 @@ export interface DarknetBaseLike {
   id?: string;
   name?: string;
   status?: string;
+  power?: { gen?: number; use?: number };
   buildings?: ReadonlyArray<DarknetBaseBuildingLike>;
 }
 
@@ -253,7 +255,6 @@ export interface ResourcePanelOptions {
 
 /* ═══════════════ 内部纯函数辅助 ═══════════════ */
 
-const DARKNET_BUILDING_KEYWORDS = ['超维暗网中继站', '暗网中继站', '暗网终端'] as const;
 const DEFAULT_NEXT_AUCTION_MINUTES = 7 * 1440; // 7日0h
 
 function itemRow(name: string, value: number | null): ResourceItemRow {
@@ -284,29 +285,6 @@ function normalizeBaseList(
   return [];
 }
 
-function detectDarknetBuildings(bases: DarknetBaseLike[]): {
-  anyDarknetBuilding: boolean;
-  relayBuildingPresent: boolean;
-} {
-  let anyDarknetBuilding = false;
-  let relayBuildingPresent = false;
-  for (const base of bases) {
-    if (!base || base.status === '废弃') continue;
-    const buildings = Array.isArray(base.buildings) ? base.buildings : [];
-    for (const bld of buildings) {
-      const name = typeof bld?.name === 'string' ? bld.name.trim() : '';
-      if (!name) continue;
-      const matchesKeyword = DARKNET_BUILDING_KEYWORDS.some(kw => name.includes(kw));
-      if (matchesKeyword) {
-        anyDarknetBuilding = true;
-        if (bld.state !== '建造中' && bld.state !== '停机') {
-          relayBuildingPresent = true;
-        }
-      }
-    }
-  }
-  return { anyDarknetBuilding, relayBuildingPresent };
-}
 
 function normalizeChannelDaily(raw?: Partial<EconomyChannelDailyView> | null): EconomyChannelDailyView {
   const refining = toFiniteNumber(raw?.refining, 0);
@@ -480,21 +458,22 @@ export function resourcePanelModel(
   const soldIntelCount = Array.isArray(rawDarknet?.sold_intel_ids) ? rawDarknet.sold_intel_ids.length : 0;
 
   const bases = normalizeBaseList(options?.bases ?? safeEconomy.bases);
-  const { anyDarknetBuilding, relayBuildingPresent } = detectDarknetBuildings(bases);
+  // G7-07：中继状态只认引擎真源；解锁仅看是否有运转中的中继
+  const relay = getDarknetRelayStatus(bases);
+  const relayBuildingPresent = relay.status === 'active';
 
   const rawMarketStatus = typeof rawDarknet?.market_status === 'string' ? rawDarknet.market_status.trim() : '';
-  const hasDarknetActivity =
-    items.length > 0 || bounties.length > 0 || auctions.length > 0 || recentLedger.length > 0;
-  const unlocked =
-    anyDarknetBuilding || relayBuildingPresent || hasDarknetActivity || rawMarketStatus === '正常连接';
+  const unlocked = relayBuildingPresent;
 
   const marketStatusText = unlocked
     ? rawMarketStatus && rawMarketStatus !== '未连接' && rawMarketStatus !== '待建超维暗网中继站'
       ? rawMarketStatus
       : '正常连接'
-    : rawMarketStatus && rawMarketStatus !== '未连接'
-      ? rawMarketStatus
-      : '待建超维暗网中继站';
+    : relay.status === 'building'
+      ? '暗网中继站建造中'
+      : relay.status === 'offline'
+        ? `暗网中继站停机${relay.reason ? `（${relay.reason}）` : ''}`
+        : '待建超维暗网中继站';
 
   const rawAuctionStatus = rawDarknet?.auction_status;
   const auctionStatus: 'closed' | 'bidding' | 'settled' =

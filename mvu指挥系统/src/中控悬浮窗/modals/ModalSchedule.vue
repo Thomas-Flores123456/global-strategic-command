@@ -740,7 +740,8 @@
                 <span class="sch-lane-name">{{ slot.name.replace(/研究序列$/, '研究组') }}</span>
                 <span v-if="slot.unlocked" class="sch-lane-meta">
                   进行 {{ slot.activeItems.length }}/{{ slot.limit
-                  }}<template v-if="slot.queuedCount > 0"> · 排队 {{ slot.queuedCount }}</template>
+                  }}<template v-if="slot.queuedCount > 0"> · 排队 {{ slot.queuedCount }}</template
+                  ><template v-if="(slot.accelMultiplier ?? 1) > 1"> · 加速 {{ (slot.accelMultiplier ?? 1).toFixed(2) }}x</template>
                 </span>
                 <span v-else class="sch-locked-reason">{{ slot.lockedReason?.replace(/，序列未开通$/, '，暂未开放') }}</span>
               </div>

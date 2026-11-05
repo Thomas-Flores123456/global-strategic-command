@@ -308,6 +308,46 @@ describe('FD-29 PKG-A · Schema 扩展、<任务> 解析器与悬赏自动交割
     expect(floor2.events.some(e => e.light === '🟡' && e.message.includes('幂等跳过重复奖励发放'))).toBe(true);
   });
 
+  it('7b. G6-08 战利品发放：不设上限、非实物不入库、重复交割不重复发放', () => {
+    const normal = parseMessageText(
+      `<任务>
+- 名称: 缴获敌军补给站
+  状态: 已完成
+  奖励:
+    战利品: [夜视仪×3, 野战电台]
+</任务>`,
+      zero(),
+      {},
+    );
+    expect(normal.data.forces.equipment).toMatchObject({ 夜视仪: 3, 野战电台: 1 });
+
+    const capped = parseMessageText(
+      `<任务>
+- 名称: 军械库洗劫
+  状态: 已完成
+  奖励:
+    战利品: [突击步枪×8, 防弹衣×5, 敌军补给线拓扑图, 港口控制权]
+</任务>`,
+      zero(),
+      {},
+    );
+    expect(capped.data.forces.equipment).toEqual({ 突击步枪: 8, 防弹衣: 5 });
+    expect(capped.events.some(e => e.light === '🟡')).toBe(false);
+    expect(capped.events.some(e => e.message.includes('非实物奖励不入库'))).toBe(true);
+
+    const repeat = parseMessageText(
+      `<任务>
+- 名称: 缴获敌军补给站
+  状态: 达成
+  奖励:
+    战利品: [夜视仪×3, 野战电台]
+</任务>`,
+      normal.data,
+      {},
+    );
+    expect(repeat.data.forces.equipment).toMatchObject({ 夜视仪: 3, 野战电台: 1 });
+  });
+
   it('8. 任务失败与取消归档：从 active 摘除并移入 history，reward_claimed=false，不发放奖励', () => {
     const floor1 = parseMessageText(
       `<任务>

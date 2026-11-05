@@ -1165,3 +1165,26 @@ describe('FD-29 PKG-B · <任务> 战区作战任务指令书解析与楼层卡�
     );
   });
 });
+
+describe('G1-04 · 协议索引取载荷按 cardType 归属（<战况> 等别名）', () => {
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).getChatMessages;
+  });
+
+  it('载荷被剥离时，<战况> 别名楼层可按 mesid 回退水合态势卡，而非 missing-block', () => {
+    const doc = new MockDocument();
+    (globalThis as Record<string, unknown>).getChatMessages = vi.fn(() => [
+      { message: '正文\n<战况>\n日期: 秋·九月二十\n地点: 青岚山北坡\n天气: 晴\n</战况>' },
+    ]);
+    const host = doc.createElement('div');
+    host.className = 'tw-floor-card-host';
+    host.setAttribute('data-tw-card', 'tactical-situation');
+    doc.body.appendChild(host);
+
+    expect(hydrateFloorCardHost(host as unknown as HTMLElement, { mesid: 7 })).toBe(true);
+    expect(host.getAttribute('data-tw-payload-error')).toBeNull();
+    const card = host.querySelector('[data-test="tactical-situation-card"]');
+    expect(card).not.toBeNull();
+    expect(card!.collectText()).toContain('青岚山北坡');
+  });
+});

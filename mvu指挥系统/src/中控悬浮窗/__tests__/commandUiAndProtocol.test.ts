@@ -852,11 +852,17 @@ describe('UI-BUILD-GRID-01 · ConsoleBuildGrid 建造/生产双面板双铁律�
     ).toBe(true);
 
     // (c) 工程车间面板接入统一条件分析器（支持激活协议与 need_building 前置建筑校验）
+    // 使用正式默认目录的 ID/名称，验证无 title 的实例仍能由目录解析；非 active 状态不能解锁。
     expect(
-      checkIsResearchUnlocked('高空无人侦察协定', [], {
-        'all.protocol.ra3.high_altitude_uav_pact': { status: 'active' },
+      checkIsResearchUnlocked('高空战术伞降与特战信标引导空投协议', [], {
+        'all.protocol.t1.airborne_pathfinder_drop': { status: 'active' },
       }),
     ).toBe(true);
+    expect(
+      checkIsResearchUnlocked('高空战术伞降与特战信标引导空投协议', [], {
+        'all.protocol.t1.airborne_pathfinder_drop': { status: 'researching' },
+      }),
+    ).toBe(false);
 
     const retrofitDef = {
       kind: 'retrofit' as const,

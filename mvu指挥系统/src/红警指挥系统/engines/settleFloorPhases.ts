@@ -113,7 +113,8 @@ export function settleFloorProtocols(
     explicitCatalogProtocols as unknown as import('../core/catalogEffective').ProtocolIndexSource,
   );
 
-  const lookupProtocolDef = (idOrName: string): ProtocolDefinitionLike => {
+  /** 目录（含 18 条存量协议静态表）未收录时返回 undefined：不再兔底生成无阵营/轨道/费用的 tier1 定义（G3-07） */
+  const lookupProtocolDef = (idOrName: string): ProtocolDefinitionLike | undefined => {
     const resolvedId = protocolIndex.resolveProtocolIdByName(idOrName) ?? canonicalizeProtocolRef(idOrName);
     const fromExplicit = explicitCatalogProtocols.find(item => {
       const itemRef = canonicalizeProtocolRef(item.id || item.name || '');
@@ -129,21 +130,18 @@ export function settleFloorProtocols(
         tier: fromLegacy.tier,
       };
     }
-    return {
-      id: resolvedId || idOrName,
-      name: protocolIndex.resolveProtocolNameById(resolvedId || idOrName) ?? idOrName,
-      tier: 1,
-    };
+    return undefined;
   };
 
   const resolveProtocolDisplayName = (idOrName: string): string => {
     const def = lookupProtocolDef(idOrName);
-    return def.name || resolveLegacyProtocolName(idOrName) || idOrName;
+    return def?.name || resolveLegacyProtocolName(idOrName) || idOrName;
   };
 
   const effectiveCatalogProtocols: ProtocolDefinitionLike[] = [];
   const seenRefs = new Set<string>();
-  const pushCatalogDef = (def: ProtocolDefinitionLike) => {
+  const pushCatalogDef = (def: ProtocolDefinitionLike | undefined) => {
+    if (!def) return;
     const ref = canonicalizeProtocolRef(def.id || def.name || '');
     if (!ref || seenRefs.has(ref)) return;
     seenRefs.add(ref);
@@ -170,12 +168,7 @@ export function settleFloorProtocols(
           : 0;
 
   let workingState: StatData = stateBefore;
-  const baseDailyRate = dailyProtocolPointRate(workingState);
-  const cmdMods = evaluateCommandHQModifiers(workingState);
-  const dailyRate =
-    cmdMods.protocolDailyRateBonus > 0
-      ? Math.round(baseDailyRate * (1 + cmdMods.protocolDailyRateBonus) * 10000) / 10000
-      : baseDailyRate;
+  const dailyRate = resolveEffectiveProtocolDailyRate(workingState);
   let deltaPoints = 0;
   const discoveredByExperimentIds: string[] = [];
   const discoveredByEventIds: string[] = [];
@@ -249,6 +242,16 @@ export function settleFloorProtocols(
     const targetKey =
       decl.protocolId ?? decl.protocol?.protocolId ?? decl.protocolName ?? decl.protocol?.protocolName ?? '';
     const protocolDef = lookupProtocolDef(targetKey);
+    if (!protocolDef) {
+      // G3-07 / G3-22：目录未收录的协议一律拒绝（不新建实例、不启封、不实验）
+      events.push({
+        light: '🟡',
+        layer: 'instruction',
+        message: `[协议] 协议声明未执行「${targetKey || '（空）'}」（原因：协议目录未收录）`,
+        path: 'protocols',
+      });
+      continue;
+    }
     const canonicalRef = canonicalizeProtocolRef(protocolDef.id || protocolDef.name || targetKey);
     const displayName = protocolDef.name || resolveLegacyProtocolName(canonicalRef) || canonicalRef;
 
@@ -464,6 +467,10 @@ export function settleFloorProtocols(
 
   if (deltaMinutes > 0 && (workingState.protocols?.some(p => p.auto_queued === true) ?? false)) {
     const skipProtocolIds = new Set<string>([...manualExperimentedIds, ...unlockedInStepB]);
+    // G3-07：目录未收录的存量实例不参与自动实验（避免引擎侧 tier1 兔底定义）
+    for (const inst of workingState.protocols ?? []) {
+      if (typeof inst.ref === 'string' && !lookupProtocolDef(inst.ref)) skipProtocolIds.add(inst.ref);
+    }
     const autoRes = settleAutoProtocols(workingState, effectiveCatalogProtocols, {
       gameDay,
       skipProtocolIds,
@@ -646,11 +653,11 @@ export function applyFactionUnlockSettlement(data: StatData, unlocks: readonly P
     const factionId = normalizeFactionId(unlock.factionId);
     if (!factionId) continue;
 
-    if (!cmd.unlocked_factions.includes(factionId)) {
+    if (!cmd.unlocked_factions.some(f => normalizeFactionId(f) === factionId)) {
       cmd.unlocked_factions.push(factionId);
     }
 
-    if (cmd.mcv_granted_factions.includes(factionId)) {
+    if (cmd.mcv_granted_factions.some(f => normalizeFactionId(f) === factionId)) {
       logs.push(`[防刷拦截] 阵营 ${factionId} 曾发放过首发 MCV，跳过重复配发`);
       continue;
     }
@@ -675,12 +682,19 @@ export function applyFactionUnlockSettlement(data: StatData, unlocks: readonly P
         g => (typeof g === 'string' && g === girlName) || (g && typeof g === 'object' && g.name === girlName),
       );
       if (!hasGirl) {
-        data.forces.girls.push({
-          name: girlName,
-          duty: girlDuty,
-          hp: '完好',
-          base: '',
-        } as unknown as StatData['forces']['girls'][number]);
+        // G8-16：替换数组而非原地 push，避免污染调用方浅拷贝快照共享的 girls 引用
+        // G8-17：发放时写入好感/服从初值，避免面板先显示「—」
+        data.forces.girls = [
+          ...data.forces.girls,
+          {
+            name: girlName,
+            duty: girlDuty,
+            hp: '完好',
+            base: '',
+            affection: 50,
+            obedience: 50,
+          } as unknown as StatData['forces']['girls'][number],
+        ];
       }
     }
 
@@ -1130,6 +1144,16 @@ function isGirlCriticallyInjuredInForces(data: Partial<StatData> | undefined | n
   const rawStatus = String(girl.status ?? '');
   const hpStr = typeof rawHp === 'string' ? rawHp : '';
   return (typeof rawHp === 'number' && rawHp <= 0) || GIRL_SEVERE_INJURY_RE.test(rawStatus) || GIRL_SEVERE_INJURY_RE.test(hpStr);
+}
+
+/**
+ * 协议点有效日产速率（G3-09 唯一算法）：建筑双轴速率 × (1 + 副官 protocolDailyRateBonus)，精确到 4 位小数。
+ * 结算步骤 A 与 PanelProtocol 日产显示共用。
+ */
+export function resolveEffectiveProtocolDailyRate(data: Partial<StatData> | undefined | null): number {
+  const baseDailyRate = dailyProtocolPointRate(data as StatData);
+  const bonus = evaluateCommandHQModifiers(data).protocolDailyRateBonus;
+  return bonus > 0 ? Math.round(baseDailyRate * (1 + bonus) * 10000) / 10000 : baseDailyRate;
 }
 
 /**

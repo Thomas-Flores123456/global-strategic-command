@@ -49,6 +49,8 @@ import {
   dismissChrono,
   ensureChatBookGatewayMethods,
   finalizeBranchWorldbookCloneIfNeeded,
+  hashText,
+  normalizeParseRoot,
   reconcileDeletedFloorsAbove,
   runParseFor,
   type RunOptions,
@@ -80,6 +82,7 @@ type ChatMsgLite = {
   role?: string;
   is_hidden?: boolean;
   swipe_id?: number;
+  message?: string;
   data?: { stat_data?: Record<string, unknown> };
 };
 
@@ -550,6 +553,49 @@ export function findLatestAiFloor(
   return null;
 }
 
+/**
+ * G9-01：按消息身份检出「删中间楼」。
+ * 以 `$parse.done[楼号].hash`（解析时该楼原文 FNV 指纹）逐楼比对宿主当前消息：
+ * 楼号 <= hostLast 却已不存在、变成 user 楼或原文指纹不符（同 swipe 页），即该楼起楼号已整体前移。
+ * 返回最小错位楼号；全部吻合（仅删末尾楼）返回 undefined。
+ */
+export function detectMidDeletionFloor(
+  hostLast: number,
+  deps: Pick<FloorObserversDeps, 'getChatMessages'>,
+  chatVars?: Record<string, unknown>,
+): number | undefined {
+  let vars = chatVars;
+  if (!vars) {
+    const gv = tav<(o: { type: string }) => Record<string, unknown>>('getVariables');
+    try {
+      vars = gv?.({ type: 'chat' }) ?? {};
+    } catch {
+      return undefined;
+    }
+  }
+  const done = normalizeParseRoot(vars?.$parse).done;
+  let firstMismatch: number | undefined;
+  for (const [key, rec] of Object.entries(done)) {
+    if (!/^\d+$/.test(key)) continue;
+    const floor = Number.parseInt(key, 10);
+    if (floor > hostLast) continue;
+    if (firstMismatch !== undefined && floor >= firstMismatch) continue;
+    let msg: ChatMsgLite | undefined;
+    try {
+      msg = deps.getChatMessages(floor)?.[0];
+    } catch {
+      continue;
+    }
+    let mismatch = !msg || msg.role === 'user';
+    if (!mismatch && msg && typeof msg.message === 'string') {
+      const sameSwipe = rec.swipe_id === undefined || (msg.swipe_id ?? 0) === rec.swipe_id;
+      mismatch = sameSwipe && hashText(msg.message) !== rec.hash;
+    }
+    if (mismatch) firstMismatch = floor;
+  }
+  return firstMismatch;
+}
+
 let wired = false;
 const inFlight = new Set<string>();
 let stopHandles: EventOnReturn[] = [];
@@ -921,13 +967,76 @@ export function installFloorObservers(
     }
   };
 
-  const onMessageDeleted = async () => {
-    const last = findLatestAiFloor(deps) ?? -1;
+  const readHostLast = (): number => {
+    let hostLast: number;
     try {
-      await reconcileDeletedFloorsAbove(last);
+      hostLast = deps.getLastMessageId();
+    } catch {
+      hostLast = findLatestAiFloor(deps) ?? -1;
+    }
+    return Number.isFinite(hostLast) ? hostLast : -1;
+  };
+
+  /**
+   * G9-01b：删中间楼后，从错位楼起到末楼逐楼按顺序重解析。
+   * 每楼以前一楼 stat_data 为基线，只重解析末楼会让中间各楼保留被删楼的旧状态，末楼也接在旧状态上。
+   * 中间楼只跑解析，末楼走 parseAndRefresh 统一刷新悬浮窗。
+   */
+  const reparseFromMidDeletion = async (midFrom: number): Promise<void> => {
+    const last = findLatestAiFloor(deps) ?? -1;
+    const expectChatId = deps.readChatId() ?? readCurrentChatId() ?? undefined;
+    for (let m = midFrom; m < last; m++) {
+      let msg: ChatMsgLite | undefined;
+      try {
+        msg = deps.getChatMessages(m)?.[0];
+      } catch {
+        continue;
+      }
+      if (!msg || msg.role === 'user' || msg.is_hidden) continue;
+      const outcome = await deps.runParse(m, { force: false, expectChatId }).catch(e => {
+        console.warn(`[floorObservers] 删中间楼重解析 #${m} 异常`, e);
+        return 'unavailable' as const;
+      });
+      if (outcome === 'chat-changed') return;
+    }
+    if (last >= 0) {
+      await parseAndRefresh(last, floating, { force: false, expectChatId }, deps);
+    } else {
+      await floating.refresh();
+    }
+  };
+
+  /** 按消息身份检出删中间楼并对账（回滚被删楼世界书、账本前移、清解析留痕）；返回错位楼号 */
+  const reconcileMidDeletion = async (hostLast: number, alsoPruneAbove: boolean): Promise<number | undefined> => {
+    const midDeletionFrom = detectMidDeletionFloor(hostLast, deps);
+    if (midDeletionFrom === undefined && !alsoPruneAbove) return undefined;
+    try {
+      await reconcileDeletedFloorsAbove(hostLast, { midDeletionFrom });
     } catch (e) {
       console.warn('[floorObservers] 删楼水位线对账异常', e);
     }
+    if (midDeletionFrom !== undefined) {
+      recordFlightLog({
+        category: 'host_event',
+        status: 'warn',
+        chatId: deps.readChatId() ?? readCurrentChatId(),
+        floorId: midDeletionFrom,
+        swipeId: null,
+        title: '删中间楼：楼号错位',
+        detail: `#${midDeletionFrom} 起消息身份与解析留痕不符，已回滚被删楼世界书条目、高楼账本前移并清除解析留痕，自该楼起逐楼重解析`,
+      });
+    }
+    return midDeletionFrom;
+  };
+
+  const onMessageDeleted = async () => {
+    // G9-01：水位线取宿主真实末楼（含隐藏楼），并按消息身份（$parse.done hash）检出删中间楼
+    const midDeletionFrom = await reconcileMidDeletion(readHostLast(), true);
+    if (midDeletionFrom !== undefined) {
+      await reparseFromMidDeletion(midDeletionFrom);
+      return;
+    }
+    const last = findLatestAiFloor(deps) ?? -1;
     if (last >= 0) {
       await parseAndRefresh(last, floating, { force: false }, deps);
     } else {
@@ -955,7 +1064,12 @@ export function installFloorObservers(
     } catch (e) {
       console.warn('[floorObservers] 分支档案书隔离异常', e);
     }
-    if (mid !== null) {
+    // G9-01b：酒馆助手 deleteChatMessages(refresh:'all') 等路径删楼只发 CHAT_CHANGED，不发 MESSAGE_DELETED。
+    // 同样按消息身份检出删中间楼；只在检出错位时对账（正常切换/新分支的留痕与消息一致，不受影响）。
+    const midDeletionFrom = await reconcileMidDeletion(readHostLast(), false);
+    if (midDeletionFrom !== undefined) {
+      await reparseFromMidDeletion(midDeletionFrom);
+    } else if (mid !== null) {
       await parseAndRefresh(mid, floating, { force: false }, deps);
     } else {
       await floating.refresh();

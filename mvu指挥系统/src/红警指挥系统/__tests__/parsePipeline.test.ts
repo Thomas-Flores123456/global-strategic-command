@@ -87,7 +87,7 @@ describe('P5 · schema v1→v2 迁移', () => {
 
 describe('9 · 键级🔴 / 块级🔴基线照落', () => {
   it('未知键→键级🔴不拖累全块', () => {
-    const r = parseMessageText('<战况>\n资金: 500\n神秘字段: 乱七八糟\n</战况>', zero(), {});
+    const r = parseMessageText('<战况>\n资金: 500\n神秘字段: 乱七八糟\n</战况>', zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(500); // 其余键照入
     expect(r.quarantine.some(q => q.scope === 'key' && /无法映射/.test(q.error))).toBe(true);
   });
@@ -103,7 +103,7 @@ describe('9 · 键级🔴 / 块级🔴基线照落', () => {
 
 describe('10 · 重复战况深合并 / 初始状态', () => {
   it('两块战况后者胜', () => {
-    const r = parseMessageText('<战况>\n资金: 100\n</战况>\n<战况>\n资金: 200\n</战况>', zero(), {});
+    const r = parseMessageText('<战况>\n资金: 100\n</战况>\n<战况>\n资金: 200\n</战况>', zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(200);
   });
   it('<初始状态> 非首楼🟡忽略', () => {
@@ -467,17 +467,17 @@ describe('5 · 键名漂移 / 枚举漂移', () => {
 describe('6 · delta 语义', () => {
   it('资金变化 +120', () => {
     const base = Schema.parse({ economy: { credits: 1000 } });
-    const r = parseMessageText('<战况>\n资金变化: +120\n</战况>', base, {});
+    const r = parseMessageText('<战况>\n资金变化: +120\n</战况>', base, { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(1120);
   });
   it('资金变化 -30', () => {
     const base = Schema.parse({ economy: { credits: 1000 } });
-    const r = parseMessageText('<战况>\n资金变化: -30\n</战况>', base, {});
+    const r = parseMessageText('<战况>\n资金变化: -30\n</战况>', base, { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(970);
   });
   it('绝对值+delta 同现 → 绝对优先🟡', () => {
     const base = Schema.parse({ economy: { credits: 1000 } });
-    const r = parseMessageText('<战况>\n资金: 500\n资金变化: +120\n</战况>', base, {});
+    const r = parseMessageText('<战况>\n资金: 500\n资金变化: +120\n</战况>', base, { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(500);
     expect(r.issues.some(i => i.rule === 'R18' && /绝对/.test(i.message))).toBe(true);
   });
@@ -593,7 +593,8 @@ describe('1 · happy path 映射全域', () => {
     expect(r.quarantine).toEqual([]);
     const d = r.data;
     expect(d.meta).toMatchObject({ date: '秋·九月十八', day_count: 48, location: '青岚山北坡' });
-    expect(d.economy.credits).toBe(1634);
+    // G7-01：非首楼 <战况> 裸改资金被拦截（归零基线 0 不变），其余路径照常落地
+    expect(d.economy.credits).toBe(0);
     expect(d.economy.credits_daily).toBe(120);
     expect(d.economy.wallet).toMatchObject({ 铜钱: 2000, 银两: 15, 下品灵石: 8, 中品灵石: 1, 上品灵石: 0 });
     expect(d.exposure).toMatchObject({ value: 2.5, trend: '+0.02/日', last_change: 'MH-6夜间试飞' });
@@ -644,19 +645,19 @@ describe('1 · happy path 映射全域', () => {
 
 describe('2 · L0 畸形标签容忍', () => {
   it('<战况|> 畸形开标签', () => {
-    const r = parseMessageText('<战况|>\n资金: 500\n</战况>', zero(), {});
+    const r = parseMessageText('<战况|>\n资金: 500\n</战况>', zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(500);
   });
   it('＜战况＞ 全角标签', () => {
-    const r = parseMessageText('＜战况＞\n资金: 600\n＜/战况＞', zero(), {});
+    const r = parseMessageText('＜战况＞\n资金: 600\n＜/战况＞', zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(600);
   });
   it('属性垃圾开标签', () => {
-    const r = parseMessageText('<战况 class="x" data-y=1>\n资金: 700\n</战况>', zero(), {});
+    const r = parseMessageText('<战况 class="x" data-y=1>\n资金: 700\n</战况>', zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(700);
   });
   it('``` 围栏包裹', () => {
-    const r = parseMessageText('<战况>\n```yaml\n资金: 800\n```\n</战况>', zero(), {});
+    const r = parseMessageText('<战况>\n```yaml\n资金: 800\n```\n</战况>', zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(800);
   });
 });
@@ -667,7 +668,7 @@ describe('3 · 闭合错拼 / 未闭合截断', () => {
     expect(r.data.codex[0]).toMatchObject({ name: '磁暴线圈', kind: '建筑' });
   });
   it('未闭合 → 截断🟡 + 内容仍入库', () => {
-    const r = parseMessageText('<战况>\n资金: 900', zero(), {});
+    const r = parseMessageText('<战况>\n资金: 900', zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(900);
     expect(r.events.some(e => e.layer === 'L0' && e.light === '🟡')).toBe(true);
   });
@@ -730,7 +731,7 @@ describe('14 · <机娘档案> → pending_lore 延迟提交暂存', () => {
   it('与 <战况>/<图鉴> 同楼共存互不干扰', () => {
     const raw =
       '<战况>\n资金: 300\n</战况>\n<图鉴>\n- 名称: 相位跃迁装置\n  类别: 装备\n</图鉴>\n<机娘档案>\n名称: 岚翎\n</机娘档案>';
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(300);
     expect(r.data.codex).toHaveLength(1);
     expect(r.data.pending_lore).toHaveLength(2);
@@ -886,7 +887,7 @@ describe('15 · <数据更新> → pending_data_patches 动态补丁暂存（§3
 理由: 电力优化
 </数据更新>
 `;
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(888);
     expect(r.data.codex).toHaveLength(1);
     expect(r.data.pending_lore).toHaveLength(2);
@@ -1045,7 +1046,7 @@ desc: 改进型补给舱。
 desc: 重型防御设施。
 </扩展档案>
 `;
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(999);
     expect(r.data.codex).toHaveLength(1);
     expect(r.data.pending_lore).toHaveLength(2);

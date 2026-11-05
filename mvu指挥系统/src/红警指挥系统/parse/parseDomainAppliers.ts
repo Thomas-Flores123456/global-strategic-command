@@ -46,6 +46,7 @@ import {
 } from '../engines/timezoneWeatherEngine';
 import { parseRelativeBuildingCoord } from '../engines/buildingCoordEngine';
 import { applyFactionUnlockSettlement } from '../engines/settleFloorPhases';
+import { parseUnitTokenNameAndCount } from '../core/prerequisites';
 import {
   alignName,
   applyAlign,
@@ -2325,6 +2326,17 @@ export function upsertDossier(arr: Record<string, unknown>[], items: unknown, ct
         );
         if (pendingSameModel.length === 1) {
           existing = pendingSameModel[0];
+        } else if (pendingSameModel.length > 1) {
+          // G8-06：同型号多台待授名时无法确定赐名对象，隔离而非新建重复档案
+          ctx.quarantine.push({
+            scope: 'element',
+            tag: '机娘档案',
+            path: `机娘档案[${name}]`,
+            raw: JSON.stringify(src).slice(0, 200),
+            error: `同型号「${rawModel}」有 ${pendingSameModel.length} 台待授名机娘，赐名对象不明`,
+            suggestion: '补充 编号(serial) 或 rename_from 指明赐名对象',
+          });
+          continue;
         }
       }
     }
@@ -2477,6 +2489,20 @@ export function upsertDossier(arr: Record<string, unknown>[], items: unknown, ct
     if (existing) {
       ctx.appliedCount++;
     } else {
+      // G8-07：同型号已有首台原型档案时，新档案强制为次生，保证首台唯一
+      const newModel = canon(String(target.model ?? ''));
+      if (
+        newModel &&
+        /首台/.test(String(target.seq ?? '')) &&
+        arr.some(e => isDossierElem(e) && canon(String(e.model ?? '')) === newModel && /首台/.test(String(e.seq ?? '')))
+      ) {
+        target.seq = '次生机';
+        yellow(
+          ctx,
+          { layer: 'L2', path: `机娘档案[${name}].seq`, message: `型号「${String(target.model)}」已有首台原型，新档案序列改为次生机` },
+          { rule: 'R18', target: '机娘档案', message: '首台唯一：已强制次生' },
+        );
+      }
       const parsed = GirlDossier.safeParse(target);
       if (!parsed.success) {
         ctx.quarantine.push({
@@ -3151,6 +3177,23 @@ export function upsertExpansion(
       takeHwParam('武器配置', ['武器配置', '武器', '武装', '武备', 'weapons']);
       takeHwParam('战术特长', ['战术特长', '技能', '特长', '能力', '被动技能', '主动技能', '专长', 'skills']);
     }
+    if (expKindStr === '建筑') {
+      const takeBldParam = (paramKey: string, aliases: readonly string[]) => {
+        const t = take(src, idx, consumed, [...aliases]);
+        if (!t || t.value == null) return;
+        const valStr = Array.isArray(t.value)
+          ? t.value.map(v => String(v ?? '').trim()).filter(Boolean).join('、')
+          : typeof t.value === 'object'
+            ? JSON.stringify(t.value)
+            : String(t.value).trim();
+        if (valStr && !mergedParams[paramKey]) {
+          mergedParams[paramKey] = valStr;
+        }
+      };
+      takeBldParam('科研加速', BUILDING_RESEARCH_ACCEL_ALIASES);
+      takeBldParam('加速领域', BUILDING_RESEARCH_LINES_ALIASES);
+      takeBldParam('算力', BUILDING_COMPUTE_ALIASES);
+    }
 
     if (Object.keys(mergedParams).length > 0) {
       target.params = mergedParams;
@@ -3245,9 +3288,9 @@ export function upsertExpansion(
 export function bridgeExpansionParamsFromQueues(
   pendingExpansions: Record<string, unknown>[],
   queues: Record<string, unknown>[],
+  bases?: Record<string, unknown>[],
 ): void {
   if (!Array.isArray(pendingExpansions) || pendingExpansions.length === 0) return;
-  if (!Array.isArray(queues) || queues.length === 0) return;
 
   for (const exp of pendingExpansions) {
     if (!isUsable(exp) || Array.isArray(exp)) continue;
@@ -3271,12 +3314,46 @@ export function bridgeExpansionParamsFromQueues(
     const hasEta = Boolean(
       params['工期'] || params['研发周期'] || params['建造周期'] || params['生产周期'] || params['周期'] || params['耗时'] || params['预计'] || params['eta'],
     );
-    if (!hasEta) {
+    if (!hasEta && Array.isArray(queues) && queues.length > 0) {
       const matchedQueue = queues.find(q => isUsable(q) && canon(String(q.item ?? '')) === canon(expName));
       const queueEta = matchedQueue && typeof matchedQueue.eta === 'string' ? matchedQueue.eta.trim() : '';
       if (queueEta) {
         params['工期'] = queueEta;
         exp.params = params;
+      }
+    }
+
+    // 若为建筑扩展档案且带有 科研加速 / 加速领域 / 算力，自动同步至各基地同名在场建筑
+    if (kindStr === '建筑' && Array.isArray(bases) && bases.length > 0) {
+      const pIdx = keyIndex(params);
+      const pCons = new Set<string>();
+      const accelT = take(params, pIdx, pCons, BUILDING_RESEARCH_ACCEL_ALIASES);
+      const linesT = take(params, pIdx, pCons, BUILDING_RESEARCH_LINES_ALIASES);
+      const compT = take(params, pIdx, pCons, BUILDING_COMPUTE_ALIASES);
+      const parsedAccel = accelT ? parseBuildingResearchAccel(accelT.value) : null;
+      const parsedLines = linesT ? parseBuildingResearchLines(linesT.value) : (parsedAccel?.extractedLines ?? []);
+      const parsedComp = compT ? parseBuildingCompute(compT.value) : null;
+
+      if (parsedAccel || parsedLines.length > 0 || parsedComp) {
+        const expCanon = canon(expName);
+        for (const b of bases) {
+          const blds = Array.isArray(b?.buildings) ? (b.buildings as Record<string, unknown>[]) : [];
+          for (const bld of blds) {
+            const bldCanon = canon(String(bld?.name ?? ''));
+            if (!bldCanon || (bldCanon !== expCanon && !bldCanon.includes(expCanon) && !expCanon.includes(bldCanon))) {
+              continue;
+            }
+            if (parsedAccel && bld.research_accel === undefined) {
+              bld.research_accel = parsedAccel.accel;
+            }
+            if (parsedLines.length > 0 && bld.research_lines === undefined) {
+              bld.research_lines = parsedLines;
+            }
+            if (parsedComp && bld.compute === undefined) {
+              bld.compute = { tflops: parsedComp.tflops, tops: parsedComp.tops };
+            }
+          }
+        }
       }
     }
   }
@@ -5162,6 +5239,11 @@ function registerBlueprintIntoCodex(
   );
 }
 
+/** BUG-R2-09 / G6-09：枟竭终态仅在显式扩容（剩余储量 > 0）时允许复活；`<资金链>` 块与任务奖励共用 */
+function exhaustedChainStaysLocked(existing: IncomeChain | undefined, nextRemainingCap: number): boolean {
+  return existing?.status === 'exhausted' && !(nextRemainingCap > 0);
+}
+
 export function settleQuestRewards(
   questName: string,
   rewards: QuestReward | undefined,
@@ -5489,6 +5571,22 @@ export function settleQuestRewards(
       const defaultTotalCap = c.capacity ?? (rate > 0 ? rate * 30 : null);
       if (existingChain) {
         const extExisting = existingChain as IncomeChain & Record<string, unknown>;
+        const rewardCap = c.capacity != null && c.capacity > 0 ? c.capacity : 0;
+        if (exhaustedChainStaysLocked(existingChain, rewardCap)) {
+          yellow(
+            ctx,
+            {
+              layer: 'L2',
+              path: `quests[${questName}].rewards.chains.${c.name}`,
+              message: `[任务] 资金链「${c.name}」已枟竭，奖励未声明新增储量，保持枟竭不复活`,
+            },
+            { rule: 'R18', target: '任务', message: `枟竭资金链「${c.name}」未扩容，奖励不重置` },
+          );
+          continue;
+        }
+        if (existingChain.status === 'exhausted') {
+          existingChain.capacity.total_yield = existingChain.capacity.extracted + rewardCap;
+        }
         existingChain.rate_daily = rate;
         existingChain.status = 'active';
         existingChain.eff = 1;
@@ -5635,6 +5733,73 @@ export function settleQuestRewards(
       }
     }
   }
+
+  // 8. G6-08：战利品/物品发放（不设上限，支持「名称×N」）
+  //    在册兵种（兵营/军校产出）→ forces.troops；在册载具（其余产出建筑）→ forces.vehicles；
+  //    控制权、拓扑图、情报等非实物 → 不入库；其余实物 → forces.equipment
+  if (rewards.items && rewards.items.length > 0) {
+    const granted: string[] = [];
+    const skipped: string[] = [];
+    for (const rawItem of rewards.items) {
+      const token = parseUnitTokenNameAndCount(String(rawItem ?? ''));
+      if (!token || token.count <= 0) continue;
+      const name = token.strippedName;
+      const qty = token.count;
+      const kind = classifyQuestItem(name);
+      if (kind === 'intangible') {
+        skipped.push(name);
+        continue;
+      }
+      if (kind === 'vehicle') {
+        const list = (data.forces.vehicles ??= []);
+        for (let i = 0; i < qty; i++) list.push(name);
+      } else {
+        const pool = kind === 'troop' ? (data.forces.troops ??= {}) : (data.forces.equipment ??= {});
+        const existingKey = Object.keys(pool).find(k => canon(k) === canon(name)) ?? name;
+        pool[existingKey] = (pool[existingKey] ?? 0) + qty;
+      }
+      granted.push(`${name}×${qty}（${kind === 'troop' ? '兵员' : kind === 'vehicle' ? '载具' : '装备'}）`);
+    }
+    if (granted.length > 0) {
+      green(
+        ctx,
+        {
+          layer: 'L2',
+          path: 'forces',
+          message: `[任务] 任务「${questName}」战利品已入库：${granted.join('、')}`,
+        },
+        { rule: 'R18', target: '任务', message: `任务战利品入库 ${granted.length} 项` },
+      );
+    }
+    if (skipped.length > 0) {
+      green(
+        ctx,
+        {
+          layer: 'L2',
+          path: `quests[${questName}].rewards.items`,
+          message: `[任务] 任务「${questName}」非实物奖励不入库：${skipped.join('、')}`,
+        },
+        { rule: 'R18', target: '任务', message: `非实物奖励 ${skipped.length} 项不入库` },
+      );
+    }
+  }
+}
+
+/** 非实物奖励（权限、情报、图纸类）——不进任何仓库 */
+const INTANGIBLE_REWARD_RE = /控制权|权限|授权|许可|拓扑|情报|线索|坐标|地图|档案|数据|资料|名额|资格|声望|好感|信任/;
+
+function classifyQuestItem(name: string): 'troop' | 'vehicle' | 'equipment' | 'intangible' {
+  if (INTANGIBLE_REWARD_RE.test(name)) return 'intangible';
+  let productions: readonly { name: string; need_building?: string; aliases?: string[] }[] = [];
+  try {
+    productions = effectiveCatalogSnapshot()?.productions ?? [];
+  } catch {
+    productions = [];
+  }
+  const key = canon(name);
+  const hit = productions.find(p => canon(p.name) === key || (p.aliases ?? []).some(a => canon(a) === key));
+  if (!hit) return 'equipment';
+  return /兵营|军校|训练/.test(hit.need_building ?? '') ? 'troop' : 'vehicle';
 }
 
 function extractQuestItemsFromBlock(rawBlock: unknown): unknown[] {
@@ -6063,6 +6228,166 @@ export function applyQuestBlock(
 const BUILDING_COORD_ALIASES = ['坐标', '相对坐标', '相对位置', '方位', '位置', 'coord', 'bearing', 'position'];
 const BUILDING_ADDON_ALIASES = ['扩建', '扩建模块', '挂件', '附属模块', 'addons'];
 const BUILDING_QTY_ALIASES = ['数量', '座数', '批量', '台数', '件数', 'qty', 'count', 'num'];
+const BUILDING_RESEARCH_ACCEL_ALIASES = [
+  '科研加速',
+  '研发加速',
+  '研究加速',
+  '科研加成',
+  '研究加成',
+  'research_accel',
+  'research_bonus',
+];
+const BUILDING_RESEARCH_LINES_ALIASES = [
+  '加速领域',
+  '科研领域',
+  '研究领域',
+  '适用领域',
+  '研究方向',
+  '研究序列',
+  'research_lines',
+  'research_domains',
+];
+const BUILDING_COMPUTE_ALIASES = ['算力', '算力产出', '并网算力', '虚拟算力', 'compute', 'compute_output'];
+
+/** 单座非标科研建筑加速增量硬上限（+35%，防 LLM 数值膨胀） */
+export const MAX_SINGLE_BUILDING_RESEARCH_ACCEL = 0.35;
+/** 单座非标建筑并网算力硬上限（100 TFLOPS / 150 TOPS，防 LLM 数值膨胀） */
+export const MAX_SINGLE_BUILDING_COMPUTE_TFLOPS = 100;
+export const MAX_SINGLE_BUILDING_COMPUTE_TOPS = 150;
+
+export function parseBuildingResearchLines(raw: unknown): string[] {
+  if (raw == null) return [];
+  const list = Array.isArray(raw)
+    ? raw.map(x => String(x ?? ''))
+    : String(raw)
+        .replace(/^[（(]|[)）]$/g, '')
+        .split(/[,，、;；/＋+|]+/);
+  return Array.from(
+    new Set(
+      list
+        .map(s => s.trim())
+        .filter(s => Boolean(s) && !/^(?:无|暂无|未知|none|null|-)$/i.test(s)),
+    ),
+  );
+}
+
+/**
+ * 解析建筑声明的科研加速值：
+ * - 支持 "15%", "+15%", "科研加速+15%", 0.15, "1.15x", "1.15倍", "+15%（工业基础、装备）"；
+ * - 自动剥离括号内附带的领域说明（作为 extractedLines 返回）；
+ * - 克制硬护栏：单座非标建筑加速增量封顶 MAX_SINGLE_BUILDING_RESEARCH_ACCEL (0.35 = +35%)。
+ */
+export function parseBuildingResearchAccel(
+  raw: unknown,
+): { accel: number; clamped: boolean; rawAccel: number; extractedLines: string[] } | null {
+  if (raw == null) return null;
+  let extractedLines: string[] = [];
+  let rawAccel: number | null = null;
+
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    if (raw <= 0) return null;
+    if (raw > 1 && raw <= 3) {
+      rawAccel = raw - 1;
+    } else if (raw > 3 && raw <= 100) {
+      rawAccel = raw / 100;
+    } else {
+      rawAccel = raw;
+    }
+  } else if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed || /^(?:无|暂无|0|0%|1|1\.0|1\.00|1x|1\.0x)$/i.test(trimmed)) return null;
+    const parenMatch = trimmed.match(/[（(]([^（）()]+)[)）]/);
+    if (parenMatch && parenMatch[1]) {
+      const inner = parenMatch[1].trim();
+      if (!/\d/.test(inner)) {
+        extractedLines = parseBuildingResearchLines(inner);
+      }
+    }
+    const pctMatch = trimmed.match(/([+-]?\d+(?:\.\d+)?)\s*%/);
+    const multMatch = trimmed.match(/(\d+(?:\.\d+)?)\s*[xX倍]/);
+    const numMatch = trimmed.match(/([+-]?\d+(?:\.\d+)?)/);
+    if (pctMatch) {
+      rawAccel = Number(pctMatch[1]) / 100;
+    } else if (multMatch) {
+      const mVal = Number(multMatch[1]);
+      rawAccel = mVal > 1 ? mVal - 1 : mVal;
+    } else if (numMatch) {
+      const nVal = Number(numMatch[1]);
+      if (nVal > 1 && nVal <= 3 && !trimmed.startsWith('+')) {
+        rawAccel = nVal - 1;
+      } else if (nVal > 3 && nVal <= 100) {
+        rawAccel = nVal / 100;
+      } else {
+        rawAccel = nVal;
+      }
+    }
+  }
+
+  if (rawAccel === null || !Number.isFinite(rawAccel) || rawAccel <= 0) return null;
+  const clamped = rawAccel > MAX_SINGLE_BUILDING_RESEARCH_ACCEL;
+  const accel = Math.round(Math.min(MAX_SINGLE_BUILDING_RESEARCH_ACCEL, Math.max(0, rawAccel)) * 10000) / 10000;
+  return { accel, clamped, rawAccel: Math.round(rawAccel * 10000) / 10000, extractedLines };
+}
+
+/**
+ * 解析建筑声明的算力并网值：
+ * - 支持 `{ tflops: 30, tops: 40 }` 或字符串 `"30 TFLOPS / 40 TOPS"`、`"40 TFLOPS"`、`"50 TOPS"`；
+ * - 克制硬护栏：单座非标建筑封顶 100 TFLOPS / 150 TOPS。
+ */
+export function parseBuildingCompute(
+  raw: unknown,
+): { tflops: number; tops: number; clamped: boolean } | null {
+  if (raw == null) return null;
+  let rawTflops = 0;
+  let rawTops = 0;
+
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    rawTflops = raw;
+    rawTops = raw;
+  } else if (isUsable(raw) && !Array.isArray(raw)) {
+    const obj = raw as Record<string, unknown>;
+    const cIdx = keyIndex(obj);
+    const cCons = new Set<string>();
+    const tfT = take(obj, cIdx, cCons, ['tflops', 'TFLOPS', '浮点', '双精度', '浮点算力']);
+    const tpT = take(obj, cIdx, cCons, ['tops', 'TOPS', '张量', '张量算力']);
+    rawTflops = tfT?.value != null ? (toNum(tfT.value) ?? 0) : 0;
+    rawTops = tpT?.value != null ? (toNum(tpT.value) ?? 0) : 0;
+  } else if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (!s) return null;
+    const tfMatch =
+      s.match(/(\d+(?:\.\d+)?)\s*(?:tflops|浮点)/i) ?? s.match(/(?:tflops|浮点)\s*[:：=]?\s*(\d+(?:\.\d+)?)/i);
+    const tpMatch =
+      s.match(/(\d+(?:\.\d+)?)\s*(?:tops|张量)/i) ?? s.match(/(?:tops|张量)\s*[:：=]?\s*(\d+(?:\.\d+)?)/i);
+    if (tfMatch || tpMatch) {
+      rawTflops = tfMatch ? Number(tfMatch[1]) : 0;
+      rawTops = tpMatch ? Number(tpMatch[1]) : 0;
+    } else {
+      const slashMatch = s.match(/(\d+(?:\.\d+)?)\s*[/／,，]\s*(\d+(?:\.\d+)?)/);
+      if (slashMatch) {
+        rawTflops = Number(slashMatch[1]);
+        rawTops = Number(slashMatch[2]);
+      } else {
+        const singleMatch = s.match(/(\d+(?:\.\d+)?)/);
+        if (singleMatch) {
+          rawTflops = Number(singleMatch[1]);
+          rawTops = Number(singleMatch[1]);
+        }
+      }
+    }
+  }
+
+  rawTflops = Number.isFinite(rawTflops) ? Math.max(0, Math.round(rawTflops)) : 0;
+  rawTops = Number.isFinite(rawTops) ? Math.max(0, Math.round(rawTops)) : 0;
+  if (rawTflops <= 0 && rawTops <= 0) return null;
+
+  const clamped = rawTflops > MAX_SINGLE_BUILDING_COMPUTE_TFLOPS || rawTops > MAX_SINGLE_BUILDING_COMPUTE_TOPS;
+  return {
+    tflops: Math.min(MAX_SINGLE_BUILDING_COMPUTE_TFLOPS, rawTflops),
+    tops: Math.min(MAX_SINGLE_BUILDING_COMPUTE_TOPS, rawTops),
+    clamped,
+  };
+}
 
 /** 建筑元素字段映射 */
 export function mapBuilding(
@@ -6119,6 +6444,72 @@ export function mapBuilding(
       ctx.appliedCount++;
     }
   }
+
+  // 非自身体系/特许科研建筑：科研加速、适用科研领域、并网算力
+  const accelT = take(src, idx, consumed, BUILDING_RESEARCH_ACCEL_ALIASES);
+  const linesT = take(src, idx, consumed, BUILDING_RESEARCH_LINES_ALIASES);
+  const computeT = take(src, idx, consumed, BUILDING_COMPUTE_ALIASES);
+
+  if (accelT && accelT.value != null) {
+    const parsedAccel = parseBuildingResearchAccel(accelT.value);
+    if (parsedAccel) {
+      target.research_accel = parsedAccel.accel;
+      ctx.appliedCount++;
+      if (parsedAccel.extractedLines.length > 0 && (!linesT || linesT.value == null)) {
+        target.research_lines = parsedAccel.extractedLines;
+      }
+      if (parsedAccel.clamped) {
+        yellow(
+          ctx,
+          {
+            layer: 'L2',
+            path: `${path}.research_accel`,
+            message: `非标建筑科研加速越界，已克制钳制 ${Math.round(parsedAccel.rawAccel * 100)}% → ${Math.round(parsedAccel.accel * 100)}%`,
+            before: parsedAccel.rawAccel,
+            after: parsedAccel.accel,
+          },
+          {
+            rule: 'R18',
+            target: `${path}.research_accel`,
+            message: `科研加速已钳制为上限 +${Math.round(MAX_SINGLE_BUILDING_RESEARCH_ACCEL * 100)}%`,
+          },
+        );
+      }
+    }
+  }
+
+  if (linesT && linesT.value != null) {
+    const parsedLines = parseBuildingResearchLines(linesT.value);
+    if (parsedLines.length > 0) {
+      target.research_lines = parsedLines;
+      ctx.appliedCount++;
+    }
+  }
+
+  if (computeT && computeT.value != null) {
+    const parsedComp = parseBuildingCompute(computeT.value);
+    if (parsedComp) {
+      target.compute = { tflops: parsedComp.tflops, tops: parsedComp.tops };
+      ctx.appliedCount++;
+      if (parsedComp.clamped) {
+        yellow(
+          ctx,
+          {
+            layer: 'L2',
+            path: `${path}.compute`,
+            message: `非标建筑并网算力越界，已钳制为 ${parsedComp.tflops} TFLOPS / ${parsedComp.tops} TOPS`,
+            before: computeT.value,
+            after: target.compute,
+          },
+          {
+            rule: 'R18',
+            target: `${path}.compute`,
+            message: `非标建筑并网算力已钳制为上限 ${MAX_SINGLE_BUILDING_COMPUTE_TFLOPS} TFLOPS / ${MAX_SINGLE_BUILDING_COMPUTE_TOPS} TOPS`,
+          },
+        );
+      }
+    }
+  }
 }
 
 const BUILDING_KNOWN_FIELD_CANONS = new Set(
@@ -6138,8 +6529,47 @@ const BUILDING_KNOWN_FIELD_CANONS = new Set(
     ...BUILDING_COORD_ALIASES,
     ...BUILDING_ADDON_ALIASES,
     ...BUILDING_QTY_ALIASES,
+    ...BUILDING_RESEARCH_ACCEL_ALIASES,
+    ...BUILDING_RESEARCH_LINES_ALIASES,
+    ...BUILDING_COMPUTE_ALIASES,
   ].map(k => canon(k)),
 );
+
+function parseBuildingStringShorthand(raw: string): Record<string, unknown> | string {
+  const trimmed = raw.trim();
+  if (!trimmed) return raw;
+  const simpleMatch = trimmed.match(/^(.+?)[（(](运转|建造中|受损|停机|运行|运转中|运行中|正常|完好)[)）]$/);
+  if (simpleMatch) {
+    return { 名称: simpleMatch[1].trim(), 状态: simpleMatch[2].trim() };
+  }
+  const parenClauseMatch = trimmed.match(/^(.+?)[（(]([^（）()]+)[)）]$/);
+  if (parenClauseMatch) {
+    const inner = parenClauseMatch[2].trim();
+    if (/(?:科研加速|研发加速|研究加速|科研加成|算力|tflops|tops)/i.test(inner)) {
+      const out: Record<string, unknown> = { 名称: parenClauseMatch[1].trim(), 状态: '运转' };
+      const tokens = inner.split(/[,，;；｜|]+/).map(t => t.trim()).filter(Boolean);
+      const extraLines: string[] = [];
+      for (const tok of tokens) {
+        if (/^(运转|建造中|受损|停机|运行|运转中|运行中|正常|完好)$/.test(tok)) {
+          out.状态 = tok;
+        } else if (/(?:科研加速|研发加速|研究加速|科研加成)/i.test(tok) || /^[+-]?\d+(?:\.\d+)?%$/.test(tok)) {
+          out.科研加速 = tok;
+        } else if (/(?:算力|tflops|tops)/i.test(tok)) {
+          out.算力 = tok;
+        } else if (/^(?:加速领域|科研领域|研究领域|适用领域)[:：=](.+)$/.test(tok)) {
+          out.加速领域 = tok.replace(/^(?:加速领域|科研领域|研究领域|适用领域)[:：=]/, '').trim();
+        } else {
+          extraLines.push(tok);
+        }
+      }
+      if (!out.加速领域 && extraLines.length > 0) {
+        out.加速领域 = extraLines;
+      }
+      return out;
+    }
+  }
+  return { 名称: trimmed, 状态: '运转' };
+}
 
 function normalizeBuildingInputItems(items: unknown): unknown {
   if (isUsable(items) && !Array.isArray(items)) {
@@ -6161,9 +6591,7 @@ function normalizeBuildingInputItems(items: unknown): unknown {
   if (!Array.isArray(items)) return items;
   return items.map(rawItem => {
     if (typeof rawItem === 'string') {
-      const m = rawItem.trim().match(/^(.+?)[（(](运转|建造中|受损|停机|运行|运转中|运行中|正常|完好)[)）]$/);
-      if (m) return { 名称: m[1].trim(), 状态: m[2].trim() };
-      return rawItem.trim() ? { 名称: rawItem.trim(), 状态: '运转' } : rawItem;
+      return parseBuildingStringShorthand(rawItem);
     }
     if (isUsable(rawItem) && !Array.isArray(rawItem)) {
       const obj = rawItem as Record<string, unknown>;
@@ -7358,7 +7786,7 @@ export function applyChainsBlock(rawBlock: unknown, data: StatData, ctx: Ctx): v
           : hasExplicitCapacityInput && totalYield !== null
             ? Math.max(0, totalYield - extracted)
             : 0;
-      if (!(nextRemainingCap > 0)) {
+      if (exhaustedChainStaysLocked(existing, nextRemainingCap)) {
         status = 'exhausted';
         eff = 0;
       }

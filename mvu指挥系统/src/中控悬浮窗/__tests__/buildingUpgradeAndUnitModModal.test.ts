@@ -108,6 +108,8 @@ describe('FD-22 Track D (BLD-MOD-MODAL-01): 建筑模态框母体升级/挂件�
       grade: '小改',
       scope: 'base',
       desc: '灰熊混动改装',
+      target_unit: 'M1A1灰熊主战坦克',
+      upgraded_name: 'M1A2 SEPv3混动灰熊主战坦克',
     });
     expect(previewUnit).toEqual({
       targetLabel: 'M1A1灰熊主战坦克',
@@ -137,6 +139,8 @@ describe('FD-22 Track D (BLD-MOD-MODAL-01): 建筑模态框母体升级/挂件�
         grade: '小改',
         scope: 'base',
         desc: '灰熊混动改装',
+        target_unit: 'M1A1灰熊主战坦克',
+        upgraded_name: 'M1A2 SEPv3混动灰熊主战坦克',
       },
       [{ id: 'base_1', name: '第一基地' }],
     );
@@ -163,6 +167,15 @@ describe('FD-22 Track D (BLD-MOD-MODAL-01): 建筑模态框母体升级/挂件�
       upgrade_mode: 'replace',
       upgraded_name: '先进光棱塔',
       desc: '光棱塔升阶包',
+    });
+    catalog.retrofits.push({
+      kind: 'retrofit',
+      name: 'M1A2 SEPv3灰熊混动改装工程',
+      research: 'M1A2 SEPv3灰熊混动改装包',
+      grade: '小改',
+      desc: '灰熊混动改装',
+      target_unit: 'M1A1灰熊主战坦克',
+      upgraded_name: 'M1A2 SEPv3混动灰熊主战坦克',
     });
 
     openLookup('M1A2 SEPv3混动灰熊主战坦克', []);

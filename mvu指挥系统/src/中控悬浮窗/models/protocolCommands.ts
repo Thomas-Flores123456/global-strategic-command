@@ -30,7 +30,7 @@ import {
   type ProtocolTier,
 } from '../../红警指挥系统/engines/protocolEngine';
 import { resolveLegacyProtocolName, type ProtocolInstance, type ProtocolStatus } from '../../红警指挥系统/core/schema';
-import { DEFAULT_PROTOCOL_CATALOG } from '../../红警指挥系统/engines/protocolCatalogIndex';
+import { FULL_DEFAULT_PROTOCOL_CATALOG } from '../../红警指挥系统/engines/protocolCatalogIndex';
 
 export { deterministicRoll, predictExperimentOutcome };
 
@@ -373,124 +373,9 @@ export function evaluateProtocolExperimentGuard(
   };
 }
 
-/**
- * 30 条规范协议默认目录（对齐 protocolCatalogIndex.ts 18 条 + 尤里 12 条），供未注入 catalogStore 时准确解析 tier / faction / 消耗
- */
-export const DEFAULT_PROTOCOL_CATALOG_LITE: readonly ProtocolDefinitionLike[] = [
-  ...DEFAULT_PROTOCOL_CATALOG,
-  {
-    id: 'yuri.protocol.t1.clone_tower_neuro_link',
-    name: '复制人—心灵控制塔神经并联增幅协议',
-    faction: '尤里',
-    track: '神经过载与心控协同',
-    tier: 1,
-    cost_points: 1,
-    experiment_cost_credits: 500,
-  },
-  {
-    id: 'yuri.protocol.t1.puppet_adrenaline_override',
-    name: '受控傀儡痛觉屏蔽与肾上腺素榨取协议',
-    faction: '尤里',
-    track: '神经过载与心控协同',
-    tier: 1,
-    cost_points: 1,
-    experiment_cost_credits: 500,
-  },
-  {
-    id: 'yuri.protocol.t2.mastermind_coolant_overclock',
-    name: '精神控制车冷媒过载与牧羊人并机分流协议',
-    faction: '尤里',
-    track: '神经过载与心控协同',
-    tier: 2,
-    cost_points: 1,
-    experiment_cost_credits: 1500,
-  },
-  {
-    id: 'yuri.protocol.t3.dominator_biphase_overload',
-    name: '心灵支配仪·双相极限过载与死士殉爆协议',
-    faction: '尤里',
-    track: '神经过载与心控协同',
-    tier: 3,
-    cost_points: 1,
-    experiment_cost_credits: 4000,
-  },
-  {
-    id: 'yuri.protocol.t1.scarab_dual_mission_pack',
-    name: '采掘机械虫—野战抢修与破履带双任务包协议',
-    faction: '尤里',
-    track: '生物机电与夺舍工程',
-    tier: 1,
-    cost_points: 1,
-    experiment_cost_credits: 500,
-  },
-  {
-    id: 'yuri.protocol.t1.virus_hallucinogen_ammo',
-    name: '生化狙击手—致幻气溶胶微囊弹换装协议',
-    faction: '尤里',
-    track: '生物机电与夺舍工程',
-    tier: 1,
-    cost_points: 1,
-    experiment_cost_credits: 500,
-  },
-  {
-    id: 'yuri.protocol.t2.brute_myofiber_unleash',
-    name: '巨像级重装破城兵—肌束极限解限与打桩机超压协议',
-    faction: '尤里',
-    track: '生物机电与夺舍工程',
-    tier: 2,
-    cost_points: 1,
-    experiment_cost_credits: 1500,
-  },
-  {
-    id: 'yuri.protocol.t2.hotwire_field_requisition',
-    name: '战地火线夺车与异制式火控快速接管协议',
-    faction: '尤里',
-    track: '生物机电与夺舍工程',
-    tier: 2,
-    cost_points: 1,
-    experiment_cost_credits: 1500,
-  },
-  {
-    id: 'yuri.protocol.t1.gatling_phased_grid_sync',
-    name: '盖特伺服电机—防空火控相控并网协议',
-    faction: '尤里',
-    track: '磁流谐振与特种攻城',
-    tier: 1,
-    cost_points: 1,
-    experiment_cost_credits: 500,
-  },
-  {
-    id: 'yuri.protocol.t2.boomer_turtleback_payloads',
-    name: '雷鸣潜艇—龟背多载荷特种攻城弹头换装协议',
-    faction: '尤里',
-    track: '磁流谐振与特种攻城',
-    tier: 2,
-    cost_points: 1,
-    experiment_cost_credits: 1500,
-  },
-  {
-    id: 'yuri.protocol.t2.magnetron_disk_flux_relay',
-    name: '磁电坦克—飞碟强磁耦合与超视距隔山牵引协议',
-    faction: '尤里',
-    track: '磁流谐振与特种攻城',
-    tier: 2,
-    cost_points: 1,
-    experiment_cost_credits: 1500,
-  },
-  {
-    id: 'yuri.protocol.t3.eclipse_orbital_reentry',
-    name: '受库存与轨道电容约束的「月蚀」天基脑波再入协议',
-    faction: '尤里',
-    track: '磁流谐振与特种攻城',
-    tier: 3,
-    cost_points: 1,
-    experiment_cost_credits: 4000,
-  },
-];
-
 const DEFAULT_PROTOCOL_CATALOG_BY_ID: ReadonlyMap<string, ProtocolDefinitionLike> = (() => {
   const map = new Map<string, ProtocolDefinitionLike>();
-  for (const def of DEFAULT_PROTOCOL_CATALOG_LITE) {
+  for (const def of FULL_DEFAULT_PROTOCOL_CATALOG) {
     const cid = canonicalizeProtocolRef(def.id || def.name || '');
     if (cid) map.set(cid, def);
     if (def.name) map.set(def.name.trim(), def);

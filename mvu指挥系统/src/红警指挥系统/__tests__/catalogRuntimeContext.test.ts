@@ -11,6 +11,7 @@ import {
 import {
   buildCatalogPrerequisiteContext,
   buildUnitPresent,
+  extractActiveProtocolSet,
   isQueueVisibleForBase,
   queueItemsForAction,
   resolveBaseReference,
@@ -30,6 +31,13 @@ const bases: RuntimeBaseLike[] = [
   },
   { id: 'beta-id', name: '南港基地', buildings: [{ name: '异地工厂', state: '运转' }] },
 ];
+
+describe('G3-08 extractActiveProtocolSet 共用 44 条完整默认目录', () => {
+  it('尤里协议以 id 激活时同时产出中文名，可满足按名书写的前置', () => {
+    const set = extractActiveProtocolSet([{ ref: 'yuri.protocol.t1.clone_tower_neuro_link', status: 'active' }]);
+    expect(set.has('复制人—心灵控制塔神经并联增幅协议')).toBe(true);
+  });
+});
 
 describe('S1-B catalog 运行时上下文', () => {
   it('Base.id 优先，旧基地名称仅在唯一时兼容；重名和缺失 fail-closed', () => {

@@ -5,6 +5,7 @@ import {
   computeExposureFloor,
   evaluateCivicFacilities,
   explainExposureFloor,
+  isMoraleEngaged,
   matchCivicFacilityDef,
   resolveExposureLevel,
   resolveMoraleStage,
@@ -246,5 +247,26 @@ describe('FD-36 PKG-A: 暴露度双驱更新引擎 (EL-0~EL-4 / 常驻底线 / �
       deltaMinutes: 2880,
     });
     expect(settledOutage.morale.value).toBe(7.4);
+  });
+});
+
+describe('G8-13/18 暴露度取整与磨合底线', () => {
+  it('G8-13：4.496 取整为 4.5 时档位与民心破冰一致', () => {
+    expect(resolveExposureLevel(4.496).code).toBe('EL-2');
+    expect(isMoraleEngaged({}, 4.496)).toBe(true);
+  });
+
+  it('G8-18：生效中的磨合暴露底线参与冷却托底，趋势不再显示下降', () => {
+    const r = settleExposureAndMorale(
+      {
+        exposure: { value: 3, trend: '平稳' },
+        command: { break_in_penalties: [{ effect_kind: 'exposure_floor', magnitude: 3, remaining_minutes: 100 }] },
+        bases: [],
+      },
+      { enableNaturalDrift: true },
+    );
+    expect(r.exposure.value).toBe(3);
+    expect(r.exposure.floor).toBe(3);
+    expect(r.exposure.trend).toBe('平稳');
   });
 });

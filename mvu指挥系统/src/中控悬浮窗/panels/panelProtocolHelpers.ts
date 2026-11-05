@@ -5,12 +5,14 @@ import {
   getProtocolExperimentCost,
   isProtocolLabOnline,
   normalizeProtocolTier,
+  sortProtocolsByTrackOrder,
 } from '../../红警指挥系统/engines/protocolEngine';
 import type { ProtocolDiscoverySpec } from '../../红警指挥系统/engines/protocolEngine';
 import {
   ALLIED_TRACK_NAMES,
   COMMON_TRACK_NAMES,
-  DEFAULT_PROTOCOL_CATALOG,
+  DEFAULT_YURI_PROTOCOL_CATALOG,
+  FULL_DEFAULT_PROTOCOL_CATALOG,
   lookupProtocolCatalogEntry,
   mergeDefaultProtocolCatalog,
   normalizeProtocolLookupKey,
@@ -40,141 +42,8 @@ export const YURI_TRACK_NAMES: readonly string[] = Object.freeze([
   '磁流谐振与特种攻城',
 ]);
 
-export const DEFAULT_YURI_PROTOCOL_CATALOG: readonly ProtocolCatalogEntry[] = Object.freeze([
-  // 轨道一：神经过载与心控协同
-  {
-    id: 'yuri.protocol.t1.clone_tower_neuro_link',
-    name: '复制人—心灵控制塔神经并联增幅协议',
-    faction: '尤里',
-    track: '神经过载与心控协同',
-    tier: 1,
-    cost_points: 1,
-    experiment_cost_credits: 500,
-    desc: '授权尤里复制人驻入心灵控制塔基座插槽充当湿件协处理器，提升心控容量与射程。',
-  },
-  {
-    id: 'yuri.protocol.t1.puppet_adrenaline_override',
-    name: '受控傀儡痛觉屏蔽与肾上腺素榨取协议',
-    faction: '尤里',
-    track: '神经过载与心控协同',
-    tier: 1,
-    cost_points: 1,
-    experiment_cost_credits: 500,
-    desc: '刺激第1阶受控敌军肾上腺素分泌，抹平生理抗拒降效并短时提升冲刺移速。',
-  },
-  {
-    id: 'yuri.protocol.t2.mastermind_coolant_overclock',
-    name: '精神控制车冷媒过载与牧羊人并机分流协议',
-    faction: '尤里',
-    track: '神经过载与心控协同',
-    tier: 2,
-    cost_points: 1,
-    experiment_cost_credits: 1500,
-    desc: '授权牧羊人湿件工程车与精神控制车液氮并机，将安全受控阈值从 3 临时推高至 5。',
-  },
-  {
-    id: 'yuri.protocol.t3.dominator_biphase_overload',
-    name: '心灵支配仪·双相极限过载与死士殉爆协议',
-    faction: '尤里',
-    track: '神经过载与心控协同',
-    tier: 3,
-    cost_points: 1,
-    experiment_cost_credits: 4000,
-    desc: '授权心灵支配仪在次声波震荡扩域与终焉神经元殉爆两项排他极限工况中切换。',
-  },
-  // 轨道二：生物机电与夺舍工程
-  {
-    id: 'yuri.protocol.t1.scarab_dual_mission_pack',
-    name: '采掘机械虫—野战抢修与破履带双任务包协议',
-    faction: '尤里',
-    track: '生物机电与夺舍工程',
-    tier: 1,
-    cost_points: 1,
-    experiment_cost_credits: 500,
-    desc: '赋予机动熔炼采矿母车释放的六足采掘机械虫野战焊补与破甲铰断履带双模能力。',
-  },
-  {
-    id: 'yuri.protocol.t1.virus_hallucinogen_ammo',
-    name: '生化狙击手—致幻气溶胶微囊弹换装协议',
-    faction: '尤里',
-    track: '生物机电与夺舍工程',
-    tier: 1,
-    cost_points: 1,
-    experiment_cost_credits: 500,
-    desc: '授权生化特种狙击手换装浓缩致幻狂乱微囊弹，超视距诱发敌方班组惊恐溃乱。',
-  },
-  {
-    id: 'yuri.protocol.t2.brute_myofiber_unleash',
-    name: '巨像级重装破城兵—肌束极限解限与打桩机超压协议',
-    faction: '尤里',
-    track: '生物机电与夺舍工程',
-    tier: 2,
-    cost_points: 1,
-    experiment_cost_credits: 1500,
-    desc: '授权巨像级重装破城兵解开安全神经锁并超压驱动液压破拆剪与聚能打桩机。',
-  },
-  {
-    id: 'yuri.protocol.t2.hotwire_field_requisition',
-    name: '战地火线夺车与异制式火控快速接管协议',
-    faction: '尤里',
-    track: '生物机电与夺舍工程',
-    tier: 2,
-    cost_points: 1,
-    experiment_cost_credits: 1500,
-    desc: '授权冥蝠滑翔工兵携便携式 IFF 破译匣滑翔夺取无主完好敌方装甲载具并火线刷机。',
-  },
-  {
-    id: 'yuri.protocol.t2.mobile_mutator_shepherd_berserk_storm',
-    name: '机动基因谐振突变车—牧羊人恒温并机与狂兽化风暴协议',
-    faction: '尤里',
-    track: '生物机电与夺舍工程',
-    tier: 2,
-    cost_points: 1,
-    experiment_cost_credits: 1500,
-    desc: '专职联动机动基因谐振突变车与牧羊人脑波中继工程车恒温并机，释放满功率双螺旋崩解—狂兽化诱导风暴。',
-  },
-  // 轨道三：磁流谐振与特种攻城
-  {
-    id: 'yuri.protocol.t1.gatling_phased_grid_sync',
-    name: '盖特伺服电机—防空火控相控并网协议',
-    faction: '尤里',
-    track: '磁流谐振与特种攻城',
-    tier: 1,
-    cost_points: 1,
-    experiment_cost_credits: 500,
-    desc: '将盖特机炮塔、盖特坦克与海妖护卫舰伺服电机并入心灵感应器预警网协同拦截。',
-  },
-  {
-    id: 'yuri.protocol.t2.boomer_turtleback_payloads',
-    name: '雷鸣潜艇—龟背多载荷特种攻城弹头换装协议',
-    faction: '尤里',
-    track: '磁流谐振与特种攻城',
-    tier: 2,
-    cost_points: 1,
-    experiment_cost_credits: 1500,
-    desc: '为雷鸣攻城潜艇龟背 8 坑大型发射井开放二元神经腐蚀弹头与强磁脉冲弹头换装。',
-  },
-  {
-    id: 'yuri.protocol.t2.magnetron_disk_flux_relay',
-    name: '磁电坦克—飞碟强磁耦合与超视距隔山牵引协议',
-    faction: '尤里',
-    track: '磁流谐振与特种攻城',
-    tier: 2,
-    cost_points: 1,
-    experiment_cost_credits: 1500,
-    desc: '授权地面磁电坦克与高空镭射幽浮建立强磁通天地中继，实现跨掩体超视距牵引。',
-  },
-  {
-    id: 'yuri.protocol.t3.eclipse_orbital_reentry',
-    name: '受库存与轨道电容约束的「月蚀」天基脑波再入协议',
-    faction: '尤里',
-    track: '磁流谐振与特种攻城',
-    tier: 3,
-    cost_points: 1,
-    experiment_cost_credits: 4000,
-    desc: '在轨道电容与战略库存约束下调用「月蚀」近地轨道脑波折射环与母型飞碟再入投送。',
-  },
-]);
+/** 尤里协议默认目录：唯一定义在 protocolCatalogIndex（G3-08 收口），此处仅转导出 */
+export { DEFAULT_YURI_PROTOCOL_CATALOG };
 
 export interface ProtocolRuntimeEntry {
   ref: string;
@@ -701,7 +570,7 @@ export function resolveMergedCatalogProtocols(catalog: unknown): readonly Protoc
   };
   const fromCatalog = source?.effectiveCatalog?.protocols ?? source?.protocols;
   return mergeDefaultProtocolCatalog<ProtocolCatalogEntry>(
-    [...DEFAULT_PROTOCOL_CATALOG, ...DEFAULT_YURI_PROTOCOL_CATALOG],
+    FULL_DEFAULT_PROTOCOL_CATALOG,
     fromCatalog,
   );
 }
@@ -734,25 +603,6 @@ export function buildRuntimeProtocolMap(
     }
   }
   return map;
-}
-
-export function buildLegacyTechDoneSet(
-  state: ProtocolCompatibleState | null | undefined,
-  lookup: ProtocolCatalogLookup<ProtocolCatalogEntry>,
-): Set<string> {
-  const set = new Set<string>();
-  for (const raw of state?.tech?.done ?? []) {
-    if (typeof raw !== 'string') continue;
-    set.add(raw);
-    const norm = normalizeProtocolLookupKey(raw);
-    if (norm) set.add(norm);
-    const matched = lookupProtocolCatalogEntry(lookup, raw);
-    if (matched) {
-      set.add(matched.id);
-      set.add(matched.name);
-    }
-  }
-  return set;
 }
 
 export function buildExternalQueueSignature(state: ProtocolCompatibleState | null | undefined): string {
@@ -792,7 +642,6 @@ export function buildRawTrackViewsForFaction(params: {
   trackNames?: readonly string[];
   mergedCatalogProtocols?: readonly ProtocolCatalogEntry[];
   runtimeProtocolMap?: ReadonlyMap<string, ProtocolRuntimeEntry>;
-  legacyTechDoneSet?: ReadonlySet<string>;
   activeState?: ProtocolCompatibleState | null | undefined;
   resolveQueueState?: (nodeId: string, status: ProtocolStatusType, inst?: ProtocolRuntimeEntry) => LocalQueueOverride;
 }): ProtocolTrackView[] {
@@ -805,9 +654,8 @@ export function buildRawTrackViewsForFaction(params: {
         : faction === '尤里'
           ? YURI_TRACK_NAMES
           : ALLIED_TRACK_NAMES,
-    mergedCatalogProtocols = [...DEFAULT_PROTOCOL_CATALOG, ...DEFAULT_YURI_PROTOCOL_CATALOG],
+    mergedCatalogProtocols = FULL_DEFAULT_PROTOCOL_CATALOG as readonly ProtocolCatalogEntry[],
     runtimeProtocolMap = new Map(),
-    legacyTechDoneSet = new Set(),
     activeState,
     resolveQueueState = (_nodeId, _status, inst) => ({
       autoQueued: inst?.auto_queued === true,
@@ -824,17 +672,14 @@ export function buildRawTrackViewsForFaction(params: {
   );
 
   return trackNames.map(trackName => {
-    const trackDefs = defs.filter(d => d.track === trackName);
+    const trackDefs = sortProtocolsByTrackOrder(defs.filter(d => d.track === trackName));
     const nodes: ProtocolNodeView[] = trackDefs.map(d => {
       const inst = runtimeProtocolMap.get(d.id) ?? runtimeProtocolMap.get(d.name);
-      const isLegacyDone = legacyTechDoneSet.has(d.name) || legacyTechDoneSet.has(d.id);
       let status: ProtocolStatusType = d.discovery ? 'undiscovered' : 'locked';
       if (inst?.status) {
         status = ['undiscovered', 'locked', 'available', 'experimenting', 'active', 'voided'].includes(inst.status)
           ? (inst.status as ProtocolStatusType)
           : 'locked';
-      } else if (isLegacyDone) {
-        status = 'active';
       }
       if (isDebugBypassPrerequisitesActive() && (status === 'undiscovered' || status === 'locked')) {
         status = 'available';

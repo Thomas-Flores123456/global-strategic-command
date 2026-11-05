@@ -275,5 +275,13 @@ describe('PRT-SLOT-01 · protocolAnchors 7 建筑阶梯锚定与双轴产点', (
       // 仅红星实验设计局运转：0.10 + 0.15 = 0.25
       expect(dailyProtocolPointRate(state)).toBe(0.25);
     });
+
+    it('G3-10：被毁/战损与研究槽同源视为非运转，不产点', () => {
+      const state = makeState([
+        { name: '红星实验设计局综合体', state: '被毁' },
+        { name: '超算中心', state: '战损' },
+      ]);
+      expect(dailyProtocolPointRate(state)).toBe(PROTOCOL_BASE_DAILY_RATE);
+    });
   });
 });

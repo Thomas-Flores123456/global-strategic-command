@@ -323,8 +323,8 @@ describe('formatResearchAdvisory（prompt 文本）', () => {
           line: '测试',
           tier: 1,
           unlocks: '测试无人机',
-          prereq: '高空无人侦察协定',
-          prereqs: ['高空无人侦察协定'],
+          prereq: '欧洲联合防务协议',
+          prereqs: ['欧洲联合防务协议'],
           desc: '依赖战略协议的研究项',
         },
       ],
@@ -333,7 +333,7 @@ describe('formatResearchAdvisory（prompt 文本）', () => {
       economy: { credits: 1000 },
       bases: [initialBase('b1', '一号基地'), initialBase('b2', '二号基地')],
       queues: [{ type: '研究', item: '基础步兵训练学', base: 'b1' }],
-      protocols: [{ ref: 'all.protocol.ra3.high_altitude_uav_pact', status: 'active' }],
+      protocols: [{ ref: 'all.research.t1.european_defense_agreement', status: 'active' }],
     } as Record<string, unknown>);
     const advisory = deriveResearchAdvisory(snap, [overlay])!;
     expect(advisory.researchSlotBusy).toBe(true);

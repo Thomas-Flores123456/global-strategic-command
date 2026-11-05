@@ -491,6 +491,31 @@ describe('DARKNET-UI-01 · 跨维暗网终端页签、锁定引导与五大区�
     expect(closedModel.darknet.marketStatusText).toBe('待建超维暗网中继站');
     expect(closedModel.darknet.auctionBadgeText).toBe('⏳ 距下次开启 7日0h');
 
+    // G7-07：建造中中继 + 残留「正常连接」与商品活动均不算解锁
+    const buildingRelay = resourcePanelModel(
+      { darknet: { market_status: '正常连接', items: snap.economy.darknet?.items ?? [] } },
+      { bases: [{ id: 'b1', name: '主基地', buildings: [{ name: '超维暗网中继站', state: '建造中' }] }] },
+    );
+    expect(buildingRelay.darknet.unlocked).toBe(false);
+    expect(buildingRelay.darknet.marketStatusText).toBe('暗网中继站建造中');
+
+    // G7-07 三态文案：停机附原因（建筑停机 / 基地断电 / 基地失守），均不解锁
+    const offlineCases: [Record<string, unknown>, string][] = [
+      [{ buildings: [{ name: '超维暗网中继站', state: '停机' }] }, '暗网中继站停机（建筑停机）'],
+      [
+        { power: { gen: 10, use: 40 }, buildings: [{ name: '超维暗网中继站', state: '运转' }] },
+        '暗网中继站停机（基地断电）',
+      ],
+      [{ status: '失守', buildings: [{ name: '超维暗网中继站', state: '运转' }] }, '暗网中继站停机（所在基地失守）'],
+    ];
+    for (const [base, text] of offlineCases) {
+      const m2 = resourcePanelModel({}, { bases: [{ id: 'b1', name: '主基地', ...base }] });
+      expect(m2.darknet.unlocked).toBe(false);
+      expect(m2.darknet.marketStatusText).toBe(text);
+    }
+    const noRelay = resourcePanelModel({}, { bases: [{ id: 'b1', buildings: [{ name: '盟军建造厂', state: '运转' }] }] });
+    expect(noRelay.darknet.marketStatusText).toBe('待建超维暗网中继站');
+
     // 六类指令纯函数抽验
     expect(buildDarknetOrderPrompt({ kind: 'buy', targetName: '脉冲电池' })).toContain('<暗网>');
     expect(buildDarknetOrderPrompt({ kind: 'sell_resource', targetName: '铁矿石' })).toContain('<暗网>');

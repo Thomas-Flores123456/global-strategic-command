@@ -36,8 +36,25 @@ import ModalBuildings from '../modals/ModalBuildings.vue';
 import {
   computeInteractiveBlueprintLayout,
   resolveBlueprintNodeAction,
+  normalizeBuildingFactionId,
+  resolveAvailableFactionPills,
   YURI_NODE_VARIANT_FALLBACK,
 } from '../modals/modalBuildingsHelpers';
+it('G8-09 核心别名合并为唯一阵营视角，并保留总览与扩展阵营', () => {
+  const snapshot = Schema.parse({});
+  snapshot.command.unlocked_factions = [' SOV ', 'ussr', '心灵', '欧美', '公共', 'general'];
+  const pills = resolveAvailableFactionPills(
+    { availableFactions: ['西洋', '苏俄', 'all', '全部阵营'] },
+    snapshot,
+    { factionDefs: [{ id: 'epsilon' }, { id: '升阳' }, { id: '焚风' }, { id: 'Custom_Faction' }] },
+  );
+  expect(pills.map(p => p.id)).toEqual(['all', 'allied', 'soviet', 'yuri', 'rising_sun', 'foehn', 'custom_faction']);
+  expect(normalizeBuildingFactionId(null)).toBe('common');
+  expect(normalizeBuildingFactionId('')).toBe('common');
+  expect(normalizeBuildingFactionId('通用')).toBe('common');
+  expect(normalizeBuildingFactionId('all')).toBe('all');
+});
+
 import { computeSystemDagreLayout } from '../models/buildingFlowLayout';
 import {
   buildBuildingOverviewModel,

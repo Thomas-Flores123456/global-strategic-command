@@ -28,6 +28,7 @@ env.yaml
 # 独立子仓库与未随主仓发布的本地子工程/私有过程目录
 site/
 SVG资产/
+SVG巨构/
 worldbook-explorer/
 docs/Architecture/Future Developments/
 docs/project/

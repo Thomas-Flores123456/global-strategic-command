@@ -26,7 +26,7 @@ function noThinkLeak(r: ReturnType<typeof parseMessageText>) {
 
 describe('L0-01 · B 线真机回归夹具', () => {
   it('#4：思考段 5 条噪声全部消失，正文后的四个块照常入库', () => {
-    const r = parseMessageText(bline.floor4, cyber(), {});
+    const r = parseMessageText(bline.floor4, cyber(), { isFirstFloor: true });
     noThinkLeak(r);
     expect(r.quarantine).toEqual([]);
     expect(r.data.meta.date).toBe('2042-03-14');
@@ -38,7 +38,7 @@ describe('L0-01 · B 线真机回归夹具', () => {
   });
 
   it('#10：正文不再被吞进 <战况>，战况键全部正常映射', () => {
-    const r = parseMessageText(bline.floor10, cyber(), {});
+    const r = parseMessageText(bline.floor10, cyber(), { isFirstFloor: true });
     noThinkLeak(r);
     expect(r.quarantine).toEqual([]);
     expect(r.data.economy.credits).toBe(1400);
@@ -46,7 +46,7 @@ describe('L0-01 · B 线真机回归夹具', () => {
   });
 
   it('#18：思考段 <timePast> 被忽略，只读正文后的那一个；正文内注释不再污染战况', () => {
-    const r = parseMessageText(bline.floor18, cyber(), {});
+    const r = parseMessageText(bline.floor18, cyber(), { isFirstFloor: true });
     noThinkLeak(r);
     expect(r.quarantine).toEqual([]);
     expect(r.data.meta).toMatchObject({ date: '2042-03-16', day_count: 3 });
@@ -77,29 +77,29 @@ describe('L0-01 · 思考容器边缘情况', () => {
     '容器名 <%s> 被剥离',
     name => {
       const raw = `<${name}>\n计划：输出 <战况>, <图鉴>\n<战况>\n资金: 1\n</战况>\n</${name}>\n${tail}`;
-      const r = parseMessageText(raw, zero(), {});
+      const r = parseMessageText(raw, zero(), { isFirstFloor: true });
       expect(r.data.economy.credits).toBe(500);
       expect(r.quarantine).toEqual([]);
     },
   );
 
   it('思考容器带属性 / 全角括号', () => {
-    const r1 = parseMessageText(`<think type="plan">\n<战况>\n资金: 1\n</战况>\n</think>\n${tail}`, zero(), {});
+    const r1 = parseMessageText(`<think type="plan">\n<战况>\n资金: 1\n</战况>\n</think>\n${tail}`, zero(), { isFirstFloor: true });
     expect(r1.data.economy.credits).toBe(500);
-    const r2 = parseMessageText(`＜think＞\n<战况>\n资金: 1\n</战况>\n＜/think＞\n${tail}`, zero(), {});
+    const r2 = parseMessageText(`＜think＞\n<战况>\n资金: 1\n</战况>\n＜/think＞\n${tail}`, zero(), { isFirstFloor: true });
     expect(r2.data.economy.credits).toBe(500);
   });
 
   it('残缺：只有 </think>（开头被宿主截掉），之前的全部内容丢弃', () => {
     const raw = `Blocs YAML finaux :\n<战况>\n资金: 1\n</战况>\n</think>\n${tail}`;
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(500);
     expect(r.events.some(e => /think-orphan-close/.test(e.message))).toBe(true);
   });
 
   it('残缺闭标签紧贴 <正文>（#4 / #10 真机形态）', () => {
     const raw = `plan : bloc <战况> en YAML.</think><正文>\n在地底两小时。\n</正文>\n${tail}`;
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(500);
     expect(r.quarantine).toEqual([]);
   });
@@ -112,14 +112,14 @@ describe('L0-01 · 思考容器边缘情况', () => {
 
   it('句中提到 </think> 不算残缺闭标签', () => {
     const raw = `${tail}\n她说 </think> 这个词很奇怪，然后继续。`;
-    expect(parseMessageText(raw, zero(), {}).data.economy.credits).toBe(500);
+    expect(parseMessageText(raw, zero(), { isFirstFloor: true }).data.economy.credits).toBe(500);
   });
 
   it('句中提到 <think> 不开容器', () => {
     const raw = `模型会写 <think> 标签，但这里只是叙述。\n${tail}`;
     const { notes } = stripThinking(raw);
     expect(notes).toEqual([]);
-    expect(parseMessageText(raw, zero(), {}).data.economy.credits).toBe(500);
+    expect(parseMessageText(raw, zero(), { isFirstFloor: true }).data.economy.credits).toBe(500);
   });
 
   it('容器内再次提到 <think> 不算嵌套，第一个闭标签结束容器', () => {
@@ -131,45 +131,45 @@ describe('L0-01 · 思考容器边缘情况', () => {
 
   it('多个思考容器都被剥离', () => {
     const raw = `<think>\n<战况>\n资金: 1\n</战况>\n</think>\n正文一\n<thinking>\n<战况>\n资金: 2\n</战况>\n</thinking>\n${tail}`;
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(500);
     expect(r.applied).toBe(true);
   });
 
   it('未闭合思考容器 + 行首 <正文>：截到 <正文>，记 🟡', () => {
     const raw = `<think>\n<战况>\n资金: 1\n</战况>\n<正文>\n故事\n</正文>\n${tail}`;
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(500);
     expect(r.events.some(e => e.light === '🟡' && /思考段未闭合/.test(e.message))).toBe(true);
   });
 
   it('未闭合思考容器且没有 <正文>：fail-closed 全部截掉，不入库思考里的战况', () => {
-    const r = parseMessageText('<think>\n<战况>\n资金: 1\n</战况>', zero(), {});
+    const r = parseMessageText('<think>\n<战况>\n资金: 1\n</战况>', zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(0);
     expect(r.issues.some(i => i.rule === 'R17' && i.target === 'think')).toBe(true);
   });
 
   it('CRLF 换行也能识别行首', () => {
     const raw = '<think>\r\n<战况>\r\n资金: 1\r\n</战况>\r\n</think>\r\n<战况>\r\n资金: 500\r\n</战况>';
-    expect(parseMessageText(raw, zero(), {}).data.economy.credits).toBe(500);
+    expect(parseMessageText(raw, zero(), { isFirstFloor: true }).data.economy.credits).toBe(500);
   });
 
   it('非思考标签（interactive_input / 注释）不受影响', () => {
     const raw = `<interactive_input>\n玩家输入\n</interactive_input>\n<!-- emotion_check: ok -->\n${tail}`;
-    expect(parseMessageText(raw, zero(), {}).data.economy.credits).toBe(500);
+    expect(parseMessageText(raw, zero(), { isFirstFloor: true }).data.economy.credits).toBe(500);
   });
 
   it('空 / 非字符串输入安全', () => {
     expect(stripThinking('').text).toBe('');
     expect(stripThinking(undefined as unknown as string).text).toBe('');
-    expect(parseMessageText(undefined as unknown as string, zero(), {}).applied).toBe(false);
+    expect(parseMessageText(undefined as unknown as string, zero(), { isFirstFloor: true }).applied).toBe(false);
   });
 });
 
 describe('L0-01 · 行首认领 / 句中提及', () => {
   it('句中列举标签名不再切出逗号块（#4 形态，无思考容器包裹）', () => {
     const raw = `Blocs YAML finaux : <战况>, <图鉴>, <扩展档案>, <数据更新>.\n<战况>\n资金: 500\n</战况>`;
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.quarantine).toEqual([]);
     expect(r.data.economy.credits).toBe(500);
     expect(r.events.some(e => /忽略句中提及的业务标签 4 处/.test(e.message))).toBe(true);
@@ -177,30 +177,30 @@ describe('L0-01 · 行首认领 / 句中提及', () => {
 
   it('块内容里提到其他业务标签，不截断当前块', () => {
     const raw = '<图鉴>\n- 名称: 磁暴线圈\n  类别: 建筑\n  简介: 数值见 <战况> 的电力栏\n</图鉴>';
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.quarantine).toEqual([]);
     expect(r.data.codex[0]).toMatchObject({ name: '磁暴线圈', desc: '数值见 <战况> 的电力栏' });
   });
 
   it('前导空白 / 全角空格的行首标签照常认领', () => {
-    expect(parseMessageText('   <战况>\n资金: 501\n</战况>', zero(), {}).data.economy.credits).toBe(501);
-    expect(parseMessageText('\u3000<战况>\n资金: 502\n</战况>', zero(), {}).data.economy.credits).toBe(502);
+    expect(parseMessageText('   <战况>\n资金: 501\n</战况>', zero(), { isFirstFloor: true }).data.economy.credits).toBe(501);
+    expect(parseMessageText('\u3000<战况>\n资金: 502\n</战况>', zero(), { isFirstFloor: true }).data.economy.credits).toBe(502);
   });
 
   it('紧跟另一标签闭合（同一行）照常认领', () => {
-    const r = parseMessageText('</正文><战况>\n资金: 503\n</战况><图鉴>\n- 名称: X\n  类别: 科技\n</图鉴>', zero(), {});
+    const r = parseMessageText('</正文><战况>\n资金: 503\n</战况><图鉴>\n- 名称: X\n  类别: 科技\n</图鉴>', zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(503);
     expect(r.data.codex[0]).toMatchObject({ name: 'X' });
   });
 
   it('句末黏连「。<战况>⏎」不认领，但给 🟡 提示', () => {
-    const r = parseMessageText('故事结束。<战况>\n资金: 504\n</战况>', zero(), {});
+    const r = parseMessageText('故事结束。<战况>\n资金: 504\n</战况>', zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(0);
     expect(r.issues.some(i => i.rule === 'R17' && /黏连/.test(i.message))).toBe(true);
   });
 
   it('单行块 <战况>资金: 505</战况> 在行首仍可读', () => {
-    expect(parseMessageText('<战况>资金: 505</战况>', zero(), {}).data.economy.credits).toBe(505);
+    expect(parseMessageText('<战况>资金: 505</战况>', zero(), { isFirstFloor: true }).data.economy.credits).toBe(505);
   });
 });
 
@@ -209,31 +209,31 @@ describe('L0-01 · 正文容器', () => {
 
   it('战报在正文之后（标准形态）', () => {
     const raw = `<正文>\n故事。\n</正文>\n\n${tail}`;
-    expect(parseMessageText(raw, zero(), {}).data.economy.credits).toBe(500);
+    expect(parseMessageText(raw, zero(), { isFirstFloor: true }).data.economy.credits).toBe(500);
   });
 
   it('正文内部行首的战报块不提取', () => {
     const raw = `<正文>\n示例：\n<战况>\n资金: 1\n</战况>\n</正文>\n${tail}`;
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(500);
     expect(r.quarantine).toEqual([]);
   });
 
   it('正文内部只有示例、正文外无战报 → 不入库', () => {
-    const r = parseMessageText('<正文>\n<战况>\n资金: 1\n</战况>\n</正文>', zero(), {});
+    const r = parseMessageText('<正文>\n<战况>\n资金: 1\n</战况>\n</正文>', zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(0);
   });
 
   it('未闭合 <正文> 只延伸到下一个行首业务标签（驾驶员认可的兜底）', () => {
     const raw = `<正文>\n故事写完了但忘了闭合。\n${tail}\n<图鉴>\n- 名称: Y\n  类别: 科技\n</图鉴>`;
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(500);
     expect(r.data.codex[0]).toMatchObject({ name: 'Y' });
   });
 
   it('未闭合 <正文> 里句中提到 <战况> 不算边界', () => {
     const raw = `<正文>\n她看着 <战况> 面板发呆。\n${tail}`;
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(500);
     expect(r.quarantine).toEqual([]);
   });
@@ -246,39 +246,39 @@ describe('L0-01 · 正文容器', () => {
 
   it('句中提到 <正文> 不开容器', () => {
     const raw = `规则：不要在 <正文> 里写战报\n${tail}`;
-    expect(parseMessageText(raw, zero(), {}).data.economy.credits).toBe(500);
+    expect(parseMessageText(raw, zero(), { isFirstFloor: true }).data.economy.credits).toBe(500);
   });
 
   it('多段正文各自屏蔽', () => {
     const raw = `<正文>\n一\n</正文>\n${tail}\n<正文>\n<战况>\n资金: 9\n</战况>\n</正文>`;
-    expect(parseMessageText(raw, zero(), {}).data.economy.credits).toBe(500);
+    expect(parseMessageText(raw, zero(), { isFirstFloor: true }).data.economy.credits).toBe(500);
   });
 });
 
 describe('L0-01 · 代码围栏', () => {
   it('围栏包在战报块外面', () => {
     const raw = '```yaml\n<战况>\n资金: 600\n</战况>\n```';
-    expect(parseMessageText(raw, zero(), {}).data.economy.credits).toBe(600);
+    expect(parseMessageText(raw, zero(), { isFirstFloor: true }).data.economy.credits).toBe(600);
   });
 
   it('围栏与开标签同一行', () => {
     const raw = '```<战况>\n资金: 601\n</战况>```';
-    expect(parseMessageText(raw, zero(), {}).data.economy.credits).toBe(601);
+    expect(parseMessageText(raw, zero(), { isFirstFloor: true }).data.economy.credits).toBe(601);
   });
 
   it('块内部的围栏（既有行为）', () => {
     const raw = '<战况>\n```yaml\n资金: 602\n```\n</战况>';
-    expect(parseMessageText(raw, zero(), {}).data.economy.credits).toBe(602);
+    expect(parseMessageText(raw, zero(), { isFirstFloor: true }).data.economy.credits).toBe(602);
   });
 
   it('思考段里的围栏战报不入库', () => {
     const raw = '<think>\n```yaml\n<战况>\n资金: 1\n</战况>\n```\n</think>\n```yaml\n<战况>\n资金: 603\n</战况>\n```';
-    expect(parseMessageText(raw, zero(), {}).data.economy.credits).toBe(603);
+    expect(parseMessageText(raw, zero(), { isFirstFloor: true }).data.economy.credits).toBe(603);
   });
 
   it('句中两个反引号后的标签不算行首', () => {
     const raw = '写成 ``<战况>`` 即可。\n<战况>\n资金: 604\n</战况>';
-    const r = parseMessageText(raw, zero(), {});
+    const r = parseMessageText(raw, zero(), { isFirstFloor: true });
     expect(r.data.economy.credits).toBe(604);
     expect(r.quarantine).toEqual([]);
   });

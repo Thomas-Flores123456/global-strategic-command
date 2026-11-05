@@ -1262,7 +1262,10 @@ async function ensureGirlDossierLoaded(girl: ArmoryGirlItem | null) {
   loadingGirlName.value = girl.name;
   try {
     const detail = await loadGirlDossierDetail(girl.name, { model: girl.model });
-    loadedDossiers[girl.name] = detail;
+    // G8-12：未命中（草稿）不缓存，下次选中/重开时重试，入档后可读到正史
+    if (detail.dossierEntry || detail.storyEntry) {
+      loadedDossiers[girl.name] = detail;
+    }
   } catch {
     // 非酒馆测试环境忽略读取异常
   } finally {

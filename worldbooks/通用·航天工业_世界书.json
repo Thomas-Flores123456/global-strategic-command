@@ -1327,42 +1327,6 @@
       "delay": 0,
       "displayIndex": 22
     },
-    "35": {
-      "uid": 35,
-      "key": [
-        "空间站"
-      ],
-      "keysecondary": [],
-      "comment": "36·空间站",
-      "content": "[通用·航天工业 | 空间站]\n战区常驻近地轨道空间站分舱段在轨组装巨构工程技术备忘录。常驻轨道空间站是分模块发射、在轨交会对接组装的常驻天基设施，属于T3战略门槛特殊巨构工程与地月投送验证的前提，工程立项核定预算为 35,000 资金（全周期扩建总投入可达 600,000 资金级距）。\n空间站由核心控制舱、微重力实验舱及太阳能桁架与对接船坞三大主力舱段构成，不仅是深空微重力实验、高灵敏度空间天文观测与全球高分辨率对地测绘的科研母港，更承担着验证地月往返推进、空间长期密闭生命维持与在轨飞船检修加注的战略使命，为战区跨入深空航天提供高冗余的近地中继门户。建造经仓段化工程立项、分舱段注资组装，并网后确立近地轨道常驻天基支点。\n\n*系统映射：common.project.orbital_space_station | kind=project | tier=T3 | line=航天工业 | 职能: 近地轨道多舱段模块化常驻空间站*\n\n<数据>\n{\n  \"schema_version\": 2,\n  \"type\": \"project\",\n  \"id\": \"common.project.orbital_space_station\",\n  \"name\": \"空间站\",\n  \"grade\": \"巨构\",\n  \"scope\": \"theater\",\n  \"cost\": 35000,\n  \"tier\": 3,\n  \"tags\": [\n    \"航天工业\",\n    \"天基巨构\",\n    \"在轨组装\"\n  ],\n  \"desc\": \"近地轨道多舱段模块化常驻空间站，提供天基微重力科研、深空测控中继与轨道停泊母港能力。\",\n  \"requirements\": {\n    \"research\": \"空间站建造工学\",\n    \"building\": \"航天发射中心\",\n    \"credits\": 35000,\n    \"nanites\": 200\n  },\n  \"modules\": [\n    {\n      \"id\": \"core_cabin\",\n      \"name\": \"核心控制舱\",\n      \"cost\": 10000,\n      \"days\": 10,\n      \"workload\": {\n        \"days\": 10,\n        \"min_days\": 5\n      },\n      \"prereqs\": []\n    },\n    {\n      \"id\": \"lab_cabin\",\n      \"name\": \"微重力实验舱\",\n      \"cost\": 12000,\n      \"days\": 12,\n      \"workload\": {\n        \"days\": 12,\n        \"min_days\": 6\n      },\n      \"prereqs\": [\n        \"core_cabin\"\n      ]\n    },\n    {\n      \"id\": \"dock_truss\",\n      \"name\": \"太阳能桁架与对接船坞\",\n      \"cost\": 13000,\n      \"days\": 12,\n      \"workload\": {\n        \"days\": 12,\n        \"min_days\": 6\n      },\n      \"prereqs\": [\n        \"core_cabin\"\n      ]\n    }\n  ],\n  \"outcome\": {\n    \"type\": \"mark\",\n    \"text\": \"近地轨道空间站常驻并网\"\n  }\n}\n</数据>",
-      "constant": false,
-      "vectorized": false,
-      "selective": false,
-      "selectiveLogic": 0,
-      "addMemo": true,
-      "order": 50017,
-      "position": 0,
-      "disable": true,
-      "excludeRecursion": true,
-      "preventRecursion": true,
-      "delayUntilRecursion": false,
-      "probability": 100,
-      "useProbability": true,
-      "depth": 4,
-      "group": "",
-      "groupOverride": false,
-      "groupWeight": 100,
-      "scanDepth": null,
-      "caseSensitive": false,
-      "matchWholeWords": false,
-      "useGroupScoring": null,
-      "automationId": "",
-      "role": null,
-      "sticky": 0,
-      "cooldown": 0,
-      "delay": 0,
-      "displayIndex": 23
-    },
     "36": {
       "uid": 36,
       "key": [

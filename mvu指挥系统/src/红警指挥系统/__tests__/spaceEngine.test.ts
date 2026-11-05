@@ -8,6 +8,9 @@ import {
   settleSpaceOperations as settleFromSettle,
 } from '../engines/settleFloor';
 import {
+  centerTierBaseCapacityT,
+  computeLaunchCapacityT,
+  computeLaunchPayout,
   extractSpaceContracts,
   hasOperationalLaunchpad,
   isLaunchWeatherPermitted,
@@ -525,6 +528,50 @@ id: SC-202
     expect(parsed38Failed.data.economy.credits).toBe(25000);
     expect(parsed38Failed.data.space.reusable_boosters).toBe(0);
     expect(parsed38Failed.data.space.orbital_assets.some(a => a.name === '赤道信标一号')).toBe(false);
+  });
+});
+
+describe('G4 航天同源与账务修复', () => {
+  const dockState = (nanites: number) =>
+    Schema.parse({
+      meta: { weather: '晴朗', day_count: 3 },
+      economy: { credits: 0, resources: { nanites: { 通用纳米工料: nanites } } },
+      bases: [
+        {
+          id: 'dock',
+          name: '轨道船坞',
+          site_type: 'orbital_dock',
+          buildings: [{ name: '航天发射中心', state: '运转' }],
+        },
+      ],
+    });
+  const mk = (id: string) =>
+    SpaceContract.parse({ id, title: id, payload: '同名载荷', base: '轨道船坞', reward_credits: 1000, recover_booster: false });
+
+  it('G4-07：轨道船坞出射纳米不足挂起；足额则发射并扣 50', () => {
+    const poor = dockState(10);
+    const held = settleSpaceOperations(poor, [mk('N-1')]);
+    expect(held.heldIds).toEqual(['N-1']);
+    expect(poor.space.contracts[0].weather_hold_reason).toContain('纳米工料不足');
+
+    const rich = dockState(120);
+    const ok = settleSpaceOperations(rich, [mk('N-2')]);
+    expect(ok.launchedIds).toEqual(['N-2']);
+    expect((rich.economy.resources?.nanites as Record<string, number>)['通用纳米工料']).toBe(70);
+    expect(ok.creditsEarned).toBe(computeLaunchPayout({ baseReward: 1000, sitePayoutMult: 1.5, isSpaceportCity: false, boosterConsumed: false }));
+  });
+
+  it('G4-10：同名载荷两次发射各自入轨，不按名合并', () => {
+    const s = dockState(500);
+    settleSpaceOperations(s, [mk('A-1'), mk('A-2')]);
+    expect(s.space.orbital_assets.map(a => a.id).sort()).toEqual(['orb:A-1', 'orb:A-2']);
+  });
+
+  it('G4-11/13/14：未耗助推器不给 15%；回款与运力由引擎纯函数单一口径', () => {
+    expect(computeLaunchPayout({ baseReward: 1000, sitePayoutMult: 1.2, isSpaceportCity: true, boosterConsumed: false })).toBe(1500);
+    expect(computeLaunchPayout({ baseReward: 1000, sitePayoutMult: 1.0, isSpaceportCity: false, boosterConsumed: true })).toBe(1150);
+    expect(centerTierBaseCapacityT(3, true)).toBe(80);
+    expect(computeLaunchCapacityT({ rocketBaseCapacityT: 100, centerTier: 2, isFullReuse: false, hasExplicitCenterConstraint: true, payloadMult: 1.15 })).toBeCloseTo(40.25);
   });
 });
 

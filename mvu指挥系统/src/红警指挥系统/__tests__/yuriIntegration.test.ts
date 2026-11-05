@@ -194,7 +194,7 @@ describe('YURI-CODE-01 · 尤里科研锚点、协议督导院、母体建筑等
         '生物机电与夺舍工程',
         '磁流谐振与特种攻城',
       ]);
-      expect(DEFAULT_YURI_PROTOCOL_CATALOG).toHaveLength(12);
+      expect(DEFAULT_YURI_PROTOCOL_CATALOG).toHaveLength(13);
 
       const stage0 = resolveYuriInstituteInfo(scanActiveProtocolBuildings(buildStateWithBuildings([])));
       expect(stage0.stage).toBe(0);
@@ -221,7 +221,15 @@ describe('YURI-CODE-01 · 尤里科研锚点、协议督导院、母体建筑等
         '生物机电与夺舍工程',
         '磁流谐振与特种攻城',
       ]);
-      expect(yuriTracks.every(t => t.nodes.length === 4)).toBe(true);
+      expect(yuriTracks.map(t => t.nodes.length)).toEqual([4, 5, 4]);
+
+      // G3-26：面板与引擎同源，仅协议实例 status 决定激活；tech.done 同名项不再被当作 active
+      const firstNode = yuriTracks[0].nodes[0];
+      const withTechDone = buildRawTrackViewsForFaction({
+        faction: '尤里',
+        activeState: { tech: { done: [firstNode.name] } } as never,
+      });
+      expect(withTechDone[0].nodes[0].status).not.toBe('active');
 
       const t3Node = yuriTracks[0].nodes.find(n => n.tier === 3)!;
       expect(computeNodeHint(buildStateWithBuildings([]), t3Node)).toContain(

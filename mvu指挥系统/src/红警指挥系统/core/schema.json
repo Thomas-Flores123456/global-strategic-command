@@ -563,6 +563,13 @@
                 "type": "string"
               }
             },
+            "settled_tx_ids": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "ledger": {
               "default": [],
               "type": "array",
@@ -808,6 +815,32 @@
                   "type": "array",
                   "items": {
                     "type": "string"
+                  }
+                },
+                "research_accel": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 0.5
+                },
+                "research_lines": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "compute": {
+                  "type": "object",
+                  "properties": {
+                    "tflops": {
+                      "default": 0,
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "tops": {
+                      "default": 0,
+                      "type": "number",
+                      "minimum": 0
+                    }
                   }
                 }
               },
@@ -1729,7 +1762,7 @@
             }
           },
           "generatedAt": {
-            "default": "2026-11-02T14:47:05.278Z",
+            "default": "2026-11-04T03:50:15.928Z",
             "type": "string"
           },
           "model": {
@@ -1789,7 +1822,7 @@
             }
           },
           "updatedAt": {
-            "default": "2026-11-02T14:47:05.280Z",
+            "default": "2026-11-04T03:50:15.930Z",
             "type": "string"
           }
         },
@@ -2988,7 +3021,7 @@
       "type": "object",
       "properties": {
         "id": {
-          "default": "patch_1793630825278_35iyl",
+          "default": "patch_1793764215927_k0i3n",
           "type": "string"
         },
         "target": {
@@ -3025,7 +3058,7 @@
           "type": "string"
         },
         "timestamp": {
-          "default": 1793630825278,
+          "default": 1793764215927,
           "type": "number"
         },
         "status": {

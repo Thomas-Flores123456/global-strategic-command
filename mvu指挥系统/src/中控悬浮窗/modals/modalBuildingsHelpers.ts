@@ -4,7 +4,11 @@
  */
 import { graphlib, layout as dagreLayout } from '@dagrejs/dagre';
 import toastr from 'toastr';
+import { normalizeFactionId } from '../../红警指挥系统/core/commandPresets';
 import type { StatData } from '../../红警指挥系统/core/schema';
+import { appendFloorProcessOp, type BuildingDispatchPatch } from '../../红警指挥系统/core/timelineLedger';
+import { hashText } from '../../红警指挥系统/composables/useParseAuthority';
+import { tav } from '../../红警指挥系统/parse/systemCheck';
 import {
   resolveBuildingRelativeCoord,
   type BuildingRing,
@@ -134,12 +138,11 @@ export function normalizeBuildingFactionId(raw: string | null | undefined): stri
   const lower = s.toLowerCase();
   if (lower === 'all' || s === '全部' || s === '全部阵营') return 'all';
   if (lower === 'common' || s === '通用') return 'common';
-  if (lower === 'allied' || lower === 'allies' || s.includes('盟军')) return 'allied';
-  if (lower === 'soviet' || s.includes('苏联') || s.includes('苏军') || s.includes('苏维埃')) return 'soviet';
   if (lower === 'yuri' || lower === 'epsilon' || s.includes('尤里') || s.includes('厄普西隆')) return 'yuri';
   if (lower === 'rising_sun' || lower === 'empire' || s.includes('升阳') || s.includes('旭日')) return 'rising_sun';
   if (lower === 'foehn' || s.includes('焚风')) return 'foehn';
-  return lower;
+  // all 在面板中是总览；其余核心别名复用引擎规则，扩展阵营仍保留自身 ID。
+  return normalizeFactionId(s);
 }
 
 export function buildFactionPillOption(
@@ -1179,12 +1182,38 @@ export interface BuildingInstanceMutationContext {
   catalog?: BuildingPowerCatalogLike | null;
 }
 
+/**
+ * G2-01：面板调度记入本楼当前 swipe 槽位的过程记录（带原文 hash），重解析时由 replayFloorProcessOps 重新应用；
+ * 原文一改即随 G1-05 作废。在建实例（buildingIndex<0，来自队列）不是楼层建筑，不记。
+ */
+function recordBuildingDispatch(floorId: number, inst: BuiltBuildingInstanceRef, patch: BuildingDispatchPatch): void {
+  if (inst.buildingIndex < 0) return;
+  const msg = tav<(id: number) => { swipe_id?: unknown; message?: unknown }[]>('getChatMessages')?.(floorId)?.[0];
+  const swipe = typeof msg?.swipe_id === 'number' && Number.isInteger(msg.swipe_id) ? msg.swipe_id : 0;
+  appendFloorProcessOp(
+    floorId,
+    swipe,
+    {
+      kind: 'BUILDING_DISPATCH',
+      ts: Date.now(),
+      baseId: inst.baseId,
+      buildingName: inst.name,
+      instanceOrdinal: inst.instanceOrdinal ?? 1,
+      patch,
+    },
+    msg ? hashText(String(msg.message ?? '')) : '',
+  );
+}
+
 export async function mutateBuildingInstance(
   inst: BuiltBuildingInstanceRef,
-  mutator: (b: Record<string, unknown>) => void,
+  patch: BuildingDispatchPatch,
   toastMsg: string,
   ctx: BuildingInstanceMutationContext,
 ): Promise<void> {
+  const mutator = (b: Record<string, unknown>) => {
+    Object.assign(b, patch);
+  };
   const localBase = ctx.snapshot?.bases?.[inst.baseIndex];
   const localBld = localBase?.buildings?.[inst.buildingIndex];
   if (localBld) {
@@ -1210,9 +1239,11 @@ export async function mutateBuildingInstance(
   ctx.onTick();
 
   if (ctx.floating.floorId !== null && ctx.floating.floorId !== undefined) {
-    await ctx.updateFloorVars(ctx.floating.floorId, vars =>
+    const floorId = ctx.floating.floorId;
+    await ctx.updateFloorVars(floorId, vars =>
       applyBuildingInstanceMutationToVars(vars, inst, mutator, ctx.catalog),
     );
+    recordBuildingDispatch(floorId, inst, patch);
     await ctx.floating.refresh();
   }
   toastr?.success?.(toastMsg, '建筑产线调度');
@@ -1225,12 +1256,7 @@ export async function toggleBuildingInstanceMode(
   const nextMode: '生产' | '加速' = inst.mode === '加速' ? '生产' : '加速';
   await mutateBuildingInstance(
     inst,
-    b => {
-      b.mode = nextMode;
-      if (nextMode === '加速' && !b.accel_scope) {
-        b.accel_scope = 'global';
-      }
-    },
+    nextMode === '加速' ? { mode: nextMode, accel_scope: inst.accelScope } : { mode: nextMode },
     `「${inst.name}」已切换为【${nextMode}】模式`,
     ctx,
   );
@@ -1243,9 +1269,7 @@ export async function toggleBuildingInstanceScope(
   const nextScope: 'global' | 'base' = inst.accelScope === 'base' ? 'global' : 'base';
   await mutateBuildingInstance(
     inst,
-    b => {
-      b.accel_scope = nextScope;
-    },
+    { accel_scope: nextScope },
     `「${inst.name}」加速范围已切换为【${nextScope === 'base' ? '仅本基地' : '战区全局'}】`,
     ctx,
   );
@@ -1258,9 +1282,7 @@ export async function toggleBuildingInstanceState(
   const nextState: '运转' | '停机' = inst.state === '运转' ? '停机' : '运转';
   await mutateBuildingInstance(
     inst,
-    b => {
-      b.state = nextState;
-    },
+    { state: nextState },
     `「${inst.name}」状态已切换为【${nextState}】`,
     ctx,
   );

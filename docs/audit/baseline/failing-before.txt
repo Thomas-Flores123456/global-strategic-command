@@ -1,0 +1,46 @@
+﻿src/__tests__/chronoBanner.test.ts > CTRL-UI-CHRONO-01 · settleFloor extraDeltaMinut
+src/红警指挥系统/__tests__/assetQueueCross.test.ts > settleFloor × R26（热路径接线，只警不拦） > 
+src/红警指挥系统/__tests__/deployParse.test.ts > E3b · <部署> 标签块预提取（设计稿§三指令面） > 多行
+src/红警指挥系统/__tests__/deployParse.test.ts > E3b · <部署> 标签块预提取（设计稿§三指令面） > 三形
+src/红警指挥系统/__tests__/engCommonWorldbook.test.ts > V2-08 · uid35 退场（通用·航天工业_世界书.json）
+src/红警指挥系统/__tests__/engSovietWorldbook.test.ts > SU-01 · 《工程·苏联》书结构（uid0/uid1-24/ui
+src/红警指挥系统/__tests__/engSovietWorldbook.test.ts > SU-01 · 24 块冻结数值对账（附录清单 × ECON-01
+src/红警指挥系统/__tests__/engSovietWorldbook.test.ts > SU-01 · 盟军书零扰动（uid0-24 = SU-01 前基线
+src/红警指挥系统/__tests__/engSovietWorldbook.test.ts > SU-01 · 真实《工程·苏联》书解析全链 >
+src/红警指挥系统/__tests__/eventSchema.test.ts > EVT-SCHEMA-01 · IncomeChain 实体与 Schema 扩容
+src/红警指挥系统/__tests__/floorProtocolIndex.test.ts > 统一楼层协议块索引 > 大小写、全角标签与摘要属性
+src/红警指挥系统/__tests__/maidenLifecycle.test.ts > MAIDEN-CORE-01 · 同型次生机娘三步生命周期、原地认亲与聊天
+src/红警指挥系统/__tests__/parseEvents.test.ts > EVT-PARSE-01 · 🟡 黄通道（轻度瑕疵归一化并记 repairs）
+src/红警指挥系统/__tests__/parseEvents.test.ts > EVT-PARSE-01 · 🟢 绿通道（合法报文零修复入库） > [
+src/红警指挥系统/__tests__/parseEvents.test.ts > EVT-PARSE-02 · 红线与经济账本隔离 > BUG-R
+src/红警指挥系统/__tests__/parseEvents.test.ts > G04-01 · 混合绿黄事件遵守原文顺序 > 绿建立→黄断裂：
+src/红警指挥系统/__tests__/parseIssuesCapAndUndo.test.ts > persistParse · issues 楼号键超帽裁汰（热
+src/红警指挥系统/__tests__/parseIssuesObservability.test.ts > persistParse · issues 落 $par
+src/红警指挥系统/__tests__/parseReportsPersistence.test.ts > PanelParseRepair.vue · loadRe
+src/红警指挥系统/__tests__/prerequisites.test.ts > PKG-A · 4. buildUnitPresent 状态/数量剥离与 UN
+src/红警指挥系统/__tests__/protocolCatalogAndWeatherOps.test.ts > DEC-CATALOG-01 · protoco
+src/红警指挥系统/__tests__/settleEvents.test.ts > EVT-SETTLE-01 · 零注入护栏与全链路闭环 > 全
+src/红警指挥系统/__tests__/useFloatingStore.test.ts > refresh 成功 > 取最近合法 AI 楼：跳过
+src/红警指挥系统/__tests__/useFloatingStore.test.ts > refresh 失败 / 无有效楼 → snapshot = null
+src/红警指挥系统/__tests__/useParseEvents.test.ts > EVT-PIPE-01 · runParseFor → settleFloo
+src/红警指挥系统/__tests__/worldbookDataFiler.test.ts > PanelDataPatches.vue · SFC 契约与三通道审
+src/红警指挥系统/__tests__/yuriIntegration.test.ts > YURI-CODE-01 · 尤里科研锚点、协议督导院、母体建筑等价与王牌
+src/中控悬浮窗/__tests__/commandUiAndProtocol.test.ts > CMD-UI-01 · floorObservers 多阵营四书同
+src/中控悬浮窗/__tests__/commandUiAndProtocol.test.ts > UI-BUILD-GRID-01 · ConsoleBuildGr
+src/中控悬浮窗/__tests__/engCommonWorldbook.test.ts > V2-08 · uid35 退场（通用·航天工业_世界书.json）
+src/中控悬浮窗/__tests__/engSovietWorldbook.test.ts > SU-01 · 《工程·苏联》书结构（uid0/uid1-24/uid
+src/中控悬浮窗/__tests__/engSovietWorldbook.test.ts > SU-01 · 24 块冻结数值对账（附录清单 × ECON-01 档
+src/中控悬浮窗/__tests__/engSovietWorldbook.test.ts > SU-01 · 盟军书零扰动（uid0-24 = SU-01 前基线；
+src/中控悬浮窗/__tests__/engSovietWorldbook.test.ts > SU-01 · 真实《工程·苏联》书解析全链 > p
+src/中控悬浮窗/__tests__/floorVarWrite.test.ts > floorVarWrite 唯一定义点契约 > 源码契约：fl
+src/中控悬浮窗/__tests__/ModalMechaGirl.test.ts > ModalMechaGirl · 四维「军备管理」模态框组件测试 (ARM-0
+src/中控悬浮窗/__tests__/ModalSettings.test.ts > DEV-SANDBOX-01 · ModalSettings 挂载 PanelD
+src/中控悬浮窗/__tests__/obuiStyleGate.test.ts > FD-42 G1 · Oblivion 实用化视觉体系静态门禁 > [
+src/中控悬浮窗/__tests__/PdaTabIntel.test.ts > FIX-P1-05 · PdaTabIntel 与 PdaWindowFrame 暂
+src/中控悬浮窗/__tests__/tagFilter.test.ts > 4. 真实世界书 18 项主建筑（8 项 T1 试点 + 2a 扩建 6 项 + D3
+src/中控悬浮窗/__tests__/tagFilter.test.ts > 8. ConsoleBuildGrid.vue 双面板双铁律过滤与一键展开 MCV 交互
+src/中控悬浮窗/__tests__/TopNavRefresh.test.ts > O-R2 直证 ② · FloatingApp @refresh 接线（SSR
+src/中控悬浮窗/__tests__/ttAgentAndSkillBridge.test.ts > PKG-D · PanelIntegrityCheck 宿主环境
+src/中控悬浮窗/pda/__tests__/pdaFrame.test.ts > PDA-FRAME-01: PdaWindowFrame 320×440px 展开
+src/中控悬浮窗/pda/__tests__/pdaTabs.test.ts > PDA-TAB-03: PdaTabIntel 战区情报与世界书待确认备忘录
+src/中控悬浮窗/pda/__tests__/pdaTabs.test.ts > PdaWindowFrame 四联页签装配、PdaTabQuests 与 Conso

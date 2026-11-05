@@ -182,6 +182,7 @@
           :snapshot="resolvedSnapshot"
           :events="liveEvents"
           :demo-mode="demoMode"
+          @select-event="onSelectEvent"
         />
         <PdaTabChains v-else-if="resolvedActiveTab === 'chains'" :snapshot="resolvedSnapshot" />
         <PdaTabIntel
@@ -227,6 +228,7 @@ import { confirmAndCommitPendingLore } from '../../红警指挥系统/worldbook/
 import type { Schema } from '../../红警指挥系统/core/schema';
 import { useFloatingStore } from '../../红警指挥系统/composables/useFloatingStore';
 import { updateFloorVars } from '../host/floorVarWrite';
+import { jumpToChatFloor } from '../host/chatJump';
 import PdaTabChains from './PdaTabChains.vue';
 import PdaTabEvents from './PdaTabEvents.vue';
 import type { PdaEventItem } from './PdaTabEvents.vue';
@@ -398,6 +400,11 @@ function tabBadgeCount(tabId: PdaPrimaryTabId): number {
 }
 
 const loreCommitError = ref('');
+
+/** G6-10：点击事件时跳到来源楼层（无楼号时仅高亮，不跳） */
+function onSelectEvent(item: { floorText: string }) {
+  void jumpToChatFloor(item.floorText);
+}
 
 async function onAdoptLore(item: NormalizedPendingLoreItem) {
   loreCommitError.value = '';

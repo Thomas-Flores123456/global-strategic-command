@@ -153,6 +153,49 @@ function makeHost(doc: MockDocument, cardType: string, payload: string): MockEle
 }
 
 describe('CARD-ALL-PROTOCOLS-01 · 全系 11 类协议标签水合、方案 C 渲染与默认精简折叠机架导轨', () => {
+  it('G1-13：航天空块、空白及缺载荷只显示错误态，不生成默认可操作合同', () => {
+    for (const type of ['space-contract', 'aerospace-contract']) {
+      for (const payload of ['', '  \n ', '<航天> \n </航天>', '<航天合同></航天合同>', '<发射中心> </发射中心>']) {
+        const doc = new MockDocument();
+        const host = makeHost(doc, type, payload);
+        if (!payload) host.children.length = 0;
+        expect(hydrateFloorCardHost(host as unknown as HTMLElement)).toBe(true);
+        expect(host.getAttribute('data-tw-payload-error')).toBe('missing-block');
+        expect(host.getAttribute('role')).toBe('status');
+        expect(host.getAttribute('data-tw-hydrated')).toBe('true');
+        expect(host.textContent).toContain('已停止渲染默认卡片');
+        expect(host.querySelector('[data-test="floor-card-mount"]')).toBeNull();
+        expect(host.querySelector('button')).toBeNull();
+      }
+    }
+  });
+
+  it('G1-14：fallback 有效同型卡按序取载荷，越界卡不得借用首卡', () => {
+    const doc = new MockDocument();
+    const first = makeHost(doc, 'aerospace-contract', '');
+    const second = makeHost(doc, 'aerospace-contract', '');
+    const overflow = makeHost(doc, 'aerospace-contract', '');
+    const globals = globalThis as Record<string, unknown>;
+    const prevChat = globals.chat;
+    globals.chat = [{ mes: '<航天>名称: 首卡任务</航天>\n<航天>名称: 次卡任务</航天>' }];
+    try {
+      const ctx = { mesid: 0, mesElement: doc.body as unknown as HTMLElement };
+      for (const [host, title] of [[first, '首卡任务'], [second, '次卡任务']] as const) {
+        expect(hydrateFloorCardHost(host as unknown as HTMLElement, ctx)).toBe(true);
+        expect(host.getAttribute('data-tw-payload-error')).toBeNull();
+        expect(host.collectText()).toContain(title);
+        expect(host.querySelector('[data-test="floor-card-mount"]')).not.toBeNull();
+      }
+      expect(hydrateFloorCardHost(overflow as unknown as HTMLElement, ctx)).toBe(true);
+      expect(overflow.getAttribute('data-tw-payload-error')).toBe('missing-block');
+      expect(overflow.getAttribute('role')).toBe('status');
+      expect(overflow.querySelector('[data-test="floor-card-mount"]')).toBeNull();
+      expect(overflow.collectText()).not.toContain('首卡任务');
+    } finally {
+      globals.chat = prevChat;
+    }
+  });
+
   it('SYSTEM_TAVERN_REGEX_REGISTRY 注册全部 11 类楼层协议标签，且旧 <战况> 尾部吞噬段被精确剥离', () => {
     const names = SYSTEM_TAVERN_REGEX_REGISTRY.map(r => r.script_name);
     expect(names).toContain('系统·阵营解锁卷宗卡片挂载');

@@ -12,7 +12,12 @@
  *    严禁跨阵营或靠超算中心越俎代庖代解锁 T2/T3 协议；通用战斗实验室仅可兜底双方 T2。
  */
 
-import { resolveMaxTechTier, TECH_TIER_T2_ANCHORS, TECH_TIER_T3_ANCHORS } from './researchSlots';
+import {
+  INACTIVE_RESEARCH_BUILDING_STATES,
+  resolveMaxTechTier,
+  TECH_TIER_T2_ANCHORS,
+  TECH_TIER_T3_ANCHORS,
+} from './researchSlots';
 
 /* ═══════════════ 类型定义 ═══════════════ */
 
@@ -140,20 +145,11 @@ export const INACTIVE_PROTOCOL_BASE_STATUSES: ReadonlySet<string> = new Set([
   '离线',
 ]);
 
-/** 非运转建筑状态集合（过滤损毁/受损/停机/离线/断电/瘫痪/建造中/摧毁等非运转状态） */
-export const INACTIVE_PROTOCOL_BUILDING_STATES: ReadonlySet<string> = new Set([
-  '建造中',
-  '损毁',
-  '受损',
-  '停机',
-  '离线',
-  '断电',
-  '瘫痪',
-  '摧毁',
-]);
+/** 非运转建筑状态集合：与 researchSlots 同源（G3-10，含被毁/战损） */
+export const INACTIVE_PROTOCOL_BUILDING_STATES: ReadonlySet<string> = INACTIVE_RESEARCH_BUILDING_STATES;
 
 /**
- * 全库 7 座核心科研/算力建筑精确底账注册表（§1.6 / D-P8b/8c / D-P26）
+ * 全库 9 座核心科研/算力建筑精确底账注册表（7 院所 + 2 算力；§1.6 / D-P8b/8c / D-P26）
  */
 export const PROTOCOL_ANCHOR_BUILDINGS: readonly ProtocolAnchorBuildingDef[] = Object.freeze([
   {

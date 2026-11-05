@@ -15,6 +15,7 @@
 import { klona } from 'klona';
 import type { EffectiveCatalog } from '../core/catalogEffective';
 import type { ParsedPlanningIntent, PlanningActionItem } from './planningParser';
+import { computePlanFingerprint } from './planningParser';
 import { runPlanningSandbox } from './planningSandbox';
 import type { PlanningReceipt, PlanningReceiptActionResult, PlanningState, StatData } from '../core/schema';
 import { appendFloorProcessOp } from '../core/timelineLedger';
@@ -22,6 +23,12 @@ import { appendFloorProcessOp } from '../core/timelineLedger';
 export interface CommitPlanningOptions {
   currentSnapshotRef?: string;
   floor?: number;
+  /** G1-03：提交所在楼层的真实 swipe_id（过程量按 (floor, swipe) 双因子落账） */
+  swipe?: number;
+  /** G1-05：本楼原文哈希，用于编辑后判定过程量失效 */
+  textHash?: string;
+  /** G1-03：是否记入 $timeline 过程量；重放路径必须传 false，避免重放又追加日志 */
+  recordProcessOp?: boolean;
   forceApprove?: boolean;
 }
 
@@ -84,7 +91,7 @@ export function commitPlanningIntent(
     currentSnapshotRef: options?.currentSnapshotRef,
   });
 
-  const itemRef = cleanText(intent.request_ref) || cleanText(intent.fingerprint) || '排产计划';
+  const itemRef = cleanText(intent.request_ref) || cleanText(intent.fingerprint) || computePlanFingerprint(intent);
 
   // 1. 幂等已提交跳过：完全不改入参状态（连 latest_receipt / queues / credits 均保持原样）
   if (sandboxResult.alreadyCommitted) {
@@ -147,16 +154,18 @@ export function commitPlanningIntent(
     planning.latest_receipt = committedReceipt;
     planning.pending_plan = null;
 
-    if (options?.floor !== undefined) {
-      appendFloorProcessOp(options.floor, 0, {
-        kind: 'COMMIT_PLANNING',
-        ts: Date.now(),
-        planId: itemRef,
-        intentSnapshot: intent,
-        queuesSnapshot: next.queues,
-        creditsAfter: next.economy?.credits,
-        planningSnapshot: next.planning as unknown as Record<string, unknown>,
-      });
+    if (options?.floor !== undefined && options.recordProcessOp !== false) {
+      appendFloorProcessOp(
+        options.floor,
+        options.swipe ?? 0,
+        {
+          kind: 'COMMIT_PLANNING',
+          ts: Date.now(),
+          planId: itemRef,
+          intentSnapshot: intent,
+        },
+        options.textHash ?? '',
+      );
     }
 
     return {

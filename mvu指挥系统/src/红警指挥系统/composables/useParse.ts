@@ -19,13 +19,14 @@ import {
   type QuarantineItem,
   type StatData,
 } from '../parse/parsePipeline';
+import { computePlanFingerprint } from '../planning/planningParser';
 import { stripThinking } from '../parse/floorSanitize';
 import type { ProjectDef, RetrofitDef } from '../core/catalog';
 import { tav, type CheckIssue } from '../parse/systemCheck';
 import {
   appendFloorProcessOp,
   ensureSwipeSlot,
-  getSwipeSlot,
+  getReplayableFloorOps,
   makeSwipeScopedKey,
   parseSwipeScopedKey,
   readTimelineLedger,
@@ -313,6 +314,14 @@ export async function runParseFor(
     // catalog 读 useCatalog 模块级缓存快照；读不到/结算异常退默认值，绝不阻断解析落盘。
     // CHRONO 暂存候选（CTRL-UI-CHRONO-01）：本楼 OVERRUN 裁决记录，落盘成功后写入 parseState.chrono
     let chronoVerdicts: import('../engines/productionReconciliation').VerdictRecord[] | null = null;
+    // 用户选择跨原文编辑保留；顺延补票分钟数按次累加作为结算输入。
+    const ledgerAtRead = readTimelineLedger();
+    const replayOps = getReplayableFloorOps(ledgerAtRead, message_id, swipeAtRead, hash);
+    const persistedExtraMinutes = replayOps.reduce(
+      (sum, op) => (op.kind === 'CHRONO_RESOLVE' && (op.extraDeltaMinutes ?? 0) > 0 ? sum + op.extraDeltaMinutes! : sum),
+      0,
+    );
+    const extraDeltaMinutes = persistedExtraMinutes + Math.max(0, opts.extraDeltaMinutes ?? 0);
     try {
       const s2Start = performance.now();
       const catalog: import('../core/catalogEffective').EffectiveCatalog | null = catalogSnap;
@@ -368,7 +377,7 @@ export async function runParseFor(
       }
       const settled = settleFloor(baseline?.stat_data, stat_data, raw, {
         catalog,
-        extraDeltaMinutes: opts.extraDeltaMinutes,
+        extraDeltaMinutes: extraDeltaMinutes > 0 ? extraDeltaMinutes : undefined,
         // CTRL-DISPATCH-PARSE-01：解析出的本楼调度令直通结算（缺省/空数组时 settleFloor 不注入，行为零变化）
         orders: result.orders,
         // CTRL-DEPLOY-PARSE-01（E3b 接线）：解析出的本楼部署令直通结算 ④″（缺省/空数组 settleFloor 不入账，行为零变化）
@@ -481,7 +490,7 @@ export async function runParseFor(
         // FIX-P1-03（08 [P1-1]）：当 reconcileProduction 将工程队列项置为 done 后、调用 applyEngOrders 之前，
         // 补跑一次 syncProjects 回写当楼竣工的阶段/模块，使同楼后续 <工程> 注资/推进令可立即生效。
         const { syncProjects } = await import('../engines/projectEngine');
-        const syncedAfterReconcile = syncProjects(result.data);
+        const syncedAfterReconcile = syncProjects(result.data, catalogSnap?.retrofits ?? []);
         result.data = recomputeBasePowerFromCatalog(syncedAfterReconcile.next, catalog, [], {
           useBuiltinFallback: true,
         });
@@ -536,12 +545,18 @@ export async function runParseFor(
 
     // PLAN-COMMIT-01：<排产计划> 排产意图接缝——在 settleFloor 之后、落盘之前结转 commitPlanningIntent，
     // 天然保证本楼新增入队项以 status='queued', spent_minutes=0 零时间落盘，绝不吃本楼 Δt 推进。
+    // 自动委托只在本楼落盘成功后记过程量，弃写不留日志。
+    const committedPlanningOps: Extract<import('../core/timelineLedger').FloorProcessOp, { kind: 'COMMIT_PLANNING' }>[] = [];
     if (result.planningDecls && result.planningDecls.length > 0) {
       try {
         const snap = catalogSnap;
         const { commitPlanningIntent } = await import('../planning/planningReceipt');
         for (const decl of result.planningDecls) {
-          const committed = commitPlanningIntent(result.data, decl, snap, { floor: message_id });
+          const committed = commitPlanningIntent(result.data, decl, snap, { floor: message_id, recordProcessOp: false });
+          if (committed.committed) {
+            committedPlanningOps.push({ kind: 'COMMIT_PLANNING', ts: Date.now(),
+              planId: decl.request_ref.trim() || decl.fingerprint.trim() || computePlanFingerprint(decl), intentSnapshot: decl });
+          }
           result.data = committed.next;
           result.events.push(...committed.events);
         }
@@ -632,39 +647,19 @@ export async function runParseFor(
     // 在写回本楼 stat_data 前按序重放（排产批准、时序裁决、YAML 修复、数据补丁裁决 100% 自动恢复）
     const s6Start = performance.now();
     try {
-      const slot = getSwipeSlot(readTimelineLedger(), message_id, swipeAtRead);
-      if (slot && slot.opLog.length > 0) {
-        const opsForReplay = slot.opLog.map(op =>
-          op.kind === 'COMMIT_PLANNING' &&
-          (Array.isArray(op.queuesSnapshot) || typeof op.creditsAfter === 'number')
-            ? { ...op, intentSnapshot: undefined }
-            : op,
-        );
+      if (replayOps.length > 0) {
         result.data = replayFloorProcessOps(
           result.data as unknown as Record<string, unknown>,
-          opsForReplay,
-          { catalog: catalogSnap, floorId: message_id },
+          replayOps,
+          { catalog: catalogSnap, floorId: message_id, onSkip: (op, reason) => {
+            result.events.push({ light: '🟡', layer: 'instruction',
+              message: `${op.kind}：${reason}`, path: '$timeline.opLog' });
+          } },
         ) as unknown as StatData;
-        // parseMessageText 重跑 <数据更新> 时会重新生成随机 patch_id，按 patchTarget 二次对齐收敛 pending_data_patches
-        for (const op of slot.opLog) {
-          if (op.kind !== 'PATCH_DECISION' || !Array.isArray(result.data.pending_data_patches)) continue;
-          if (op.decision === 'approve' || op.decision === 'reject') {
-            result.data = {
-              ...result.data,
-              pending_data_patches: result.data.pending_data_patches.filter(
-                p => p.id !== op.patchId && (!op.patchTarget || p.target !== op.patchTarget),
-              ),
-            };
-          } else if (op.decision === 'defer') {
-            result.data = {
-              ...result.data,
-              pending_data_patches: result.data.pending_data_patches.map(p =>
-                p.id === op.patchId || (op.patchTarget && p.target === op.patchTarget)
-                  ? { ...p, status: 'deferred' as const }
-                  : p,
-              ),
-            };
-          }
+        // G2-01：面板调度（启停/加速）改变建筑运转态，重放后按结算同源口径重算基地电力
+        if (replayOps.some(op => op.kind === 'BUILDING_DISPATCH')) {
+          const { recomputeBasePowerFromCatalog } = await import('../engines/settleFloor');
+          result.data = recomputeBasePowerFromCatalog(result.data, catalogSnap, [], { useBuiltinFallback: true });
         }
       }
     } catch (err) {
@@ -676,10 +671,7 @@ export async function runParseFor(
     if (
       result.engOrders.length > 0 ||
       (result.planningDecls && result.planningDecls.length > 0) ||
-      (getSwipeSlot(readTimelineLedger(), message_id, swipeAtRead)?.opLog.some(
-        op => op.kind === 'COMMIT_PLANNING',
-      ) ??
-        false)
+      replayOps.some(op => op.kind === 'COMMIT_PLANNING')
     ) {
       try {
         const { promoteIdleQueuesAtZeroDelta } = await import('../engines/settleFloor');
@@ -694,6 +686,9 @@ export async function runParseFor(
 
     // 落盘本楼（必落快照：无 tag / 全隔离也把归一基线写入，杜绝"渲染开局态"）
     await uvw(v => _.set(v, 'stat_data', result.data), { type: 'message', message_id });
+    for (const op of committedPlanningOps) {
+      appendFloorProcessOp(message_id, swipeAtRead, op, hash);
+    }
 
     const green = result.events.filter(e => e.light === '🟢').length;
     const yellow = result.events.filter(e => e.light === '🟡').length;
@@ -926,7 +921,6 @@ export async function submitFix(
       ts: Date.now(),
       blockType: item.tag ?? '战况',
       fixedYaml: fixedText,
-      fixedStatSnapshot: result.data as unknown as Record<string, unknown>,
     });
 
     // 隔离区收敛：摘除已修复项 + 并入本次新隔离项
@@ -1086,25 +1080,25 @@ export async function autoAdvanceChrono(): Promise<ChronoActionResult> {
         const msgNow = api.gcm(stash.message_id)?.[0];
         const currentSwipe =
           msgNow && typeof msgNow.swipe_id === 'number' && Number.isInteger(msgNow.swipe_id) ? msgNow.swipe_id : 0;
-        const nextData = _.get(api.gv({ type: 'message', message_id: stash.message_id }), 'stat_data') as
-          | StatData
-          | undefined;
-        if (nextData && typeof nextData === 'object') {
-          const conflictId =
-            stash.verdicts
-              .map(v => v.item)
-              .filter(Boolean)
-              .join(',') || `chrono_${stash.message_id}`;
-          appendFloorProcessOp(stash.message_id, currentSwipe, {
+        const conflictId =
+          stash.verdicts
+            .map(v => v.item)
+            .filter(Boolean)
+            .join(',') || `chrono_${stash.message_id}`;
+        // G6-07：只记结算输入（顺延分钟数），不记队列/基地/部队快照——重解析时 runParseFor 把它传给 settleFloor，
+        // 经济/时钟/资金链/队列按同一时长重算，上游改动后也不会被旧快照覆盖。
+        appendFloorProcessOp(
+          stash.message_id,
+          currentSwipe,
+          {
             kind: 'CHRONO_RESOLVE',
             ts: Date.now(),
             conflictId,
             resolution: 'defer',
-            queuesSnapshot: nextData.queues,
-            basesSnapshot: nextData.bases,
-            forcesSnapshot: nextData.forces as unknown as Record<string, unknown>,
-          });
-        }
+            extraDeltaMinutes: delta,
+          },
+          msgNow ? hashText(String(msgNow.message ?? '')) : '',
+        );
       } catch {
         /* ignore ledger write error */
       }
@@ -1245,9 +1239,7 @@ export async function forceCommissionChrono(): Promise<ForceCommissionOutcome> {
       ts: Date.now(),
       conflictId: commissioned.join(',') || `chrono_${stash.message_id}`,
       resolution: 'force',
-      queuesSnapshot: working.queues,
-      basesSnapshot: working.bases,
-      forcesSnapshot: working.forces as unknown as Record<string, unknown>,
+      targets: [...targets.values()].filter(t => commissioned.includes(t.item)).map(t => ({ item: t.item, base: t.base })),
     });
 
     // $parse 留痕（hash 保持既有登记）；隔离区条目原样保留（先读出现值防误清）

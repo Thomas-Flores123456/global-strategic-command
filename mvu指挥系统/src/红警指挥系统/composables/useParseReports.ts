@@ -4,8 +4,10 @@ import {
   parseSwipeScopedKey,
   pruneTimelineAboveFloor,
   readTimelineLedger,
+  remapTimelineAfterMidDeletion,
   writeTimelineLedger,
   type TimelineLedgerState,
+  type WorldbookMutationRecord,
 } from '../core/timelineLedger';
 import type { VerdictRecord } from '../engines/productionReconciliation';
 import type { ParseEvent, QuarantineItem } from '../parse/parsePipeline';
@@ -16,6 +18,7 @@ import {
   apis,
   ensureChatBookGatewayMethods,
   FALLBACK_ROSTER_MARK,
+  hashText,
   normalizeParseRoot,
   type GetVariables,
   type UpdateVariablesWith,
@@ -394,34 +397,92 @@ export async function checkParseQuarantine(): Promise<CheckIssue[]> {
 
 /* ═══════════════ SEAM-01：删楼水位线对账 ═══════════════ */
 
+/** 逆向回滚被删楼层的世界书变更，并清理其追加的花名册行；返回回滚条数 */
+async function rollbackRemovedWbMutations(removedWbMutations: WorldbookMutationRecord[]): Promise<number> {
+  if (removedWbMutations.length === 0) return 0;
+  ensureChatBookGatewayMethods();
+  const wbRes = await rollbackWorldbookMutations(removedWbMutations);
+  // 兜底清理花名册追加行（当 chatBookBinding 尚未导出 ROSTER_ENTRY_NAME 常量时）
+  const gw = chatBookGateway as unknown as {
+    getChatWorldbookName: (t: string) => string | null;
+    getWorldbookNames: () => string[];
+    updateWorldbookWith: (
+      name: string,
+      fn: (entries: { name?: string; content?: string }[]) => { name?: string; content?: string }[],
+    ) => Promise<void>;
+  };
+  const rosterMutations = removedWbMutations.filter(m => Boolean(m.rosterLineAdded));
+  if (rosterMutations.length > 0) {
+    const allBooks = gw.getWorldbookNames();
+    const byBook = new Map<string, string[]>();
+    for (const m of rosterMutations) {
+      const book = (m.bookName || gw.getChatWorldbookName('current') || '').trim();
+      if (!book || !allBooks.includes(book) || !m.rosterLineAdded) continue;
+      const lines = byBook.get(book) ?? [];
+      lines.push(m.rosterLineAdded.trim());
+      byBook.set(book, lines);
+    }
+    for (const [book, linesToRemove] of byBook.entries()) {
+      await gw.updateWorldbookWith(book, entries =>
+        entries.map(e => {
+          if (typeof e?.name === 'string' && e.name.includes(FALLBACK_ROSTER_MARK) && typeof e.content === 'string') {
+            return {
+              ...e,
+              content: e.content
+                .split(/\r?\n/)
+                .filter(l => !linesToRemove.includes(l.trim()))
+                .join('\n'),
+            };
+          }
+          return e;
+        }),
+      );
+    }
+  }
+  return wbRes.rolledBackCount;
+}
+
 /**
  * 删楼水位线对账：
  * 1) 清理聊天变量 `$parse.done`、`$parse.quarantine`、`$parse.issues`、`$parse.reports`（及内存态）中楼层号 `> maxFloor` 的残留项；
  * 2) 调用 `pruneTimelineAboveFloor(readTimelineLedger(), maxFloor)` 裁剪 `$timeline` 高于 `maxFloor` 的楼层；
  * 3) 若有 `removedWbMutations` 则调用 `await rollbackWorldbookMutations(removedWbMutations)` 自动逆向回滚聊天世界书词条。
+ *
+ * G9-01：`opts.midDeletionFrom` 表示调用方按消息身份（$parse.done hash）检出「删中间楼」，楼号自该楼起整体前移：
+ * 此时仅回滚被删楼的 wbJournal，`$timeline` 更高楼层整体前移 1 楼（remapTimelineAfterMidDeletion），
+ * 并清除 `>= midDeletionFrom` 的 $parse 留痕使其重解析，在返回值 `needsReparseFrom` 标记。
  */
 export async function reconcileDeletedFloorsAbove(
   maxFloor: number,
-): Promise<{ prunedFloors: number[]; rolledBackWbCount: number }> {
+  opts?: { midDeletionFrom?: number },
+): Promise<{ prunedFloors: number[]; rolledBackWbCount: number; needsReparseFrom?: number }> {
   const safeMax = Number.isFinite(maxFloor) ? Math.trunc(maxFloor) : -1;
+  const midFrom =
+    typeof opts?.midDeletionFrom === 'number' && Number.isFinite(opts.midDeletionFrom) && opts.midDeletionFrom <= safeMax
+      ? Math.max(0, Math.trunc(opts.midDeletionFrom))
+      : undefined;
+  /** $parse 留痕裁剪线：删中间楼时从错位楼起全部作废，否则按水位线 */
+  const parseCut = midFrom !== undefined ? midFrom - 1 : safeMax;
   const prunedSet = new Set<number>();
+  /** 删中间楼：错位楼身份留痕（尚在才重映射账本；首次对账即清除留痕，重放同一删楼不重复回滚） */
+  let midIdentityHash: string | undefined;
 
   // 1. 清理内存态 parseState
   for (const k of Object.keys(parseState.quarantine)) {
     const parsed = parseSwipeScopedKey(k);
-    if (parsed && parsed.floorId > safeMax) {
+    if (parsed && parsed.floorId > parseCut) {
       prunedSet.add(parsed.floorId);
       delete parseState.quarantine[k];
     }
   }
   for (let i = parseState.reports.length - 1; i >= 0; i--) {
     const mid = parseState.reports[i].message_id;
-    if (typeof mid === 'number' && mid > safeMax) {
+    if (typeof mid === 'number' && mid > parseCut) {
       prunedSet.add(mid);
       parseState.reports.splice(i, 1);
     }
   }
-  if (parseState.chrono && parseState.chrono.message_id > safeMax) {
+  if (parseState.chrono && parseState.chrono.message_id > parseCut) {
     prunedSet.add(parseState.chrono.message_id);
     parseState.chrono = null;
   }
@@ -433,23 +494,24 @@ export async function reconcileDeletedFloorsAbove(
       await uvw(
         v => {
           const p = normalizeParseRoot(_.get(v, '$parse'));
+          if (midFrom !== undefined) midIdentityHash = p.done[String(midFrom)]?.hash;
           for (const k of Object.keys(p.done)) {
             const parsed = parseSwipeScopedKey(k);
-            if (parsed && parsed.floorId > safeMax) {
+            if (parsed && parsed.floorId > parseCut) {
               prunedSet.add(parsed.floorId);
               delete p.done[k];
             }
           }
           for (const k of Object.keys(p.quarantine)) {
             const parsed = parseSwipeScopedKey(k);
-            if (parsed && parsed.floorId > safeMax) {
+            if (parsed && parsed.floorId > parseCut) {
               prunedSet.add(parsed.floorId);
               delete p.quarantine[k];
             }
           }
           for (const k of Object.keys(p.issues)) {
             const parsed = parseSwipeScopedKey(k);
-            if (parsed && parsed.floorId > safeMax) {
+            if (parsed && parsed.floorId > parseCut) {
               prunedSet.add(parsed.floorId);
               delete p.issues[k];
             }
@@ -457,7 +519,7 @@ export async function reconcileDeletedFloorsAbove(
           if (Array.isArray(p.reports)) {
             p.reports = p.reports.filter(item => {
               const mid = (item as { message_id?: unknown } | null)?.message_id;
-              if (typeof mid === 'number' && mid > safeMax) {
+              if (typeof mid === 'number' && mid > parseCut) {
                 prunedSet.add(mid);
                 return false;
               }
@@ -467,7 +529,7 @@ export async function reconcileDeletedFloorsAbove(
           if (Array.isArray(p.log)) {
             p.log = p.log.filter(item => {
               const mid = (item as { message_id?: unknown } | null)?.message_id;
-              if (typeof mid === 'number' && mid > safeMax) {
+              if (typeof mid === 'number' && mid > parseCut) {
                 prunedSet.add(mid);
                 return false;
               }
@@ -485,6 +547,24 @@ export async function reconcileDeletedFloorsAbove(
   }
 
   // 3. 裁剪 $timeline 高于 maxFloor 的楼层并逆向回滚世界书
+  //    G9-01：删中间楼时只回滚被删楼的 wbJournal，高楼账本整体前移 1 楼；错位楼身份留痕已被前次对账清除则不重复重映射。
+  if (midFrom !== undefined) {
+    let rolledBackWbCount = 0;
+    if (midIdentityHash !== undefined) {
+      // 错位楼原文完整前移到 midFrom-1 → 被删的是其前方未解析楼（如 user 楼），该楼自身无世界书变更
+      const shifted = midFrom > 0 ? apis()?.gcm(midFrom - 1)?.[0] : undefined;
+      const deletedFloor =
+        typeof shifted?.message === 'string' && hashText(shifted.message) === midIdentityHash ? midFrom - 1 : midFrom;
+      const { nextLedger, removedWbMutations } = remapTimelineAfterMidDeletion(readTimelineLedger(), deletedFloor);
+      writeTimelineLedger(() => nextLedger);
+      rolledBackWbCount = await rollbackRemovedWbMutations(removedWbMutations);
+    }
+    return {
+      prunedFloors: [...prunedSet].sort((a, b) => a - b),
+      rolledBackWbCount,
+      needsReparseFrom: midFrom,
+    };
+  }
   const currentLedger = readTimelineLedger();
   for (const floorRec of Object.values(currentLedger.floors)) {
     if (floorRec.floorId > safeMax) {
@@ -493,50 +573,7 @@ export async function reconcileDeletedFloorsAbove(
   }
   const { nextLedger, removedWbMutations } = pruneTimelineAboveFloor(currentLedger, safeMax);
   writeTimelineLedger(() => nextLedger);
-
-  let rolledBackWbCount = 0;
-  if (removedWbMutations.length > 0) {
-    ensureChatBookGatewayMethods();
-    const wbRes = await rollbackWorldbookMutations(removedWbMutations);
-    rolledBackWbCount = wbRes.rolledBackCount;
-    // 兜底清理花名册追加行（当 chatBookBinding 尚未导出 ROSTER_ENTRY_NAME 常量时）
-    const gw = chatBookGateway as unknown as {
-      getChatWorldbookName: (t: string) => string | null;
-      getWorldbookNames: () => string[];
-      updateWorldbookWith: (
-        name: string,
-        fn: (entries: { name?: string; content?: string }[]) => { name?: string; content?: string }[],
-      ) => Promise<void>;
-    };
-    const rosterMutations = removedWbMutations.filter(m => Boolean(m.rosterLineAdded));
-    if (rosterMutations.length > 0) {
-      const allBooks = gw.getWorldbookNames();
-      const byBook = new Map<string, string[]>();
-      for (const m of rosterMutations) {
-        const book = (m.bookName || gw.getChatWorldbookName('current') || '').trim();
-        if (!book || !allBooks.includes(book) || !m.rosterLineAdded) continue;
-        const lines = byBook.get(book) ?? [];
-        lines.push(m.rosterLineAdded.trim());
-        byBook.set(book, lines);
-      }
-      for (const [book, linesToRemove] of byBook.entries()) {
-        await gw.updateWorldbookWith(book, entries =>
-          entries.map(e => {
-            if (typeof e?.name === 'string' && e.name.includes(FALLBACK_ROSTER_MARK) && typeof e.content === 'string') {
-              return {
-                ...e,
-                content: e.content
-                  .split(/\r?\n/)
-                  .filter(l => !linesToRemove.includes(l.trim()))
-                  .join('\n'),
-              };
-            }
-            return e;
-          }),
-        );
-      }
-    }
-  }
+  const rolledBackWbCount = await rollbackRemovedWbMutations(removedWbMutations);
 
   // 4. 删楼越界摘要自动清理（safeMax >= 0 时，剔除 to > safeMax 的越界未来摘要条目并解隐残存区间）
   if (safeMax >= 0) {
@@ -564,16 +601,19 @@ export async function reconcileDeletedFloorsAbove(
           comment?: string;
           extra?: Record<string, unknown>;
         }): { from: number; to: number } | null => {
+          // G9-03：只认规范摘要前缀（摘要·/摘要·大·/摘要·中·+区间）且非旧档继承（extra.legacy）的条目；
+          // 区间缺失不默认 from=1，直接跳过，防旧档 extra.to 被误判越界而误删条目并大范围解隐。
           const title = String(e?.name || e?.comment || '').trim();
           const m = /^摘要·(?:大·|中·)?(\d+)-(\d+)/.exec(title);
+          if (!m) return null;
           const ex = e?.extra && typeof e.extra === 'object' ? e.extra : undefined;
+          if (ex?.legacy === true) return null;
           const exFrom = typeof ex?.from === 'number' && Number.isFinite(ex.from) ? Math.trunc(ex.from) : null;
           const exTo = typeof ex?.to === 'number' && Number.isFinite(ex.to) ? Math.trunc(ex.to) : null;
-          if (!title.startsWith('摘要·') && !m && exTo === null) return null;
-          const from = exFrom ?? (m ? Number.parseInt(m[1], 10) : 1);
-          const to = exTo ?? (m ? Number.parseInt(m[2], 10) : -1);
-          if (!Number.isFinite(to) || to < 0) return null;
-          return { from: Number.isFinite(from) && from >= 0 ? from : 1, to };
+          const from = exFrom ?? Number.parseInt(m[1], 10);
+          const to = exTo ?? Number.parseInt(m[2], 10);
+          if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to < from) return null;
+          return { from, to };
         };
 
         const entryKey = (e: { uid?: number; name?: string; comment?: string }, bounds: { from: number; to: number }) =>

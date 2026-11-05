@@ -17,6 +17,7 @@
 import { canon } from '../parse/parsePipeline';
 import { setHasEquivalentBuilding } from '../core/prerequisitesHelpers';
 import type { IncomeChain } from '../core/schema';
+import { readStockPause } from './chainEngine';
 import { resolveEffectiveBaseWeather } from './timezoneWeatherEngine';
 
 /* ═══════════════ 公共建筑工况纯函数（双 operationEngine 同源对齐） ═══════════════ */
@@ -183,6 +184,45 @@ export interface GridConstraintResult {
   events: GridConstraintEvent[];
 }
 
+const CHAIN_BUILDING_SEMANTIC_GROUPS: readonly RegExp[] = [
+  /驿站|旅馆|客栈|旅社|招待所|宾馆/,
+  /调度楼|行政楼|办公楼|调度中心|行政调度/,
+  /水培|生态副食|水循环保障|温室/,
+  /维修所|修车厂|汽修|维修车间|战地维修/,
+];
+
+/**
+ * 判定基地在役建筑集合是否满足资金链依赖建筑 `req`：
+ * 1. 标准等价建筑匹配（`setHasEquivalentBuilding`）；
+ * 2. 规范化子串包含匹配（如依赖「行政调度楼」匹配在役建筑「水泥厂行政调度楼与预热塔观察哨」）；
+ * 3. 叙事据点同义设施族匹配（如依赖「驿站旅馆」匹配在役建筑「三十八号道班客栈（地面伪装驿站与川菜馆）」）。
+ */
+export function hasOperationalChainBuilding(
+  operationalSet: ReadonlySet<string>,
+  req: string,
+): boolean {
+  if (setHasEquivalentBuilding(operationalSet, req)) return true;
+  const reqCanon = canon(req);
+  if (reqCanon.length < 2) return false;
+
+  for (const name of operationalSet) {
+    const bCanon = canon(name);
+    if (bCanon.length >= 2 && (bCanon.includes(reqCanon) || reqCanon.includes(bCanon))) {
+      return true;
+    }
+  }
+
+  for (const groupRe of CHAIN_BUILDING_SEMANTIC_GROUPS) {
+    if (groupRe.test(req)) {
+      for (const name of operationalSet) {
+        if (groupRe.test(name)) return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 /**
  * 电网与依赖建筑硬联动（§6.3 · Q7 · SIM-WEATHER-01）：对整组链条应用断供/建筑失能钳制与恢复复原（纯函数，幂等语义）。
  * - 断供或依赖建筑失能：deps.base_id 命中断供基地，或 deps.buildings 中任一依赖建筑在基地中缺失/全部处于
@@ -227,7 +267,7 @@ export function applyGridConstraints(input: {
           const allBuildingNames = new Set(
             (b.buildings ?? []).filter(bd => bd && typeof bd.name === 'string').map(bd => bd.name),
           );
-          return reqBuildings.some(req => setHasEquivalentBuilding(allBuildingNames, req));
+          return reqBuildings.some(req => hasOperationalChainBuilding(allBuildingNames, req));
         }) ?? (input.bases.length === 1 ? input.bases[0] : undefined);
     }
 
@@ -252,7 +292,7 @@ export function applyGridConstraints(input: {
           .map(bd => bd.name),
       );
       for (const req of reqBuildings) {
-        if (!setHasEquivalentBuilding(operationalSet, req)) {
+        if (!hasOperationalChainBuilding(operationalSet, req)) {
           failedBuildings.push(req);
         }
       }
@@ -314,9 +354,14 @@ export function applyGridConstraints(input: {
     const inOutage = powerOutage || buildingOutage || vehicleOutage || factionHostile;
 
     if (inOutage) {
+      // G6-31：欠料暂停链（eff=0）同样编码暂停前原态，防断供期间被库存恢复绕过
+      const stockPause = constrainedByGrid ? null : readStockPause(chain);
+      const preStatus = stockPause ? stockPause.status : chain.status;
+      const preEff = stockPause ? stockPause.eff : chain.eff;
+      const preReason = stockPause ? stockPause.reason : chain.reason;
       // 断供、依赖建筑非运转、采矿车未就位或贸易势力敌对钳制：编码挂起前原状态与原 eff 并保留原始业务备注
-      if (!constrainedByGrid && (chain.status === 'active' || chain.status === 'distressed') && chain.eff !== 0) {
-        const stateSuffix = `[原状态:${chain.status},eff:${chain.eff}]`;
+      if (!constrainedByGrid && (preStatus === 'active' || preStatus === 'distressed') && preEff !== 0) {
+        const stateSuffix = `[原状态:${preStatus},eff:${preEff}]`;
         let outagePrefix: string;
         if (!powerOutage && !buildingOutage && (vehicleOutage || factionHostile)) {
           const parts: string[] = [];
@@ -334,7 +379,7 @@ export function applyGridConstraints(input: {
           if (factionHostile) extraParts.push(`贸易势力敌对断交(${rawDepFaction})`);
           outagePrefix = `因基地${GRID_OUTAGE_MARKER}（${extraParts.join('；')}），依赖设施停机停产`;
         }
-        const reason = `${outagePrefix}${chain.reason ? `（原：${chain.reason}）` : ''}${stateSuffix}`;
+        const reason = `${outagePrefix}${preReason ? `（原：${preReason}）` : ''}${stateSuffix}`;
         chains.push({
           ...chain,
           eff: 0,
@@ -355,7 +400,7 @@ export function applyGridConstraints(input: {
         stateMatch[1] === 'distressed' ? 'distressed' : 'active';
       const parsedEff = Number(stateMatch[2]);
       const restoredEff =
-        Number.isFinite(parsedEff) && parsedEff > 0 && parsedEff <= 1
+        Number.isFinite(parsedEff) && parsedEff > 0 && parsedEff <= 2
           ? parsedEff
           : restoredStatus === 'distressed'
             ? 0.5
@@ -655,7 +700,7 @@ export function withWeatherView<T extends Partial<WeatherChainLike> = IncomeChai
     const baseEff = typeof chain.eff === 'number' && Number.isFinite(chain.eff) ? chain.eff : 1;
     const next: T = {
       ...chain,
-      eff: Math.max(0, Math.min(1, baseEff * chainDecay)),
+      eff: Math.max(0, Math.min(2, baseEff * chainDecay)),
     };
     if ('amount' in chain && typeof chain.amount === 'number' && chain.amount > 0) {
       (next as WeatherChainLike).amount = chain.amount * chainDecay;

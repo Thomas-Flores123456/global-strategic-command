@@ -39,9 +39,13 @@ import {
   makeGlobalLimitFor,
   makeLaneKeyFor,
   makeParallelLimitFor,
+  makeResearchAccelEffFor,
+  researchSpecIndexFromCatalog,
+  resolveResearchSlotAccelMultiplier,
   SLOT_REGISTRY,
   slotBoard,
   type LineOf,
+  type ResearchBuildingSpecOf,
   type SlotStateView,
 } from './researchSlots';
 import { SCHEDULE_COPY } from '../planning/scheduleCopy';
@@ -98,6 +102,18 @@ function buildDeployOf(env: LaneResolveEnv): DeployOf {
 /** 从环境快照提取有效目录的科研 lineOf 查找回调 */
 function buildResearchLineOf(env: LaneResolveEnv): LineOf {
   return lineIndexFromCatalog(env.catalog?.researches ?? []);
+}
+
+/** 从环境快照提取建筑目录的科研加速查找回调 */
+function buildResearchSpecOf(env: LaneResolveEnv): ResearchBuildingSpecOf {
+  return researchSpecIndexFromCatalog(
+    env.catalog?.buildings as ReadonlyArray<{
+      name?: string;
+      id?: string;
+      research_accel?: number;
+      research_lines?: readonly string[];
+    }>,
+  );
 }
 
 /** 从环境快照构造 productionLanes 最小状态视图（只读引用，零拷贝修改） */
@@ -242,7 +258,8 @@ export class ResearchLaneProvider implements ILaneProvider {
     const slotView = toSlotStateView(env);
     const lineOf = buildResearchLineOf(env);
     const deployOf = buildDeployOf(env);
-    const board = slotBoard(slotView, lineOf, undefined, { deployOf });
+    const researchSpecOf = buildResearchSpecOf(env);
+    const board = slotBoard(slotView, lineOf, undefined, { deployOf, researchSpecOf });
     const unlockedBySlot = new Map(board.map(entry => [entry.slotId, entry.unlocked] as const));
     const globalLimit = makeGlobalLimitFor(slotView)('研究');
 
@@ -250,6 +267,7 @@ export class ResearchLaneProvider implements ILaneProvider {
       const unlocked = unlockedBySlot.get(slot.slotId) ?? false;
       const capacity = unlocked ? slot.capacity : 0;
       const locked = !unlocked;
+      const accelMultiplier = resolveResearchSlotAccelMultiplier(slotView, slot, researchSpecOf);
       return {
         laneKey: `research:${slot.slotId}`,
         domain: this.domain,
@@ -257,7 +275,7 @@ export class ResearchLaneProvider implements ILaneProvider {
         baseId: undefined,
         capacity,
         globalLimit,
-        accelMultiplier: 1.0,
+        accelMultiplier,
         locked,
         lockedReason: locked ? SCHEDULE_COPY.lockedReason(slot.anchor) : undefined,
       };
@@ -274,8 +292,16 @@ export class ResearchLaneProvider implements ILaneProvider {
     const slotView = toSlotStateView(env);
     const lineOf = buildResearchLineOf(env);
     const deployOf = buildDeployOf(env);
+    const researchSpecOf = buildResearchSpecOf(env);
     const warnSink = opts?.warnSink ?? this.defaultWarnSink;
-    return makeParallelLimitFor(slotView, lineOf, { warnSink, deployOf })(txn);
+    return makeParallelLimitFor(slotView, lineOf, { warnSink, deployOf, researchSpecOf })(txn);
+  }
+
+  resolveAccelEff(txn: TransactionItem, env: LaneResolveEnv): number {
+    const slotView = toSlotStateView(env);
+    const lineOf = buildResearchLineOf(env);
+    const researchSpecOf = buildResearchSpecOf(env);
+    return makeResearchAccelEffFor(slotView, lineOf, { researchSpecOf })(txn);
   }
 
   resolveGlobalLimit(env: LaneResolveEnv): number {
@@ -775,6 +801,9 @@ export class LaneRegistryHub {
    * - 非双模产线 / 研究 / 工程 → 1
    */
   resolveAccelEffForTxn(txn: TransactionItem, env: LaneResolveEnv): number {
+    if (txn.type === '研究') {
+      return this.researchProvider.resolveAccelEff(txn, env);
+    }
     if (txn.type === '协议') {
       const proto = this.getProvider('protocol');
       if (proto) {

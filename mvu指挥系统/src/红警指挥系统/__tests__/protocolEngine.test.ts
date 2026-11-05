@@ -24,6 +24,7 @@ import {
   getNextBreakthroughProbPercent,
   getProtocolExperimentCost,
   isProtocolLabOnline,
+  isProtocolTrackPredecessorActive,
   predictExperimentOutcome,
   PROTOCOL_LANE_KEY,
   PROTOCOL_TIER_EXPERIMENT_SPEC,
@@ -817,6 +818,23 @@ describe('PRT-SLOT-01 · protocolEngine 渐进概率实验引擎与 UTO 自动�
         locked: false,
         accelMultiplier: 1.25,
       });
+    });
+  });
+
+  describe('⑦ G3-01 同轨前序按 tier 判定（不依赖目录数组顺序）', () => {
+    it('目录中 T2 排在 T1 之前时，T1 无前序、T2 以 T1 为前序', () => {
+      const t2: ProtocolDefinitionLike = { id: 'x.t2', name: 'T2', track: '轨A', tier: 2 };
+      const t1a: ProtocolDefinitionLike = { id: 'x.t1a', name: 'T1a', track: '轨A', tier: 1 };
+      const t1b: ProtocolDefinitionLike = { id: 'x.t1b', name: 'T1b', track: '轨A', tier: 1 };
+      const catalog = [t2, t1a, t1b];
+      const empty: ProtocolEngineStateView = { bases: [], protocols: [] };
+      expect(isProtocolTrackPredecessorActive(empty, t1a, catalog)).toBe(true);
+      expect(isProtocolTrackPredecessorActive(empty, t2, catalog)).toBe(false);
+      const withT1bActive: ProtocolEngineStateView = {
+        bases: [],
+        protocols: [{ ref: 'x.t1a', status: 'active' }, { ref: 'x.t1b', status: 'active' }] as never,
+      };
+      expect(isProtocolTrackPredecessorActive(withT1bActive, t2, catalog)).toBe(true);
     });
   });
 });

@@ -11,6 +11,7 @@
 
 import type { RetrofitDef } from '../core/catalog';
 import { buildCompletedTechAndProtocolSet } from '../core/catalogRuntimeContext';
+import { parseUnitTokenNameAndCount } from '../core/prerequisites';
 import {
   isProjectV2,
   type Project,
@@ -22,23 +23,26 @@ import {
   allocateProjectInstanceId,
   availableCredits,
   buildProjection,
-  BUILTIN_RETROFIT_UPGRADE_SPECS,
   checkPhaseGates,
   checkSlotGate,
   findProjectIndex,
+  MAIN_SLOT,
   phaseBase,
   projectionItemName,
   resolveEngineeringQueueIndex,
+  resolveRetrofitUpgradeRules,
   type CancelProjectResult,
   type ProjectCommandFailureReason,
   type ProjectCommandResult,
   type ProjectEvent,
   type ProjectStateView as BaseProjectStateView,
-  type RetrofitUpgradeSpec,
+  type RetrofitUpgradeRule,
   type StartProjectOptions,
   type SyncProjectsResult,
 } from './projectEngineHelpers';
-import { syncV2Project } from './projectEngineV2Core';
+import { checkFreeSlotGate, engagedSlotCount, syncV2Project } from './projectEngineV2Core';
+import { engSlotCapacityInBase } from './engineeringSlots';
+import { deductEconomyNanites } from './naniteLedger';
 
 export * from './projectEngineHelpers';
 export * from './projectEngineV2Core';
@@ -66,246 +70,123 @@ export interface ProjectStateView extends Omit<BaseProjectStateView, 'bases' | '
     girls?: ReadonlyArray<{ name: string; model?: string; [k: string]: unknown }>;
     [k: string]: unknown;
   };
-  /** 可选：现代化改装升级规格覆盖表（未传时使用 BUILTIN_RETROFIT_UPGRADE_SPECS） */
-  retrofitUpgradeSpecs?: Readonly<Record<string, RetrofitUpgradeSpec>>;
 }
 
-function resolveUpgradedUnitNameForTarget(spec: RetrofitUpgradeSpec, matchedTarget: string): string {
-  if (
-    spec.research === '航母电磁弹射改装工程研发' &&
-    canon(matchedTarget) === canon('CV-63小鹰级常规动力航空母舰')
-  ) {
-    return 'CV-63小鹰级航空母舰(电弹现代改)';
-  }
-  return spec.upgraded_name;
+/** 精确匹配单位 token（剥离状态/数量后缀后 canon 相等），保留原后缀换名；升格后名不再命中 from，天然防二次叠加 */
+function upgradeUnitToken(token: string, rule: RetrofitUpgradeRule): string | null {
+  const parsed = parseUnitTokenNameAndCount(token);
+  if (!parsed || canon(parsed.strippedName) !== canon(rule.from)) return null;
+  const suffix = parsed.rawName.startsWith(parsed.strippedName)
+    ? parsed.rawName.slice(parsed.strippedName.length)
+    : '';
+  return `${rule.to}${suffix}`;
 }
 
-function upgradeUnitTokenList(
-  list: ReadonlyArray<string> | undefined,
-  spec: RetrofitUpgradeSpec,
-): { list: string[]; changed: boolean } {
-  if (!list || !spec.target_unit?.length) return { list: list ? [...list] : [], changed: false };
+function upgradeTokenList(list: ReadonlyArray<string>, rules: readonly RetrofitUpgradeRule[]): string[] | null {
   let changed = false;
   const next = list.map(token => {
-    const trimmed = token.trim();
-    for (const target of spec.target_unit!) {
-      if (canon(trimmed) === canon(target)) {
+    for (const rule of rules) {
+      const up = upgradeUnitToken(token, rule);
+      if (up !== null) {
         changed = true;
-        return resolveUpgradedUnitNameForTarget(spec, target);
-      }
-      if (trimmed.startsWith(target)) {
-        const rest = trimmed.slice(target.length);
-        if (!rest || /^[\s(（×xX*]/.test(rest)) {
-          changed = true;
-          return `${resolveUpgradedUnitNameForTarget(spec, target)}${rest}`;
-        }
+        return up;
       }
     }
     return token;
   });
-  return { list: next, changed };
+  return changed ? next : null;
 }
 
-function upgradeUnitRecord(
-  record: Readonly<Record<string, number>> | undefined,
-  spec: RetrofitUpgradeSpec,
-): { record: Record<string, number>; changed: boolean } {
-  if (!record || !spec.target_unit?.length) return { record: record ? { ...record } : {}, changed: false };
+function upgradeRecord(
+  record: Readonly<Record<string, number>>,
+  rules: readonly RetrofitUpgradeRule[],
+): Record<string, number> | null {
   let changed = false;
   const next: Record<string, number> = {};
-  for (const [k, count] of Object.entries(record)) {
-    const matched = spec.target_unit.find(t => canon(t) === canon(k));
-    if (matched) {
-      changed = true;
-      const newKey = resolveUpgradedUnitNameForTarget(spec, matched);
-      const existingKey = Object.keys(next).find(ek => canon(ek) === canon(newKey));
-      if (existingKey && existingKey !== newKey) {
-        const prevCount = next[existingKey] ?? 0;
-        delete next[existingKey];
-        next[newKey] = prevCount + count;
-      } else {
-        next[newKey] = (next[newKey] ?? 0) + count;
-      }
-    } else {
-      const existingKey = Object.keys(next).find(ek => canon(ek) === canon(k));
-      if (existingKey) {
-        next[existingKey] = (next[existingKey] ?? 0) + count;
-      } else {
-        next[k] = (next[k] ?? 0) + count;
-      }
+  const add = (key: string, count: number) => {
+    const existing = Object.keys(next).find(k => canon(k) === canon(key)) ?? key;
+    next[existing] = (next[existing] ?? 0) + count;
+  };
+  for (const [key, count] of Object.entries(record)) {
+    const rule = rules.find(r => canon(r.from) === canon(key));
+    if (rule) changed = true;
+    add(rule ? rule.to : key, count);
+  }
+  return changed ? next : null;
+}
+
+type ForcesLike = NonNullable<ProjectStateView['forces']>;
+type BaseForcesLike = NonNullable<NonNullable<ProjectStateView['bases']>[number]['forces']>;
+
+function upgradeForces<F extends ForcesLike | BaseForcesLike>(forces: F, rules: readonly RetrofitUpgradeRule[]): F {
+  const patch: Record<string, unknown> = {};
+  for (const key of ['vehicles', 'aircraft'] as const) {
+    const list = forces[key];
+    if (Array.isArray(list)) {
+      const up = upgradeTokenList(list, rules);
+      if (up) patch[key] = up;
     }
   }
-  return { record: next, changed };
+  for (const key of ['troops', 'infantry', 'equipment'] as const) {
+    const rec = forces[key];
+    if (rec) {
+      const up = upgradeRecord(rec, rules);
+      if (up) patch[key] = up;
+    }
+  }
+  const girls = (forces as ForcesLike).girls;
+  if (Array.isArray(girls)) {
+    let girlsChanged = false;
+    const nextGirls = girls.map(g => {
+      const rule = rules.find(r => typeof g.model === 'string' && canon(r.from) === canon(g.model));
+      if (!rule) return g;
+      girlsChanged = true;
+      return { ...g, model: rule.to };
+    });
+    if (girlsChanged) patch.girls = nextGirls;
+  }
+  return Object.keys(patch).length > 0 ? ({ ...forces, ...patch } as F) : forces;
 }
 
 /**
- * 当现代化改装工程完工时，自动将 state.forces、state.bases[].forces 与 state.bases[].buildings
- * 中的存量旧型号单位（vehicles / aircraft / troops / infantry / equipment）及母体建筑原位更名为 upgraded_name
- * （FD-22 · D-UNIT-MOD-02 / FD-37 · PKG-C）。
+ * 现代化改装完工升格（FD-22）：规则唯一来源 = 世界书 retrofit 条目（resolveRetrofitUpgradeRules）。
+ * 单位改装改写全局与各基地 forces；建筑改装仅改写牵头基地母体建筑。
  */
 export function applyRetrofitCompletionUpgrade<S extends ProjectStateView>(
   state: S,
-  completedRefs: ReadonlyArray<{ ref: string; lead_base: string }>,
+  completed: ReadonlyArray<{ def: RetrofitDef; lead_base: string }>,
 ): S {
-  if (!completedRefs.length) return state;
   let nextForces = state.forces;
   let nextBases = state.bases;
-
-  for (const { ref, lead_base } of completedRefs) {
-    const customSpecs = state.retrofitUpgradeSpecs;
-    const spec =
-      customSpecs?.[ref] ??
-      customSpecs?.[ref.trim()] ??
-      BUILTIN_RETROFIT_UPGRADE_SPECS[ref] ??
-      BUILTIN_RETROFIT_UPGRADE_SPECS[ref.trim()];
-    if (!spec) continue;
-
-    // 1. 升级全局 forces 中的在役存量单位（vehicles / aircraft / troops / infantry / equipment / girls）
-    if (nextForces && spec.target_unit?.length) {
-      let forcesChanged = false;
-      const updatedForces: Record<string, unknown> = { ...nextForces };
-
-      if (Array.isArray(nextForces.vehicles)) {
-        const res = upgradeUnitTokenList(nextForces.vehicles, spec);
-        if (res.changed) {
-          updatedForces.vehicles = res.list;
-          forcesChanged = true;
+  for (const { def, lead_base } of completed) {
+    const rules = resolveRetrofitUpgradeRules(def);
+    const unitRules = rules.filter(r => r.kind === 'unit');
+    const buildingRules = rules.filter(r => r.kind === 'building');
+    if (unitRules.length > 0 && nextForces) nextForces = upgradeForces(nextForces, unitRules);
+    if (nextBases && rules.length > 0) {
+      nextBases = nextBases.map(base => {
+        let next = base;
+        if (unitRules.length > 0 && base.forces) {
+          const f = upgradeForces(base.forces, unitRules);
+          if (f !== base.forces) next = { ...next, forces: f };
         }
-      }
-      if (Array.isArray(nextForces.aircraft)) {
-        const res = upgradeUnitTokenList(nextForces.aircraft, spec);
-        if (res.changed) {
-          updatedForces.aircraft = res.list;
-          forcesChanged = true;
-        }
-      }
-      if (nextForces.troops) {
-        const res = upgradeUnitRecord(nextForces.troops, spec);
-        if (res.changed) {
-          updatedForces.troops = res.record;
-          forcesChanged = true;
-        }
-      }
-      if (nextForces.infantry) {
-        const res = upgradeUnitRecord(nextForces.infantry, spec);
-        if (res.changed) {
-          updatedForces.infantry = res.record;
-          forcesChanged = true;
-        }
-      }
-      if (nextForces.equipment) {
-        const res = upgradeUnitRecord(nextForces.equipment, spec);
-        if (res.changed) {
-          updatedForces.equipment = res.record;
-          forcesChanged = true;
-        }
-      }
-      if (Array.isArray(nextForces.girls)) {
-        let girlsChanged = false;
-        const nextGirls = nextForces.girls.map(g => {
-          const model = typeof g.model === 'string' ? g.model.trim() : '';
-          const matched = spec.target_unit?.find(t => canon(t) === canon(model));
-          if (matched) {
-            girlsChanged = true;
-            return { ...g, model: resolveUpgradedUnitNameForTarget(spec, matched) };
-          }
-          return g;
-        });
-        if (girlsChanged) {
-          updatedForces.girls = nextGirls;
-          forcesChanged = true;
-        }
-      }
-      if (forcesChanged) {
-        nextForces = updatedForces as S['forces'];
-      }
-    }
-
-    // 2. 升级各基地驻军 forces（vehicles / aircraft / troops / infantry / equipment）与建筑改装目标
-    if (nextBases) {
-      let basesChanged = false;
-      const updatedBases = nextBases.map(base => {
-        let baseChanged = false;
-        let bBuildings = base.buildings;
-        let bForces = base.forces;
-
-        if (
-          spec.host_building?.length &&
-          bBuildings &&
-          (!lead_base || base.id === lead_base || canon(base.name ?? '') === canon(lead_base))
-        ) {
-          const nextBlds = bBuildings.map(bd => {
-            if (spec.host_building!.some(h => canon(h) === canon(bd.name))) {
-              baseChanged = true;
-              return { ...bd, name: spec.upgraded_name };
-            }
-            return bd;
+        const isLead = !lead_base || base.id === lead_base || canon(base.name ?? '') === canon(lead_base);
+        if (buildingRules.length > 0 && isLead && base.buildings) {
+          let bChanged = false;
+          const blds = base.buildings.map(bd => {
+            const rule = buildingRules.find(r => canon(r.from) === canon(bd.name));
+            if (!rule) return bd;
+            bChanged = true;
+            return { ...bd, name: rule.to };
           });
-          if (baseChanged) bBuildings = nextBlds;
+          if (bChanged) next = { ...next, buildings: blds };
         }
-
-        if (bForces && spec.target_unit?.length) {
-          let bfChanged = false;
-          const nextBf = { ...bForces };
-          if (Array.isArray(bForces.vehicles)) {
-            const res = upgradeUnitTokenList(bForces.vehicles, spec);
-            if (res.changed) {
-              nextBf.vehicles = res.list;
-              bfChanged = true;
-            }
-          }
-          if (Array.isArray(bForces.aircraft)) {
-            const res = upgradeUnitTokenList(bForces.aircraft, spec);
-            if (res.changed) {
-              nextBf.aircraft = res.list;
-              bfChanged = true;
-            }
-          }
-          if (bForces.troops) {
-            const res = upgradeUnitRecord(bForces.troops, spec);
-            if (res.changed) {
-              nextBf.troops = res.record;
-              bfChanged = true;
-            }
-          }
-          if (bForces.infantry) {
-            const res = upgradeUnitRecord(bForces.infantry, spec);
-            if (res.changed) {
-              nextBf.infantry = res.record;
-              bfChanged = true;
-            }
-          }
-          if (bForces.equipment) {
-            const res = upgradeUnitRecord(bForces.equipment, spec);
-            if (res.changed) {
-              nextBf.equipment = res.record;
-              bfChanged = true;
-            }
-          }
-          if (bfChanged) {
-            bForces = nextBf;
-            baseChanged = true;
-          }
-        }
-
-        if (!baseChanged) return base;
-        basesChanged = true;
-        return {
-          ...base,
-          ...(bBuildings !== base.buildings ? { buildings: bBuildings } : {}),
-          ...(bForces !== base.forces ? { forces: bForces } : {}),
-        };
+        return next;
       });
-      if (basesChanged) nextBases = updatedBases;
     }
   }
-
   if (nextForces === state.forces && nextBases === state.bases) return state;
-  return {
-    ...state,
-    ...(nextForces !== state.forces ? { forces: nextForces } : {}),
-    ...(nextBases !== state.bases ? { bases: nextBases } : {}),
-  };
+  return { ...state, forces: nextForces, bases: nextBases };
 }
 
 /* ═══════════════ ① 立项（§3.8 立项令：科技门＋容量门＋首期注资＋纳米开工门） ═══════════════ */
@@ -394,7 +275,11 @@ export function startProject<S extends ProjectStateView>(
 
   const next = {
     ...state,
-    economy: { ...(state.economy ?? {}), credits: availableCredits(state) - (phaseDefs[0].cost ?? 0) },
+    economy: deductEconomyNanites(
+      state.economy,
+      phaseDefs[0].resources?.nanites ?? 0,
+      availableCredits(state) - (phaseDefs[0].cost ?? 0),
+    ),
     queues,
     projects: [...(state.projects ?? []), { ...project, phases }],
   } as S;
@@ -402,7 +287,7 @@ export function startProject<S extends ProjectStateView>(
     {
       type: 'project_started',
       item: def.name,
-      detail: `立项「${projectId}」@「${lead}」（${def.grade}/${scope}，${phases.length} 阶段）；首期「${phaseDefs[0].name}」注资 ${phaseDefs[0].cost ?? 0} 已扣账，投影项 queued 待属地工程槽放票`,
+      detail: `立项「${projectId}」@「${lead}」（${def.grade}/${scope}，${phases.length} 阶段）；首期「${phaseDefs[0].name}」注资 ${phaseDefs[0].cost ?? 0} 与纳米 ${phaseDefs[0].resources?.nanites ?? 0} 已扣账，投影项 queued 待属地工程槽放票`,
     },
   ];
   return { ok: true, next, events, projectId };
@@ -462,7 +347,8 @@ export function startPhase<S extends ProjectStateView>(
   const gateFail = checkPhaseGates(state, phaseDef, `${project.ref}·${phase.name}`);
   if (gateFail) return fail(gateFail.reason, gateFail.message);
 
-  // ── 通过：扣账＋投影＋回写阶段 ──
+  // ── 通过：扣账（资金＋纳米）＋投影＋回写阶段 ──
+  const phaseNaniteCost = phaseDef.resources?.nanites ?? 0;
   const queues = [...(state.queues ?? [])];
   const projection = buildProjection(project, phase, phaseDef);
   const nextPhase: ProjectPhase = { ...phase, status: '进行中', queue_index: queues.length };
@@ -474,7 +360,7 @@ export function startPhase<S extends ProjectStateView>(
   );
   const next = {
     ...state,
-    economy: { ...(state.economy ?? {}), credits: availableCredits(state) - (phaseDef.cost ?? 0) },
+    economy: deductEconomyNanites(state.economy, phaseNaniteCost, availableCredits(state) - (phaseDef.cost ?? 0)),
     queues,
     projects: nextProjects,
   } as S;
@@ -485,7 +371,7 @@ export function startPhase<S extends ProjectStateView>(
       {
         type: 'phase_started',
         item: projection.item,
-        detail: `阶段 #${phaseIdx} 注资 ${phaseDef.cost ?? 0} 已扣账；纳米开工门通过（需求 ${phaseDef.resources?.nanites ?? 0} ≤ 库存，门槛不抵扣）；投影项 queued @「${base}」`,
+        detail: `阶段 #${phaseIdx} 注资 ${phaseDef.cost ?? 0} 已扣账；纳米 ${phaseNaniteCost} 已扣减；投影项 queued @「${base}」`,
       },
     ],
     projectId: project.id,
@@ -494,12 +380,15 @@ export function startPhase<S extends ProjectStateView>(
 
 /* ═══════════════ ③ 里程碑回写（每楼结算后同步；projects[] 缺席零行为变化） ═══════════════ */
 
-export function syncProjects<S extends ProjectStateView>(state: S): SyncProjectsResult<S> {
+export function syncProjects<S extends ProjectStateView>(
+  state: S,
+  retrofits: readonly RetrofitDef[] = [],
+): SyncProjectsResult<S> {
   const projects = state.projects;
   if (!projects || projects.length === 0) return { next: state, events: [] };
   const queues = state.queues ?? [];
   const events: ProjectEvent[] = [];
-  const newlyCompletedRefs: { ref: string; lead_base: string }[] = [];
+  const newlyCompleted: { def: RetrofitDef; lead_base: string }[] = [];
   let changed = false;
 
   const nextProjects = projects.map(project => {
@@ -557,7 +446,8 @@ export function syncProjects<S extends ProjectStateView>(state: S): SyncProjects
     if (!phasesChanged) return project;
     changed = true;
     if (nextPhases.every(p => p.status === '完工')) {
-      newlyCompletedRefs.push({ ref: project.ref, lead_base: project.lead_base });
+      const def = retrofits.find(r => canon(r.name) === canon(project.ref));
+      if (def) newlyCompleted.push({ def, lead_base: project.lead_base });
       events.push({
         type: 'project_completed',
         item: project.ref,
@@ -570,7 +460,7 @@ export function syncProjects<S extends ProjectStateView>(state: S): SyncProjects
 
   if (!changed) return { next: state, events };
   const nextWithProjects = { ...state, projects: nextProjects } as S;
-  const nextWithRetrofitUpgrade = applyRetrofitCompletionUpgrade(nextWithProjects, newlyCompletedRefs);
+  const nextWithRetrofitUpgrade = applyRetrofitCompletionUpgrade(nextWithProjects, newlyCompleted);
   return { next: nextWithRetrofitUpgrade, events };
 }
 
@@ -600,6 +490,26 @@ function setProjectHold<S extends ProjectStateView>(
       'bad_status',
       `工程「${project.ref}」当前「${project.status}」——${hold ? '暂停' : '恢复'}令仅「${expectStatus}」状态可受理`,
     );
+  }
+
+  // G4-19：恢复时复验属地工程槽（与 V2 setProjectV2Hold 同口径，复用 checkFreeSlotGate）
+  if (!hold) {
+    const neededByBase = new Map<string, { count: number; label: string }>();
+    for (const ph of project.phases) {
+      if (ph.queue_index === null || ph.status !== '暂停') continue;
+      const b = phaseBase(project, ph.idx);
+      const prev = neededByBase.get(b);
+      neededByBase.set(b, { count: (prev?.count ?? 0) + 1, label: prev?.label ?? projectionItemName(project.ref, ph.name) });
+    }
+    for (const [b, info] of neededByBase) {
+      const gateErr = checkFreeSlotGate(state, b, MAIN_SLOT, info.label);
+      if (gateErr) return fail(gateErr.reason, gateErr.message);
+      const capacity = engSlotCapacityInBase(state, b, MAIN_SLOT) ?? 0;
+      const engaged = engagedSlotCount(state, b, MAIN_SLOT.slotId);
+      if (engaged + info.count > capacity) {
+        return fail('no_slot', `基地「${b}」工程槽容量不足（需 ${info.count} 槽，余 ${capacity - engaged} 槽）——拒恢复`);
+      }
+    }
   }
 
   // 投影项 hold 透传（FIX-P1-03：强制校验工程身份并支持下标漂移重定位）

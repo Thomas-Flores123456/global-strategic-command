@@ -8,6 +8,8 @@ import {
 } from '../engines/chainEngine';
 import { settleFloor } from '../engines/settleFloor';
 import { Schema, type IncomeChain } from '../core/schema';
+import { settleQuestRewards } from '../parse/parseDomainAppliers';
+import { newCtx } from '../parse/parseTypesAndCanon';
 
 function makeChain(partial: Partial<IncomeChain> & { id: string }): IncomeChain {
   return {
@@ -347,6 +349,31 @@ describe('chainEngine 纯函数资金链状态机与时钟推进计算器', () =
       expect(emptyRes.nextChains[0].reason).toContain('上游原料/外币不足暂停');
     });
 
+    it('G6-01 欠料暂停链在库存补足后按原 eff 自动复工，库存仍不足则保持暂停', () => {
+      const smelt = makeChain({
+        id: 'smelt_boost',
+        rate_daily: 800,
+        eff: 1.5,
+        reason: '参谋调度',
+        resources_daily: { minerals: { 铁矿石: -200 } },
+      });
+      const paused = settleChainsDeltaT([smelt], 1440, 4, { resources: { minerals: { 铁矿石: 0 } } })
+        .nextChains[0];
+      expect(paused.eff).toBe(0);
+      expect(paused.status).toBe('distressed');
+
+      const still = settleChainsDeltaT([paused], 1440, 5, { resources: { minerals: { 铁矿石: 100 } } });
+      expect(still.nextChains[0].eff).toBe(0);
+      expect(still.deltaCredits).toBe(0);
+
+      const resumed = settleChainsDeltaT([paused], 1440, 6, { resources: { minerals: { 铁矿石: 500 } } });
+      expect(resumed.nextChains[0].status).toBe('active');
+      expect(resumed.nextChains[0].eff).toBe(1.5);
+      expect(resumed.nextChains[0].reason).toBe('参谋调度');
+      expect(resumed.deltaCredits).toBe(1200);
+      expect(resumed.deltaResources).toEqual({ minerals: { 铁矿石: -300 } });
+    });
+
     it('3. settleFloor 集成：三轨收支落盘解锁 null 小类资源，且欠料停机状态持久保留', () => {
       const state = Schema.parse({
         bases: [
@@ -393,6 +420,48 @@ describe('chainEngine 纯函数资金链状态机与时钟推进计算器', () =
       expect(pausedChain?.status).toBe('distressed');
       expect(pausedChain?.eff).toBe(0);
       expect(pausedChain?.reason).toContain('上游原料/外币不足暂停');
+    });
+
+    it('G6-09 任务奖励命中已枟竭链：未声明容量不复活；声明容量则扩容复活', () => {
+      const mk = () =>
+        Schema.parse({
+          economy: {
+            chains: [
+              { id: 'mine', name: '青岚矿脉', rate_daily: 300, status: 'exhausted', eff: 0, capacity: { total_yield: 900, extracted: 900 } },
+            ],
+          },
+        });
+      const locked = mk();
+      settleQuestRewards('复勘', { chains: [{ name: '青岚矿脉', rate_daily: 500 }] } as never, locked, newCtx());
+      expect(locked.economy.chains[0]).toMatchObject({ status: 'exhausted', eff: 0, rate_daily: 300 });
+
+      const expanded = mk();
+      settleQuestRewards('复勘', { chains: [{ name: '青岚矿脉', rate_daily: 500, capacity: 3000 }] } as never, expanded, newCtx());
+      expect(expanded.economy.chains[0]).toMatchObject({ status: 'active', eff: 1, rate_daily: 500 });
+      expect(expanded.economy.chains[0].capacity.total_yield).toBe(3900);
+    });
+
+    it('G6-03 settleFloor 向电网约束传入势力与载具：贸易势力敌对 / 依赖载具缺席时链条挂起且不产出', () => {
+      const state = Schema.parse({
+        bases: [{ id: 'b1', name: '前沿第一基地', status: '运转中', power: { gen: 200, use: 50 } }],
+        factions: [{ name: '铁道幸存者同盟', attitude: '敌意' }],
+        forces: { vehicles: ['多功能步兵战车'] },
+        economy: {
+          credits: 1000,
+          chains: [
+            { id: 'trade', name: '铁道互市', rate_daily: 500, deps: { base_id: 'b1', faction: '铁道幸存者同盟' } },
+            { id: 'haul', name: '矿场转运', rate_daily: 300, deps: { base_id: 'b1', vehicles: ['重型运输车'] } },
+          ],
+        },
+      });
+      const settled = settleFloor(state, state, '<timePast>1 D</timePast>');
+      const trade = settled.data.economy.chains.find(c => c.id === 'trade');
+      const haul = settled.data.economy.chains.find(c => c.id === 'haul');
+      expect(trade).toMatchObject({ status: 'distressed', eff: 0 });
+      expect(trade?.reason).toContain('贸易势力敌对断交');
+      expect(haul).toMatchObject({ status: 'distressed', eff: 0 });
+      expect(haul?.reason).toContain('依赖载具未就位');
+      expect(settled.data.economy.credits).toBe(1000);
     });
   });
 });

@@ -210,6 +210,22 @@
             </span>
             <span class="prt-badge-state flex-none">{{ gridStatus.crossFactionSynergy ? '在役' : '未建' }}</span>
           </div>
+
+          <div
+            v-for="fac in nonStandardFacilities"
+            :key="fac.baseName + fac.name"
+            class="prt-grid-badge prt-grid-badge--on ob-tag col-span-2 flex items-center justify-between gap-1.5 rounded-[2px] border px-2 py-1 font-mono text-[11px]"
+            data-grid-badge="non_standard_facility"
+            data-in-service="true"
+          >
+            <span class="flex min-w-0 items-center gap-1.5 truncate">
+              <span class="prt-badge-dot flex-none" aria-hidden="true" />
+              <span class="truncate">{{ fac.name }}</span>
+            </span>
+            <span class="prt-badge-state flex-none">
+              {{ fac.summary }} · 在役
+            </span>
+          </div>
         </div>
       </section>
     </div>
@@ -666,8 +682,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { playTacticalStagger, scheduleNextFrame } from '../../红警指挥系统/ui/motion/useGsapMotion';
-import { dailyProtocolPointRate, scanActiveProtocolBuildings } from '../../红警指挥系统/engines/protocolAnchors';
-import { evaluateCommandHQModifiers } from '../../红警指挥系统/engines/settleFloorPhases';
+import { scanActiveProtocolBuildings } from '../../红警指挥系统/engines/protocolAnchors';
+import { INACTIVE_RESEARCH_BUILDING_STATES } from '../../红警指挥系统/engines/researchSlots';
+import { resolveEffectiveProtocolDailyRate } from '../../红警指挥系统/engines/settleFloorPhases';
 import { PROTOCOL_TIER_EXPERIMENT_SPEC } from '../../红警指挥系统/engines/protocolEngine';
 import { ALLIED_TRACK_NAMES, buildProtocolCatalogLookup, SOVIET_TRACK_NAMES } from '../../红警指挥系统/engines/protocolCatalogIndex';
 import type { Schema } from '../../红警指挥系统/core/schema';
@@ -676,7 +693,7 @@ import { useCatalogStore } from '../../红警指挥系统/composables/useCatalog
 import { canToggleProtocolAutoQueue } from '../models/protocolCommands';
 import type { ProtocolAutoQueueItemView, ProtocolCommandStagedEvent, ProtocolExperimentGuardResult, ProtocolScheduleAction, ProtocolScheduleDispatchEvent } from '../models/protocolCommands';
 import {
-  attachNormalizedQueueOrdersToTracks, buildAttemptLadderSteps, buildAutoQueueList, buildExternalQueueSignature, buildLegacyTechDoneSet,
+  attachNormalizedQueueOrdersToTracks, buildAttemptLadderSteps, buildAutoQueueList, buildExternalQueueSignature,
   buildNormalizedQueueOrderMap, buildRawTrackViewsForFaction, buildRuntimeProtocolMap, buildScheduleChangeDispatch,
   computeIsLabSealed, computeMoveAutoQueueNext, computeNodeHint, computeSelectedUnlocks,
   computeToggleAutoQueueHoldNext, computeToggleAutoQueueNext, defaultCreditsByTier, detectHasCustomCatalogOnly,
@@ -741,6 +758,46 @@ watch(
 function selectInstitute(inst: InstituteTheme): void { activeInstitute.value = inst; }
 
 const gridStatus = computed<ProtocolGridStatus>(() => scanActiveProtocolBuildings(activeState.value));
+const nonStandardFacilities = computed(() => {
+  const list: Array<{ baseName: string; name: string; summary: string }> = [];
+  const rawBases = (activeState.value as unknown as {
+    bases?: ReadonlyArray<{
+      name?: string;
+      status?: string;
+      buildings?: ReadonlyArray<{
+        name: string;
+        state?: string;
+        compute?: { tflops?: number; tops?: number };
+        research_accel?: number;
+        research_lines?: readonly string[];
+      }>;
+    }>;
+  })?.bases;
+  for (const base of rawBases ?? []) {
+    if (!base || base.status === '失守' || base.status === '废弃') continue;
+    for (const b of base.buildings ?? []) {
+      if (!b || !b.name) continue;
+      const st = (b.state ?? '运转').trim();
+      if (INACTIVE_RESEARCH_BUILDING_STATES.has(st)) continue;
+      const tflops = b.compute?.tflops ?? 0;
+      const tops = b.compute?.tops ?? 0;
+      const accel = typeof b.research_accel === 'number' && b.research_accel > 0 ? b.research_accel : 0;
+      if (tflops <= 0 && tops <= 0 && accel <= 0) continue;
+      const parts: string[] = [];
+      if (tflops > 0 || tops > 0) parts.push(`+${tflops}T/+${tops}Top`);
+      if (accel > 0) {
+        const lineStr = b.research_lines?.length ? `${b.research_lines.join('/')}` : '科研';
+        parts.push(`${lineStr}+${Math.round(accel * 100)}%`);
+      }
+      list.push({
+        baseName: base.name ?? '',
+        name: b.name,
+        summary: parts.join(' · '),
+      });
+    }
+  }
+  return list;
+});
 const isBattleLabInService = computed<boolean>(() =>
   Boolean(
     gridStatus.value.commonBattleLab ||
@@ -772,11 +829,9 @@ const protocolPoints = computed<number>(() => {
 });
 
 const formattedProtocolPoints = computed<string>(() => formatProtocolPoints(protocolPoints.value));
-const dailyPointRate = computed(() => {
-  const baseRate = dailyProtocolPointRate(activeState.value);
-  const bonus = evaluateCommandHQModifiers(activeState.value as Partial<Schema> | null | undefined).protocolDailyRateBonus;
-  return bonus > 0 ? Math.round((baseRate + bonus) * 10000) / 10000 : baseRate;
-});
+const dailyPointRate = computed(() =>
+  resolveEffectiveProtocolDailyRate(activeState.value as Partial<Schema> | null | undefined),
+);
 const totalDailyPoints = computed<number>(() => resolveTotalDailyPoints(activeState.value, props.totalDailyPoints));
 
 const showNoLabEmptyState = computed<boolean>(() =>
@@ -833,7 +888,6 @@ const selectedUnlocks = computed(() => computeSelectedUnlocks(catalog, selectedN
 const mergedCatalogProtocols = computed<readonly ProtocolCatalogEntry[]>(() => resolveMergedCatalogProtocols(catalog));
 const catalogProtocolLookup = computed(() => buildProtocolCatalogLookup(mergedCatalogProtocols.value));
 const runtimeProtocolMap = computed(() => buildRuntimeProtocolMap(activeState.value, catalogProtocolLookup.value));
-const legacyTechDoneSet = computed(() => buildLegacyTechDoneSet(activeState.value, catalogProtocolLookup.value));
 
 const localQueueOverrides = ref<Record<string, LocalQueueOverride>>({});
 const externalQueueSignature = computed(() => buildExternalQueueSignature(activeState.value));
@@ -849,7 +903,6 @@ function buildRawTrackViews(faction: '通用' | '苏联' | '盟军' | '尤里', 
     trackNames,
     mergedCatalogProtocols: mergedCatalogProtocols.value,
     runtimeProtocolMap: runtimeProtocolMap.value,
-    legacyTechDoneSet: legacyTechDoneSet.value,
     activeState: activeState.value,
     resolveQueueState: resolveNodeQueueState,
   });

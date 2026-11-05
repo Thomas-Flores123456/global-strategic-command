@@ -9,6 +9,10 @@
         </span>
       </div>
 
+      <div v-if="relayLocked" class="relay-lock-note" data-testid="step2-relay-lock">
+        已接力导入存档：资金与已研科技沿用存档值，档位切换与科技整组替换已锁定；可在下方逐项微调。
+      </div>
+
       <div class="opt-grid">
         <button
           v-for="p in DIFFICULTY_PRESETS"
@@ -18,7 +22,8 @@
           :class="{ sel: choices.preset === p.id }"
           :data-preset-id="p.id"
           :aria-pressed="choices.preset === p.id"
-          @click="choices.preset = p.id"
+          :disabled="relayLocked && p.id !== 'custom'"
+          @click="selectPreset(p.id)"
         >
           <div class="opt-title">
             <span>{{ p.label }}</span>
@@ -93,9 +98,9 @@
               class="wiz-input tech-search"
               placeholder="检索 T1 科技…"
             />
-            <button type="button" class="wiz-pill" @click="selectOnlyPowerTech">仅选发电</button>
-            <button type="button" class="wiz-pill" @click="selectAllT1Tech">全选</button>
-            <button type="button" class="wiz-pill" @click="clearT1Tech">清空</button>
+            <button type="button" class="wiz-pill" :disabled="relayLocked" @click="selectOnlyPowerTech">仅选发电</button>
+            <button type="button" class="wiz-pill" :disabled="relayLocked" @click="selectAllT1Tech">全选</button>
+            <button type="button" class="wiz-pill" :disabled="relayLocked" @click="clearT1Tech">清空</button>
           </div>
         </div>
         <div class="wiz-check-list">
@@ -206,15 +211,31 @@ const filteredTechNames = computed(() => {
 
 const effective = computed(() => resolveDifficulty(choices));
 
+/**
+ * G1-08：战局接力导入（continuation）时，资金/已研科技以存档为准（packToChoices 已回填 custom*）。
+ * 切非 custom 档位或科技整组快捷替换会静默覆盖存档且不可恢复，故锁定；逐项微调保留。
+ */
+const relayLocked = computed(
+  () => choices.importedStat !== null && (choices.importMode ?? 'continuation') === 'continuation',
+);
+
+function selectPreset(id: LaunchChoices['preset']) {
+  if (relayLocked.value && id !== 'custom') return;
+  choices.preset = id;
+}
+
 function selectOnlyPowerTech() {
+  if (relayLocked.value) return;
   choices.customTech = [POWER_TECH];
 }
 
 function selectAllT1Tech() {
+  if (relayLocked.value) return;
   choices.customTech = [...t1TechNames.value];
 }
 
 function clearT1Tech() {
+  if (relayLocked.value) return;
   choices.customTech = [];
 }
 </script>
@@ -259,5 +280,11 @@ function clearT1Tech() {
   border-color: var(--rac-accent) !important;
   background: rgba(56, 189, 248, 0.12) !important;
   color: var(--rac-hi);
+}
+
+.relay-lock-note {
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  color: var(--rac-accent);
 }
 </style>

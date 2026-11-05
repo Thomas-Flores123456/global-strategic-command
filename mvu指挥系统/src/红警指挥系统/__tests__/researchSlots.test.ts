@@ -13,6 +13,7 @@ import {
   makeGlobalLimitFor,
   makeLaneKeyFor,
   makeParallelLimitFor,
+  makeResearchAccelEffFor,
   MECHA_RESEARCH_NAMES,
   SLOT_REGISTRY,
   slotBoard,
@@ -21,6 +22,9 @@ import {
   type SlotStateView,
   type SlotWarn,
 } from '../engines/researchSlots';
+import { createLaneRegistryHub } from '../engines/laneProviders';
+import { computeBudgetForBase } from '../engines/settleFloorHelpers';
+import { buildStructuredExpansionDataObject } from '../worldbook/expansionFiler';
 import { Schema } from '../core/schema';
 import { settleTransactions, type TransactionItem } from '../engines/transactionEngine';
 
@@ -283,6 +287,17 @@ describe('③ 双层门：全局 tier 门 × 槽内恒 1', () => {
         ],
       }),
     ).toBe(2);
+  });
+
+  it('G3-05：失守/废弃基地的 T3 建筑不计入 techTier', () => {
+    expect(
+      techTier({
+        bases: [
+          { status: '失守', buildings: [{ name: '量子超算中心', state: '运转' }] },
+          { status: '废弃', buildings: [{ name: '红星实验设计局综合体', state: '运转' }] },
+        ],
+      } as never),
+    ).toBe(1);
   });
 
   it('T3（真实建筑红星科学城在场，无需注入 techTierOf）：全局不限，6 项研究同升 active', () => {
@@ -711,5 +726,104 @@ describe('E2b 通道B：deploy 能力面锚定消费（批（八十四））', (
     expect(board.find(e => e.slotId === 'slot.main')?.unlocked).toBe(false);
     expect(board.find(e => e.slotId === 'slot.vehicle')?.unlocked).toBe(false);
     expect(board.find(e => e.slotId === 'slot.industry')?.unlocked).toBe(false);
+  });
+
+  it('⑧ 非自身体系科研与算力建筑接入：<态势> 与 <扩展档案> 标签直出科研加速/领域/算力，含克制钳制护栏与算力池并网', () => {
+    const baseline = Schema.parse({
+      bases: [
+        {
+          id: 'base_1',
+          name: '暗河地下主基地',
+          status: '运转中',
+          power: { gen: 300, use: 150 },
+          buildings: [{ name: '矿石精炼厂', state: '运转' }],
+        },
+      ],
+    });
+
+    const parsed = parseMessageText(
+      [
+        '<态势>',
+        '基地:',
+        '  - 名称: 暗河地下主基地',
+        '    建筑:',
+        '      - 名称: 荒坂前哨材料实验室',
+        '        状态: 运转',
+        '        科研加速: +15%',
+        '        加速领域: 工业基础, 装备',
+        '        算力: 25 TFLOPS / 35 TOPS',
+        '      - 军用科技废墟超算机房（运转，科研加速+80%，算力500TFLOPS/600TOPS）',
+        '</态势>',
+        '',
+        '<扩展档案>',
+        '- 名称: 绿洲地下生物育种试验站',
+        '  类别: 建筑',
+        '  简介: 接管自恶土绿洲农业集团的封闭式育种实验站。',
+        '  参数:',
+        '    可建造: 否（战利品接管）',
+        '    耗电: 30',
+        '    科研加速: +20%（农畜业）',
+        '    算力产出: 15 TFLOPS / 20 TOPS',
+        '</扩展档案>',
+      ].join('\n'),
+      baseline,
+      {},
+    );
+
+    const blds = parsed.data.bases[0].buildings;
+    const matLab = blds.find(b => b.name === '荒坂前哨材料实验室');
+    expect(matLab).toMatchObject({
+      state: '运转',
+      research_accel: 0.15,
+      research_lines: ['工业基础', '装备'],
+      compute: { tflops: 25, tops: 35 },
+    });
+
+    // 离谱数值 (+80% / 500TFLOPS / 600TOPS) 自动触发克制钳制护栏 (+35% / 100 TFLOPS / 150 TOPS)
+    const superRoom = blds.find(b => b.name === '军用科技废墟超算机房');
+    expect(superRoom).toMatchObject({
+      state: '运转',
+      research_accel: 0.35,
+      compute: { tflops: 100, tops: 150 },
+    });
+
+    // 非标建筑并网算力汇总入基地算力池 (25+100 = 125 TFLOPS, 35+150 = 185 TOPS)
+    const emptyCatalog = {
+      buildings: [],
+      researches: RESEARCHES,
+      productions: [],
+      retrofits: [],
+      projects: [],
+      protocols: [],
+    };
+    const budget = computeBudgetForBase(emptyCatalog as never, parsed.data.bases[0], parsed.data);
+    expect(budget).toEqual({ tflops: 125, tops: 185 });
+
+    // 科研槽推进倍率：工业基础槽同时吃 0.35(通用) + 0.15*0.75(对口次座递减) = 1.46x；载具槽仅吃 0.35(通用) = 1.35x
+    const accelEffFor = makeResearchAccelEffFor(parsed.data, testLineOf);
+    expect(accelEffFor(txn({ type: '研究', item: '基础化工学' }))).toBe(1.46);
+    expect(accelEffFor(txn({ type: '研究', item: '机动侦察工学' }))).toBe(1.35);
+
+    const hub = createLaneRegistryHub();
+    expect(
+      hub.resolveAccelEffForTxn(txn({ type: '研究', item: '基础化工学' }), {
+        bases: parsed.data.bases,
+        queues: parsed.data.queues,
+        catalog: emptyCatalog as never,
+      }),
+    ).toBe(1.46);
+
+    // <扩展档案> 非标不可建造建筑 (可建造: 否) 仍可生成带 buildable: false 与 research_accel / compute 的工况数据块
+    const expDossier = parsed.data.pending_expansions.find(e => e.name === '绿洲地下生物育种试验站');
+    expect(expDossier).toBeDefined();
+    const synthData = buildStructuredExpansionDataObject(expDossier!);
+    expect(synthData).toMatchObject({
+      type: 'building',
+      name: '绿洲地下生物育种试验站',
+      buildable: false,
+      research_accel: 0.2,
+      research_lines: ['农畜业'],
+      outputs: { virtual: { compute: { tflops: 15, tops: 20 } } },
+    });
   });
 });

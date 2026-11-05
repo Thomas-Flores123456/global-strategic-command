@@ -13,6 +13,10 @@ import type { EffectiveCatalog } from './catalogEffective';
 import type { ParsedPlanningIntent } from '../planning/planningParser';
 import { commitPlanningIntent } from '../planning/planningReceipt';
 import type { DataPatch, StatData } from './schema';
+import { canon } from '../parse/parseCommon';
+import { parseMessageText } from '../parse/parsePipeline';
+import { forceCommission, reconcileProduction, operationCompletionsToDeclarations } from '../engines/productionReconciliation';
+import { applyEngOrders } from '../engines/engOrderBridge';
 import { tav } from '../parse/systemCheck';
 
 export type FloorProcessOp =
@@ -23,7 +27,7 @@ export type FloorProcessOp =
       optionKey?: 'A' | 'B' | string;
       approvedAtTurn?: number;
       intentSnapshot?: ParsedPlanningIntent;
-      /** 兜底快照：当无完整 intentSnapshot 时按字段幂等恢复 */
+      /** 历史结果快照仅保留存档形状，不覆盖重算状态；缺意图时跳过并说明 */
       queuesSnapshot?: unknown[];
       creditsAfter?: number;
       planningSnapshot?: Record<string, unknown>;
@@ -34,7 +38,13 @@ export type FloorProcessOp =
       conflictId: string;
       resolution: 'defer' | 'force';
       itemName?: string;
-      /** 裁决后的队列与基地/兵力局部快照，确保重算后 100% 幂等还原 */
+      targets?: { item: string; base?: string }[];
+      /**
+       * G6-07：顺延补票分钟数（resolution='defer'）。这是本楼本 swipe 的结算输入而非结果快照：
+       * 重解析时累加后传给 settleFloor，经济/时钟/资金链/队列按同一时长重算。每次顺延各记一条、不去重。
+       */
+      extraDeltaMinutes?: number;
+      /** 历史裁决结果快照仅保留存档形状；重放按目标意图重新裁决，不覆盖重算状态 */
       queuesSnapshot?: unknown[];
       basesSnapshot?: unknown[];
       forcesSnapshot?: Record<string, unknown>;
@@ -53,7 +63,24 @@ export type FloorProcessOp =
       patchTarget?: string;
       decision: 'approve' | 'defer' | 'reject';
       patchSnapshot?: DataPatch | Record<string, unknown>;
+    }
+  | {
+      /** G2-01：面板即时调度（建筑启停/生产↔加速/加速范围），重解析时按实例身份重新应用 */
+      kind: 'BUILDING_DISPATCH';
+      ts: number;
+      /** 基地 id（缺省为基地名） */
+      baseId: string;
+      buildingName: string;
+      /** 同名建筑在本基地内的 1-based 序号（canon 名计数） */
+      instanceOrdinal: number;
+      patch: BuildingDispatchPatch;
     };
+
+export interface BuildingDispatchPatch {
+  state?: '运转' | '停机';
+  mode?: '生产' | '加速';
+  accel_scope?: 'global' | 'base';
+}
 
 export interface WorldbookEntrySnapshot {
   name: string;
@@ -331,6 +358,14 @@ export function readTimelineLedger(): TimelineLedgerState {
       /* fallback to memory */
     }
   }
+  // G1-01：内存兜底只属于写入它的聊天；切换聊天后不得把上一聊天的 originChatId/楼层账本带入新聊天
+  const fallbackChatId = memoryLedgerFallback.originChatId;
+  if (fallbackChatId) {
+    const currentChatId = readCurrentHostChatId();
+    if (currentChatId && currentChatId !== fallbackChatId) {
+      memoryLedgerFallback = createEmptyTimelineLedger();
+    }
+  }
   return klona(memoryLedgerFallback);
 }
 
@@ -405,7 +440,9 @@ export function ensureSwipeSlot(
       updatedAt: Date.now(),
     };
   } else if (textHash) {
-    floorRec.swipes[sKey].textHash = textHash;
+    const slot = floorRec.swipes[sKey];
+    // 原文编辑不撤销用户选择；仅更新过程记录所属原文指纹。
+    slot.textHash = textHash;
   }
   return floorRec.swipes[sKey];
 }
@@ -416,6 +453,18 @@ export function getSwipeSlot(
   swipeId: number,
 ): TimelineSwipeSlot | undefined {
   return ledger.floors[makeFloorKey(floorId)]?.swipes[makeSwipeKey(swipeId)];
+}
+
+/** 原文编辑不撤销用户选择；hash 只记录当前来源，回放按意图应用。 */
+export function getReplayableFloorOps(
+  ledger: TimelineLedgerState,
+  floorId: number,
+  swipeId: number,
+  _textHash: string,
+): FloorProcessOp[] {
+  const slot = getSwipeSlot(ledger, floorId, swipeId);
+  if (!slot || !Array.isArray(slot.opLog)) return [];
+  return slot.opLog;
 }
 
 export function getSwipeWorldbookMutations(
@@ -467,21 +516,40 @@ export function appendFloorProcessOp(
       ledger.originChatId = readCurrentHostChatId();
     }
     const slot = ensureSwipeSlot(ledger, floorId, swipeId, textHash);
+    let entry: FloorProcessOp = op;
     // 同类同标识操作幂等去重更新（例如同一补丁重复点击推迟/生效，以最新裁决为准）
     if (op.kind === 'PATCH_DECISION') {
       slot.opLog = slot.opLog.filter(
         existing => !(existing.kind === 'PATCH_DECISION' && existing.patchId === op.patchId),
       );
-    } else if (op.kind === 'CHRONO_RESOLVE') {
+    } else if (op.kind === 'CHRONO_RESOLVE' && op.extraDeltaMinutes === undefined) {
+      // 顺延补票记录（带 extraDeltaMinutes）是累加的结算输入，不参与同 conflictId 去重
       slot.opLog = slot.opLog.filter(
-        existing => !(existing.kind === 'CHRONO_RESOLVE' && existing.conflictId === op.conflictId),
+        existing =>
+          !(
+            existing.kind === 'CHRONO_RESOLVE' &&
+            existing.conflictId === op.conflictId &&
+            existing.extraDeltaMinutes === undefined
+          ),
       );
     } else if (op.kind === 'COMMIT_PLANNING') {
       slot.opLog = slot.opLog.filter(
         existing => !(existing.kind === 'COMMIT_PLANNING' && existing.planId === op.planId),
       );
+    } else if (op.kind === 'BUILDING_DISPATCH') {
+      // 同一建筑实例的调度合并为一条（后写字段胜出），反复开关不膨胀 opLog
+      const sameInstance = (existing: FloorProcessOp) =>
+        existing.kind === 'BUILDING_DISPATCH' &&
+        existing.baseId === op.baseId &&
+        canon(existing.buildingName) === canon(op.buildingName) &&
+        existing.instanceOrdinal === op.instanceOrdinal;
+      const prev = slot.opLog.find(sameInstance);
+      if (prev?.kind === 'BUILDING_DISPATCH') {
+        entry = { ...op, patch: { ...prev.patch, ...op.patch } };
+      }
+      slot.opLog = slot.opLog.filter(existing => !sameInstance(existing));
     }
-    slot.opLog.push(klona(op));
+    slot.opLog.push(klona(entry));
     slot.updatedAt = Date.now();
   });
 }
@@ -548,11 +616,60 @@ export function pruneTimelineAboveFloor(
   return { nextLedger, removedWbMutations: removed };
 }
 
+/**
+ * G9-01：删中间楼后的账本重映射。移除 deletedFloor 楼（返回其全部 swipe 的 wbJournal 供逆向回滚），
+ * 更高楼层的键与 floorId（含槽位与 wbJournal 记录）整体减 1，低楼保持不变。
+ */
+export function remapTimelineAfterMidDeletion(
+  ledger: TimelineLedgerState,
+  deletedFloor: number,
+): { nextLedger: TimelineLedgerState; removedWbMutations: WorldbookMutationRecord[] } {
+  const nextLedger = klona(ledger);
+  const removed: WorldbookMutationRecord[] = [];
+  const floors: Record<string, TimelineFloorRecord> = {};
+
+  for (const [fKey, floorRec] of Object.entries(nextLedger.floors)) {
+    if (floorRec.floorId < deletedFloor) {
+      floors[fKey] = floorRec;
+      continue;
+    }
+    if (floorRec.floorId === deletedFloor) {
+      for (const slot of Object.values(floorRec.swipes)) {
+        for (const wbRec of slot.wbJournal) {
+          removed.push(wbRec);
+        }
+      }
+      continue;
+    }
+    const floorId = floorRec.floorId - 1;
+    floorRec.floorId = floorId;
+    for (const slot of Object.values(floorRec.swipes)) {
+      slot.floorId = floorId;
+      for (const wbRec of slot.wbJournal) {
+        wbRec.floorId = floorId;
+      }
+    }
+    floors[makeFloorKey(floorId)] = floorRec;
+  }
+  nextLedger.floors = floors;
+
+  removed.sort((a, b) => b.ts - a.ts || b.floorId - a.floorId);
+
+  let nextMax = -1;
+  for (const floorRec of Object.values(floors)) {
+    if (floorRec.floorId > nextMax) nextMax = floorRec.floorId;
+  }
+  nextLedger.maxFloorWatermark = nextMax;
+
+  return { nextLedger, removedWbMutations: removed };
+}
+
 /* ═══════════════ 楼层交互过程量幂等重放引擎 (`replayFloorProcessOps`) ═══════════════ */
 
 export interface ReplayFloorOpsOptions {
   catalog?: EffectiveCatalog | null;
   floorId?: number;
+  onSkip?: (op: FloorProcessOp, reason: string) => void;
 }
 
 /**
@@ -574,52 +691,72 @@ export function replayFloorProcessOps<T extends Record<string, unknown>>(
 
     switch (op.kind) {
       case 'COMMIT_PLANNING': {
-        if (op.intentSnapshot) {
-          try {
-            const committed = commitPlanningIntent(
-              state as unknown as StatData,
-              op.intentSnapshot,
-              options?.catalog ?? null,
-              {
-                forceApprove: true,
-                floor: options?.floorId,
-              },
-            );
-            state = committed.next as unknown as Record<string, unknown>;
-            break;
-          } catch {
-            /* fallback to snapshot fields below */
-          }
+        if (!op.intentSnapshot) {
+          options?.onSkip?.(op, '旧排产记录缺少意图，不能用旧快照覆盖新结算');
+          break;
         }
-        if (Array.isArray(op.queuesSnapshot)) {
-          state.queues = klona(op.queuesSnapshot);
-        }
-        if (typeof op.creditsAfter === 'number' && isRecord(state.economy)) {
-          state.economy = { ...state.economy, credits: op.creditsAfter };
-        }
-        if (isRecord(op.planningSnapshot)) {
-          state.planning = klona(op.planningSnapshot);
+        const committed = commitPlanningIntent(state as unknown as StatData, op.intentSnapshot,
+          options?.catalog ?? null, { forceApprove: true, floor: options?.floorId, recordProcessOp: false });
+        state = committed.next as unknown as Record<string, unknown>;
+        if (!committed.committed && committed.receipt.status !== 'committed') {
+          options?.onSkip?.(op, committed.receipt.summary);
         }
         break;
       }
 
       case 'CHRONO_RESOLVE': {
-        if (Array.isArray(op.queuesSnapshot)) {
-          state.queues = klona(op.queuesSnapshot);
-        }
-        if (Array.isArray(op.basesSnapshot)) {
-          state.bases = klona(op.basesSnapshot);
-        }
-        if (isRecord(op.forcesSnapshot)) {
-          state.forces = klona(op.forcesSnapshot);
+        if (op.resolution !== 'force') break; // 顺延是 settleFloor 的输入，不在此重复推进。
+        const targets = op.targets ?? (op.itemName ? [{ item: op.itemName }] : []);
+        if (!targets.length) options?.onSkip?.(op, '旧特批记录缺少目标，保留记录但不恢复整份快照');
+        for (const target of targets) {
+          const applied = forceCommission(state as unknown as StatData, target);
+          if (applied) state = applied.next as unknown as Record<string, unknown>;
+          else options?.onSkip?.(op, `特批目标已不存在或已完成：${target.item}`);
         }
         break;
       }
 
       case 'SUBMIT_FIX': {
-        if (isRecord(op.fixedStatSnapshot)) {
-          state = klona(op.fixedStatSnapshot);
+        const raw = /[<＜]\s*\/?\s*(战况|态势|选项|图鉴|初始状态|工程)/.test(op.fixedYaml)
+          ? op.fixedYaml : `<${op.blockType}>\n${op.fixedYaml}\n</${op.blockType}>`;
+        const fixed = parseMessageText(raw, state as unknown as StatData, {
+          floorId: options?.floorId, isFirstFloor: options?.floorId === 0,
+        });
+        if (fixed.operationCompletions.length) {
+          fixed.data = reconcileProduction(fixed.data, { found: true,
+            declarations: operationCompletionsToDeclarations(fixed.data, fixed.operationCompletions), rejected: [],
+          }).next;
         }
+        if (fixed.engOrders.length) {
+          fixed.data = applyEngOrders(fixed.data, fixed.engOrders,
+            options?.catalog?.retrofits ?? [], options?.catalog?.projects ?? []).next;
+        }
+        state = fixed.data as unknown as Record<string, unknown>;
+        break;
+      }
+
+      case 'BUILDING_DISPATCH': {
+        const bases = Array.isArray(state.bases) ? (state.bases as Record<string, unknown>[]) : [];
+        const baseIndex = bases.findIndex(b => isRecord(b) && (b.id || b.name) === op.baseId);
+        const base = bases[baseIndex];
+        if (!base || !Array.isArray(base.buildings)) {
+          options?.onSkip?.(op, `建筑调度基地已不存在：${op.baseId}`);
+          break;
+        }
+        const nameKey = canon(op.buildingName);
+        let seen = 0;
+        const buildings = (base.buildings as Record<string, unknown>[]).map(b => {
+          if (!isRecord(b) || canon(b.name) !== nameKey) return b;
+          seen += 1;
+          return seen === op.instanceOrdinal ? { ...b, ...op.patch } : b;
+        });
+        if (seen < op.instanceOrdinal) {
+          options?.onSkip?.(op, `建筑调度目标已不存在：${op.buildingName} #${op.instanceOrdinal}`);
+          break;
+        }
+        const nextBases = [...bases];
+        nextBases[baseIndex] = { ...base, buildings };
+        state.bases = nextBases;
         break;
       }
 
@@ -631,26 +768,30 @@ export function replayFloorProcessOps<T extends Record<string, unknown>>(
           ? (klona(state.applied_data_patches) as Record<string, unknown>[])
           : [];
 
+        // 精确身份跨 pending/applied 优先；仅在 ID 消失后接受唯一同目标候选。
+        const exactPending = rawPending.filter(p => p && p.id === op.patchId);
+        const exactApplied = rawApplied.filter(p => p && p.id === op.patchId);
+        const hasExact = exactPending.length + exactApplied.length > 0;
+        const pending = hasExact ? exactPending : rawPending.filter(p => op.patchTarget && p?.target === op.patchTarget);
+        const completed = hasExact ? exactApplied : rawApplied.filter(p => op.patchTarget && p?.target === op.patchTarget);
+        if (pending.length + completed.length > 1) {
+          options?.onSkip?.(op, `补丁身份有歧义：${op.patchTarget ?? op.patchId}`);
+          break;
+        }
+        const matched = pending[0];
+        const applied = completed[0];
+        if (!matched) {
+          if (!applied) options?.onSkip?.(op, `补丁目标已不存在：${op.patchTarget ?? op.patchId}`);
+          break;
+        }
         if (op.decision === 'approve') {
-          const matched = rawPending.find(p => p && p.id === op.patchId);
-          state.pending_data_patches = rawPending.filter(p => !p || p.id !== op.patchId);
-          const patchToApply = op.patchSnapshot
-            ? (klona(op.patchSnapshot) as Record<string, unknown>)
-            : matched
-              ? { ...matched, status: 'applied' }
-              : null;
-          if (patchToApply) {
-            const patchId = String(patchToApply.id ?? op.patchId);
-            const filteredApplied = rawApplied.filter(p => !p || String(p.id ?? '') !== patchId);
-            filteredApplied.push({ ...patchToApply, id: patchId, status: 'applied' });
-            state.applied_data_patches = filteredApplied;
-          }
+          state.pending_data_patches = rawPending.filter(p => p !== matched);
+          state.applied_data_patches = [...rawApplied.filter(p => p.id !== op.patchId),
+            { ...matched, id: op.patchId, status: 'applied' }];
         } else if (op.decision === 'defer') {
-          state.pending_data_patches = rawPending.map(p =>
-            p && p.id === op.patchId ? { ...p, status: 'deferred' } : p,
-          );
+          state.pending_data_patches = rawPending.map(p => p === matched ? { ...p, status: 'deferred' } : p);
         } else if (op.decision === 'reject') {
-          state.pending_data_patches = rawPending.filter(p => !p || p.id !== op.patchId);
+          state.pending_data_patches = rawPending.filter(p => p !== matched);
         }
         break;
       }

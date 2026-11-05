@@ -402,8 +402,8 @@ describe('EVT-PARSE-01 · parseMessageText 集成', () => {
       SAMPLE_CHAIN_ESTABLISH.trim(),
       '</事件>',
     ].join('\n');
-    const r = parseMessageText(raw, {});
-    expect(r.applied).toBe(true); // 战况账本写入
+    const r = parseMessageText(raw, {}, { isFirstFloor: true });
+    expect(r.applied).toBe(true); // 战况账本写入（首楼允许设定资金，G7-01）
     expect((r.data.economy as { credits?: number }).credits).toBe(5000);
     expect(r.eventDeclarations).toHaveLength(1);
     expect((r.data.economy as { chains?: unknown[] }).chains).toEqual([]); // 事件不直接建链

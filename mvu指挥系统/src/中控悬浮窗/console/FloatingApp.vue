@@ -79,7 +79,7 @@
               :snapshot="floating.snapshot"
               :active-modal="activeModal"
               :pre-launch-locked="isPreLaunchLocked"
-              :show-engineering="debugState.enabled"
+              :show-engineering="engineeringEnabled"
               @open-modal="openModal"
             />
 
@@ -157,8 +157,8 @@
 
       <!-- ══ 工程指挥弹窗（ENG-UI-01 骨架；D17 一级主模态 + DetailDrawer 详情复用；生产环境默认关闭，DEV 开启） ══ -->
       <ModalEngineering
-        v-if="activeModal === 'engineering' && debugState.enabled"
-        :open="activeModal === 'engineering' && debugState.enabled"
+        v-if="activeModal === 'engineering' && engineeringEnabled"
+        :open="activeModal === 'engineering' && engineeringEnabled"
         :snapshot="floating.snapshot"
         @close="closeModal"
       />
@@ -244,8 +244,8 @@
         @close="closeModal"
       />
       <ModalEngineering
-        v-if="activeModal === 'engineering' && debugState.enabled"
-        :open="activeModal === 'engineering' && debugState.enabled"
+        v-if="activeModal === 'engineering' && engineeringEnabled"
+        :open="activeModal === 'engineering' && engineeringEnabled"
         :snapshot="floating.snapshot"
         @close="closeModal"
       />
@@ -325,6 +325,7 @@ import {
 } from '../../红警指挥系统/ui/ui';
 import { useCatalogStore } from '../../红警指挥系统/composables/useCatalog';
 import { debugState } from '../../红警指挥系统/composables/useDebugMode';
+import { isFeatureEnabled } from '../../红警指挥系统/core/featureGates';
 import { closeDetail, detail } from '../../红警指挥系统/composables/useDetail';
 import { useFloatingStore } from '../../红警指挥系统/composables/useFloatingStore';
 import { readCurrentHostChatId } from '../../红警指挥系统/core/timelineLedger';
@@ -545,7 +546,7 @@ function openModal(key: ModalKey) {
     key !== 'card-update'
   )
     return;
-  if (key === 'engineering' && !debugState.enabled) return;
+  if (key === 'engineering' && !engineeringEnabled) return;
   if (key === 'dataflow' && debugState.miniHudOpen) {
     debugState.miniHudOpen = false;
     activeModal.value = 'dataflow';
@@ -565,14 +566,8 @@ watch(
   { immediate: true },
 );
 
-watch(
-  () => debugState.enabled,
-  enabled => {
-    if (!enabled && activeModal.value === 'engineering') {
-      activeModal.value = null;
-    }
-  },
-);
+/** D6 统一开关：工程玩法未完工，生产构建隐藏入口且拒绝打开弹窗，开发环境照常开放 */
+const engineeringEnabled = isFeatureEnabled('engineering');
 
 function openDataFlowFull() {
   debugState.miniHudOpen = false;

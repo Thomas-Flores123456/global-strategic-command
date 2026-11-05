@@ -94,6 +94,11 @@ export interface TwoStageSettleOptions extends SettleOptions {
   /** 基地可用算力池查询（default 恒 {0,0}；集成层自 operationEngine effectiveVirtual 汇总） */
   computeFor?: (txn: TransactionItem) => ComputeBudget;
   /**
+   * 建筑加速倍率（研究槽科研建筑加速 / 产线加速模式，≥ 1；default 恒 1）。
+   * 与 effFor（工况效率）分离注入：研究事务在阶段二与算力加速比合并后统一封顶 RESEARCH_TOTAL_ACCEL_CAP。
+   */
+  accelFor?: (txn: TransactionItem) => number;
+  /**
    * 严格纳米准入门（SIM-NANITE-01）：当 true 时，若候列 queued 排产项声明 req_nanites > 0
    * 且当前批内剩余可用纳米 remainingNanites < req_nanites，则保持 queued 等待后续补给，绝不透支升格。
    */
@@ -120,6 +125,9 @@ export const MINUTES_PER_DAY = 1440;
  * 的防线交给确定性常量而非 min_days 单点兜底；min_days_lock 仍是最终物理硬下限。
  */
 export const SATISFACTION_CAP = 1;
+
+/** 研究事务总加速上限（算力加速 × 科研建筑加速合并后 ≤ 2×，即「+100%」） */
+export const RESEARCH_TOTAL_ACCEL_CAP = 2;
 
 /** 研究/建造权重：偏物理仿真（TFLOPS 主导晶格自组织成型，§3.8） */
 export const WEIGHT_SIMULATION = { tflops: 0.7, tops: 0.3 } as const;
@@ -187,9 +195,16 @@ export function rawSpeedup(type: string, spec: TwoStageSpec | undefined, budget:
  *   阶段二标称短于锁值时乘子 <1（强制减速）。
  * - 研究（09 工期约定）：lock 为总工期地板——min(rawSpeedup, phase2Minutes/(lockMinutes − phase1Minutes))；
  *   lock ≤ 阶段一标称或 lock=0、total_minutes≤0 时不钳制。
+ * - accel：建筑加速倍率（≥ 1）与算力加速比相乘；研究事务合并后封顶 RESEARCH_TOTAL_ACCEL_CAP。
  */
-export function phase2Multiplier(txn: TransactionItem, spec: TwoStageSpec | undefined, budget: ComputeBudget): number {
-  const raw = rawSpeedup(txn.type, spec, budget);
+export function phase2Multiplier(
+  txn: TransactionItem,
+  spec: TwoStageSpec | undefined,
+  budget: ComputeBudget,
+  accel = 1,
+): number {
+  const combined = rawSpeedup(txn.type, spec, budget) * accel;
+  const raw = txn.type === '研究' ? Math.min(RESEARCH_TOTAL_ACCEL_CAP, combined) : combined;
   const lockMinutes = txn.min_days_lock > 0 ? txn.min_days_lock * MINUTES_PER_DAY : 0;
   if (lockMinutes <= 0 || txn.total_minutes <= 0) return raw;
   const { phase1, phase2 } = phaseSplit(spec);
@@ -263,31 +278,42 @@ export function applyNaniteDeduction(
 
 /**
  * 组合工况效率与阶段二算力加速为单一 effFor（喂给 settleTransactions 既有接缝）：
- * - 阶段一（spent < total×phase1Ratio）：仅基础工况 eff（配料不吃算力）；
- * - 阶段二：基础工况 eff × phase2Multiplier（含 min_days_lock 钳制）——两正交乘子叠乘；
+ * - 阶段一（spent < total×phase1Ratio）：基础工况 eff × 建筑加速（配料不吃算力）；
+ * - 阶段二：基础工况 eff × phase2Multiplier（建筑加速×算力加速合并封顶，含 min_days_lock 钳制）；
  * - 不注入任何回调时对 min_days_lock=0 的事务恒等于基础 eff（行为恒等）。
  */
 export function makeTwoStageEffFor(options: TwoStageSettleOptions = {}, deltaMinutes = 0): (txn: TransactionItem) => number {
   const baseEffFor = options.effFor ?? (() => 1);
   const assemblyFor = options.assemblyFor ?? (() => undefined);
   const computeFor = options.computeFor ?? (() => ({ tflops: 0, tops: 0 }));
+  const accelFor = options.accelFor ?? (() => 1);
   return txn => {
+    const accel = accelFor(txn);
     const base = baseEffFor(txn);
-    if (txn.total_minutes <= 0) return base;
+    if (txn.type !== '研究') {
+      // 非研究事务：建筑加速与工况 eff 同位相乘（沿用既有口径）
+      return twoStageEff(txn, base * accel, 1);
+    }
+    return twoStageEff(txn, base, accel);
+  };
+
+  function twoStageEff(txn: TransactionItem, base: number, accel: number): number {
+    if (txn.total_minutes <= 0) return base * accel;
     const spec = assemblyFor(txn);
     const phase1End = txn.total_minutes * phaseSplit(spec).phase1;
     if (txn.spent_minutes < phase1End) {
-      if (deltaMinutes > 0 && base > 0) {
+      const phase1Eff = base * accel;
+      if (deltaMinutes > 0 && phase1Eff > 0) {
         const phase1Remain = phase1End - txn.spent_minutes;
-        if (deltaMinutes * base > phase1Remain) {
-          const p2 = phase2Multiplier(txn, spec, computeFor(txn));
-          return (phase1Remain + (deltaMinutes * base - phase1Remain) * p2) / deltaMinutes;
+        if (deltaMinutes * phase1Eff > phase1Remain) {
+          const p2 = phase2Multiplier(txn, spec, computeFor(txn), accel) / accel;
+          return (phase1Remain + (deltaMinutes * phase1Eff - phase1Remain) * p2) / deltaMinutes;
         }
       }
-      return base;
+      return phase1Eff;
     }
-    return base * phase2Multiplier(txn, spec, computeFor(txn));
-  };
+    return base * phase2Multiplier(txn, spec, computeFor(txn), accel);
+  }
 }
 
 /* ═══════════════ 两段式结算主函数（对 settleTransactions 的策略包装） ═══════════════ */

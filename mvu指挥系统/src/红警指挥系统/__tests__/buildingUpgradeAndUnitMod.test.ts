@@ -12,7 +12,7 @@ import {
   reconcileProduction,
   type ReconcileStateShape,
 } from '../engines/productionReconciliation';
-import { syncProjects, type ProjectStateView } from '../engines/projectEngine';
+import { applyRetrofitCompletionUpgrade, syncProjects, type ProjectStateView } from '../engines/projectEngine';
 import type { TransactionItem } from '../engines/transactionEngine';
 
 function makeBuildingTxn(item: string, base = 'base_main'): TransactionItem {
@@ -215,7 +215,19 @@ describe('FD-22 Track B (BLD-MOD-CORE-01): 建筑单向向下兼容、产线继�
       ],
     };
 
-    const synced = syncProjects(state);
+    const retrofitDef = {
+      kind: 'retrofit' as const,
+      name: 'M1A2 SEPv3灰熊混动改装工程',
+      research: 'x',
+      grade: '中改' as const,
+      desc: '',
+      target_unit: 'M1A1灰熊主战坦克',
+      upgraded_name: 'M1A2 SEPv3混动灰熊主战坦克',
+    };
+    const synced = syncProjects(state, [retrofitDef]);
+    // G4-06：精确匹配——升格后名再次同步不叠加后缀
+    const again = applyRetrofitCompletionUpgrade(synced.next, [{ def: retrofitDef, lead_base: 'base_main' }]);
+    expect(again.forces?.vehicles?.[0]).toBe('M1A2 SEPv3混动灰熊主战坦克(正常) ×3');
     expect(synced.next.projects?.[0]?.status).toBe('完工');
     expect(synced.next.forces?.vehicles).toEqual([
       'M1A2 SEPv3混动灰熊主战坦克(正常) ×3',

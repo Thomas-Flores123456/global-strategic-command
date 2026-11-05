@@ -59,6 +59,7 @@
                 <span v-else class="eng-tab-lock"><Icon name="lock" :size="9" /></span>
               </button>
               <button
+                v-if="spaceEnabled"
                 role="tab"
                 data-test="eng-tab-space"
                 class="eng-tab"
@@ -1137,6 +1138,16 @@
                           <input v-model.trim="spaceDraft.payload" type="text" class="eng-catalog-search" placeholder="有效载荷名称" />
                         </label>
                         <label class="eng-space-field">
+                          <span class="eng-space-field-label">载荷质量 (t)</span>
+                          <input v-model.number="spaceDraft.massTons" type="number" min="0" step="0.5" class="eng-catalog-search" placeholder="留空则按载荷名推断" />
+                        </label>
+                        <label class="eng-space-field">
+                          <span class="eng-space-field-label">目标轨道</span>
+                          <select v-model="spaceDraft.orbitTarget" class="eng-catalog-search">
+                            <option v-for="o in ['LEO', 'SSO', 'GTO', 'GEO', 'TLI']" :key="o" :value="o">{{ o }}</option>
+                          </select>
+                        </label>
+                        <label class="eng-space-field">
                           <span class="eng-space-field-label">合同名称</span>
                           <input v-model.trim="spaceDraft.title" type="text" class="eng-catalog-search" placeholder="发射合同标题" />
                         </label>
@@ -1226,6 +1237,7 @@ import Icon from '../../红警指挥系统/ui/Icon.vue';
 import type { ProjectDef, RetrofitDef } from '../../红警指挥系统/core/catalog';
 import type { Project, ProjectV2, Schema, SpaceContract } from '../../红警指挥系统/core/schema';
 import { isProjectV1, isProjectV2 } from '../../红警指挥系统/core/schema';
+import { isFeatureEnabled } from '../../红警指挥系统/core/featureGates';
 import { useCatalogStore } from '../../红警指挥系统/composables/useCatalog';
 import { openDetail } from '../../红警指挥系统/composables/useDetail';
 import EngSceneView from '../panels/EngSceneView.vue';
@@ -1248,7 +1260,12 @@ import {
   diagnoseLaunchReadiness,
   resolveAeroEquipmentStockCount,
 } from '../models/spacePanelModel';
-import { BUILDABLE_AERO_EQUIPMENT_CATALOG, LAUNCHPAD_BUILDINGS } from '../../红警指挥系统/engines/spaceEngine';
+import {
+  BUILDABLE_AERO_EQUIPMENT_CATALOG,
+  LAUNCHPAD_BUILDINGS,
+  centerTierBaseCapacityT,
+  evaluateLaunchSiteModifiers,
+} from '../../红警指挥系统/engines/spaceEngine';
 import { fillHostSendInput } from '../../红警指挥系统/worldbook/hostSendInput';
 import { engVerbToUnifiedCommandType, findModuleObserverMetrics, findPhaseObserverMetrics, projectEngineeringObserverView } from '../../红警指挥系统/engines/engOrderBridge';
 import type { EngineeringObserverView, UtoTaskObserverMetrics } from '../../红警指挥系统/engines/engOrderBridge';
@@ -1392,11 +1409,14 @@ const longRetrofitCatalog = computed<RetrofitDef[]>(() => catalog.retrofits.filt
 const spaceProjectCatalog = computed<ProjectDef[]>(() => projectCatalog.value.filter(d => isAerospaceProjectDef(d)));
 const longProjectCatalog = computed<ProjectDef[]>(() => projectCatalog.value.filter(d => !isAerospaceProjectDef(d)));
 
+/** D6 统一开关：航天玩法未完工，生产构建不展示天基航天标签页 */
+const spaceEnabled = isFeatureEnabled('space');
 const effectiveScopeTab = computed<'short' | 'long' | 'space'>(() => {
   if (scopeTab.value === 'short' && shortCatalog.value.length === 0) {
     if (longProjectCatalog.value.length > 0) return 'long';
-    if (spaceProjectCatalog.value.length > 0 || (props.snapshot?.space?.launch_centers?.length ?? 0) > 0) return 'space';
+    if (spaceEnabled && (spaceProjectCatalog.value.length > 0 || (props.snapshot?.space?.launch_centers?.length ?? 0) > 0)) return 'space';
   }
+  if (scopeTab.value === 'space' && !spaceEnabled) return 'short';
   return scopeTab.value;
 });
 const switchScopeTab = (tab: 'short' | 'long' | 'space') => {
@@ -1751,10 +1771,6 @@ const rocketStageCheck = ref({
 interface LaunchCenterSiteProfile {
   siteType: string;
   badgeText: string;
-  payoutMult: number;
-  payoutMultText: string;
-  payloadMult: number;
-  baseMaxTons: number;
   immuneToEarthWeather: boolean;
 }
 
@@ -1762,58 +1778,46 @@ const LAUNCH_CENTER_SITE_PROFILES: Record<string, LaunchCenterSiteProfile> = {
   equatorial_coastal: {
     siteType: 'equatorial_coastal',
     badgeText: '🌊 赤道/低纬滨海 · 燃料回款+20% · 运力×1.15',
-    payoutMult: 1.2,
-    payoutMultText: '×1.20 (+20%)',
-    payloadMult: 1.15,
-    baseMaxTons: 25,
     immuneToEarthWeather: false,
   },
   inland_canyon: {
     siteType: 'inland_canyon',
     badgeText: '⛰️ 内陆深谷加固 · 隐蔽暴露+0.05 · 高轨×0.90',
-    payoutMult: 1.0,
-    payoutMultText: '×1.00 (标准)',
-    payloadMult: 1.0,
-    baseMaxTons: 22,
     immuneToEarthWeather: false,
   },
   sea_platform: {
     siteType: 'sea_platform',
     badgeText: '🚢 海上半潜平台 · 回款+20% · 运力×1.15 · 上限T2',
-    payoutMult: 1.2,
-    payoutMultText: '×1.20 (+20%)',
-    payloadMult: 1.15,
-    baseMaxTons: 25,
     immuneToEarthWeather: false,
   },
   high_latitude: {
     siteType: 'high_latitude',
     badgeText: '❄️ 高纬/极地试验场 · 极轨回款+25% · 极轨运力×1.20',
-    payoutMult: 1.25,
-    payoutMultText: '×1.25 (+25%)',
-    payloadMult: 1.2,
-    baseMaxTons: 26,
     immuneToEarthWeather: false,
   },
   orbital_dock: {
     siteType: 'orbital_dock',
     badgeText: '🛰️ 轨道船坞母港 · 回款+50% · 运力×2.00 · 全天候真空',
-    payoutMult: 1.5,
-    payoutMultText: '×1.50 (+50%)',
-    payloadMult: 2.0,
-    baseMaxTons: 80,
     immuneToEarthWeather: true,
   },
   lunar_surface: {
     siteType: 'lunar_surface',
     badgeText: '🌕 月面低重力中心 · 回款+35% · 运力×1.50 · 全天候真空',
-    payoutMult: 1.35,
-    payoutMultText: '×1.35 (+35%)',
-    payloadMult: 1.5,
-    baseMaxTons: 60,
     immuneToEarthWeather: true,
   },
 };
+
+/** G4-14：选址回款/运力乘数与等级运力一律取自 spaceEngine，弹窗只保留徽章文案与天气豁免 */
+function engineSiteFigures(siteType: string, tier: number, isFullReuse = false) {
+  const mod = evaluateLaunchSiteModifiers(siteType, 'LEO');
+  const pct = Math.round((mod.payoutMult - 1) * 100);
+  return {
+    payoutMult: mod.payoutMult,
+    payoutMultText: `×${mod.payoutMult.toFixed(2)} (${pct === 0 ? '标准' : `${pct > 0 ? '+' : ''}${pct}%`})`,
+    payloadMult: mod.payloadMult,
+    maxPayloadTons: Math.round(centerTierBaseCapacityT(tier, isFullReuse) * mod.payloadMult * 100) / 100,
+  };
+}
 
 function inferSiteTypeForBase(baseNameOrLoc: string, explicitSiteType?: string): string {
   if (explicitSiteType && LAUNCH_CENTER_SITE_PROFILES[explicitSiteType]) {
@@ -2127,8 +2131,7 @@ const launchCenterCards = computed<LaunchCenterCardView[]>(() => {
           ? 2
           : 1;
     const effectiveTier: 1 | 2 | 3 = siteType === 'sea_platform' && computedTier > 2 ? 2 : computedTier;
-    const tierBaseTons = effectiveTier === 3 ? 150 : effectiveTier === 2 ? 65 : profile.baseMaxTons;
-    const maxPayloadTons = Math.round(tierBaseTons * profile.payloadMult);
+    const figures = engineSiteFigures(siteType, effectiveTier);
 
     const localWeatherRaw = profile.immuneToEarthWeather
       ? '真空无气象干扰'
@@ -2168,10 +2171,7 @@ const launchCenterCards = computed<LaunchCenterCardView[]>(() => {
         primaryTz,
       ),
       weatherBadge,
-      payoutMult: profile.payoutMult,
-      payoutMultText: profile.payoutMultText,
-      payloadMult: profile.payloadMult,
-      maxPayloadTons,
+      ...figures,
       isBuilt: true,
       isSpaceportCity,
       mountedSlots: rawSlots,
@@ -2226,8 +2226,7 @@ const launchCenterCards = computed<LaunchCenterCardView[]>(() => {
           ? 2
           : 1;
     const effectiveTier: 1 | 2 | 3 = siteType === 'sea_platform' && computedTier > 2 ? 2 : computedTier;
-    const tierBaseTons = effectiveTier === 3 ? 150 : effectiveTier === 2 ? 65 : profile.baseMaxTons;
-    const maxPayloadTons = Math.round(tierBaseTons * profile.payloadMult);
+    const figures = engineSiteFigures(siteType, effectiveTier);
     const localWeatherRaw = profile.immuneToEarthWeather ? '真空无气象干扰' : b.weather || globalWeather;
     const hasWeatherTower = Boolean(rawSlots.lc_weather_tower);
     const weatherBadge = profile.immuneToEarthWeather
@@ -2258,10 +2257,7 @@ const launchCenterCards = computed<LaunchCenterCardView[]>(() => {
             : 'Tier-1 · 小型发射场(4槽)',
       localTimeBadge: formatBaseLocalTimeBadge(globalClock, idx, b.tz_offset, primaryTz),
       weatherBadge,
-      payoutMult: profile.payoutMult,
-      payoutMultText: profile.payoutMultText,
-      payloadMult: profile.payloadMult,
-      maxPayloadTons,
+      ...figures,
       isBuilt: hasLaunchBld,
       isSpaceportCity,
       mountedSlots: rawSlots,
@@ -2289,10 +2285,7 @@ const launchCenterCards = computed<LaunchCenterCardView[]>(() => {
       tierBadge: 'Tier-1 · 小型发射场(4槽)',
       localTimeBadge: formatBaseLocalTimeBadge(globalClock, 0, 8, 8),
       weatherBadge: `🌤️ ${globalWeather}`,
-      payoutMult: profile.payoutMult,
-      payoutMultText: profile.payoutMultText,
-      payloadMult: profile.payloadMult,
-      maxPayloadTons: 25,
+      ...engineSiteFigures('inland_canyon', 1),
       isBuilt: launchReadiness.value.launchpadReady,
       isSpaceportCity: false,
       mountedSlots: rawSlots,
@@ -2834,6 +2827,8 @@ const spaceDraft = ref<{
   recoverBooster: boolean;
   useStoredBooster: boolean;
   rewardCredits: number;
+  massTons: number | null;
+  orbitTarget: string;
 }>({
   title: `${SPACE_CONTRACT_KIND_OPTIONS[0].defaultPayload}发射任务`,
   kind: SPACE_CONTRACT_KIND_OPTIONS[0].key,
@@ -2843,6 +2838,8 @@ const spaceDraft = ref<{
   recoverBooster: true,
   useStoredBooster: false,
   rewardCredits: SPACE_CONTRACT_KIND_OPTIONS[0].defaultReward,
+  massTons: null,
+  orbitTarget: 'LEO',
 });
 
 watch(
@@ -2869,6 +2866,9 @@ const draftPayoutPreview = computed(() =>
     spaceDraft.value.rewardCredits,
     spaceDraft.value.useStoredBooster,
     spaceOverview.value.boosterCount,
+    activeLaunchCenter.value
+      ? { payoutMultiplier: activeLaunchCenter.value.payoutMult, isSpaceportCity: activeLaunchCenter.value.isSpaceportCity }
+      : null,
   ),
 );
 
@@ -2894,6 +2894,10 @@ async function handleSubmitSpaceContract() {
         rewardCredits: spaceDraft.value.rewardCredits,
         recoverBooster: spaceDraft.value.recoverBooster,
         useStoredBooster: spaceDraft.value.useStoredBooster && spaceOverview.value.boosterCount > 0,
+        // G4-15：主合同表单与商业委托同口径携带发射中心 id，引擎按中心取选址/等级
+        launchCenterId: activeLaunchCenter.value?.base === fallbackBase ? activeLaunchCenter.value.id : undefined,
+        massTons: spaceDraft.value.massTons ?? undefined,
+        orbitTarget: spaceDraft.value.orbitTarget,
       }),
     fillHostSendInput,
     loadedToast,

@@ -342,7 +342,14 @@ export interface BaseLike {
   weather?: string;
   site_type?: string;
   power?: { gen?: number; use?: number };
-  buildings?: { name: string; state?: string; mode?: string }[];
+  buildings?: {
+    name: string;
+    state?: string;
+    mode?: string;
+    research_accel?: number;
+    research_lines?: string[];
+    compute?: { tflops?: number; tops?: number };
+  }[];
   forces?: {
     vehicles?: ReadonlyArray<string | { name?: string; type?: string }> | Record<string, number>;
     [key: string]: unknown;
@@ -559,22 +566,48 @@ export function evalBaseBuildings(
   }[] = [];
   const effPower = resolveEffectiveBasePower(base, data);
   const env = { power: effPower };
+  const isLowPower = effPower.gen < effPower.use;
   for (const building of base.buildings ?? []) {
     const bState = effectiveBuildingState(building);
     if (!isBuildingOperationalState(bState)) continue;
+    const inlineTf =
+      typeof building.compute?.tflops === 'number' && Number.isFinite(building.compute.tflops)
+        ? Math.min(100, Math.max(0, building.compute.tflops))
+        : 0;
+    const inlineTp =
+      typeof building.compute?.tops === 'number' && Number.isFinite(building.compute.tops)
+        ? Math.min(150, Math.max(0, building.compute.tops))
+        : 0;
     const def = findCatalogBuildingDef(catalog.buildings, building.name);
-    if (!def) continue;
+    if (!def) {
+      if (inlineTf > 0 || inlineTp > 0) {
+        const powerFactor = isLowPower ? 0.5 : 1;
+        results.push({
+          name: building.name,
+          primaryBehavior: isLowPower ? 'degraded' : 'normal',
+          efficiency: powerFactor,
+          compute: {
+            tflops: Math.round(inlineTf * powerFactor * 100) / 100,
+            tops: Math.round(inlineTp * powerFactor * 100) / 100,
+          },
+        });
+      }
+      continue;
+    }
     const evalResult = calculateBuildingOperation(
       { ...(def as unknown as Record<string, unknown>), state: bState },
       env,
     );
+    const catTf = evalResult.effectiveVirtual?.compute?.tflops ?? 0;
+    const catTp = evalResult.effectiveVirtual?.compute?.tops ?? 0;
+    const powerFactor = isLowPower ? 0.5 : 1;
     results.push({
       name: building.name,
       primaryBehavior: evalResult.primaryBehavior,
       efficiency: evalResult.efficiency,
       compute: {
-        tflops: evalResult.effectiveVirtual?.compute?.tflops ?? 0,
-        tops: evalResult.effectiveVirtual?.compute?.tops ?? 0,
+        tflops: Math.max(catTf, Math.round(inlineTf * powerFactor * 100) / 100),
+        tops: Math.max(catTp, Math.round(inlineTp * powerFactor * 100) / 100),
       },
     });
   }
