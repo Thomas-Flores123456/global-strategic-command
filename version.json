@@ -1,10 +1,18 @@
 {
   "project": "SillyTavern-世界观构建",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "save_schema": 2,
-  "updated_at": "2026-10-29",
+  "updated_at": "2026-11-10",
   "manifest_url": "https://raw.githubusercontent.com/Thomas-Flores123456/global-strategic-command/main/version.json",
   "releases": [
+    {
+      "version": "2.5.1",
+      "date": "2026-11-10",
+      "breaking_save": false,
+      "save_schema": 2,
+      "summary": "民心显式输入门禁、科研算力按需求共享、建造反向不变量与排程回执实时对账，新增参谋前馈实时预览与赛博朋克2077军备世界书",
+      "save_migration_note": "完全兼容 SavePack V2 战局档案；本版不改存档结构，旧档可直接读取，无需备份迁移。"
+    },
     {
       "version": "2.5.0",
       "date": "2026-10-29",
