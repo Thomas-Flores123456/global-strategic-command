@@ -21,6 +21,12 @@
  *   - 不删除酒馆里的任何世界书；仓库删掉的书在酒馆里会残留（控制台会提醒，可手动删）；
  *   - 在酒馆世界书编辑器里对同名书的手动改动，下次同步（含实时推送）会被冲掉，请改仓库源文件。
  *
+ * 落盘语义（重要）：
+ *   - 酒馆 saveWorldInfo(name, data) 默认走 1s 「全局共用」防抖（不按书名区分），酒馆助手的
+ *     createOrReplaceWorldbook 内部就是这么调的：连写 N 本只会把最后一本 POST 到磁盘，其余只改了内存缓存
+ *     （实测 35 本只落盘 1 本，刷新页面后露馅）。
+ *   - 因此每本写完立即调 SillyTavern.getContext().saveWorldInfo(name, data, true) 强制落盘（见 persistNow）。
+ *
  * 实时机制：
  *   - EventSource 连接服务的 /events（断线浏览器自动重连）；
  *   - 服务端检测到文件变更（500ms 防抖）推送 {added, changed, removed}，此处只增量拉取变更的书；
@@ -100,6 +106,22 @@ if (typeof window !== 'undefined') {
     console.log(`[世界书同步] 当前目标网址: ${SYNC_BASE}`);
     return SYNC_BASE;
   };
+
+  // 控制台自检：事件流状态 + 本地 revision；手动全量：syncWorldbooksNow()
+  window.getWorldbookSyncStatus = function () {
+    const names = ['CONNECTING', 'OPEN', 'CLOSED'];
+    const status = {
+      base: SYNC_BASE,
+      sse: esClient ? names[esClient.readyState] ?? esClient.readyState : 'none',
+      lastRevision,
+      drops: sseDrops,
+    };
+    console.log('[世界书同步] 状态：', status);
+    return status;
+  };
+  window.syncWorldbooksNow = function () {
+    return enqueue('控制台全量同步', syncWorldbooks);
+  };
 }
 
 // ---------- 串行队列：全量/增量同步不并发执行（对同一本书并发写没有意义） ----------
@@ -114,6 +136,28 @@ function enqueue(label, fn) {
 }
 
 // ---------- 同步逻辑 ----------
+
+/**
+ * 强制落盘：createOrReplaceWorldbook 只更新了酒馆内存缓存并挂了一个全局共用的 1s 防抖保存，
+ * 连写多本时只有最后一本会真正 POST /api/worldinfo/edit。这里用酒馆公开 context 的
+ * loadWorldInfo（命中刚写入的缓存）+ saveWorldInfo(..., immediately=true) 把这本立刻写进磁盘。
+ */
+async function persistNow(name) {
+  const ctx = globalThis.SillyTavern?.getContext?.();
+  if (typeof ctx?.loadWorldInfo !== 'function' || typeof ctx?.saveWorldInfo !== 'function') {
+    throw new Error('当前酒馆版本的 SillyTavern.getContext() 缺少 loadWorldInfo/saveWorldInfo，无法强制落盘');
+  }
+  const data = await ctx.loadWorldInfo(name);
+  if (!data) throw new Error(`loadWorldInfo('${name}') 返回空，落盘中止`);
+  await ctx.saveWorldInfo(name, data, true);
+}
+
+async function writeBook(book) {
+  // true=新建，false=覆盖同名（依据酒馆助手 createOrReplaceWorldbook 返回值语义）
+  const isNew = await createOrReplaceWorldbook(book.name, book.entries);
+  await persistNow(book.name);
+  return isNew;
+}
 
 async function syncWorldbooks() {
   const t0 = Date.now();
@@ -153,8 +197,7 @@ async function syncWorldbooks() {
   let failed = 0;
   for (const book of books) {
     try {
-      // true=新建，false=覆盖同名（依据酒馆助手 createOrReplaceWorldbook 返回值语义）
-      const isNew = await createOrReplaceWorldbook(book.name, book.entries);
+      const isNew = await writeBook(book);
       if (isNew) created++;
       else replaced++;
       console.log(`[世界书同步] ${isNew ? '新建' : '覆盖'} ${book.name}（${book.count} 条）`);
@@ -188,7 +231,7 @@ async function applyChanges(names, removed) {
   let failed = 0;
   for (const book of await fetchBooks(names)) {
     try {
-      await createOrReplaceWorldbook(book.name, book.entries);
+      await writeBook(book);
       wrote++;
       console.log(`[世界书同步] 实时更新 ${book.name}（${book.count} 条）`);
     } catch (e) {
@@ -208,6 +251,7 @@ async function applyChanges(names, removed) {
 
 let lastRevision = null;
 let esClient = null;
+let sseDrops = 0; // 累计断线次数，便于在控制台判断是否反复重连
 
 function watchEvents() {
   if (typeof EventSource !== 'function') {
@@ -221,8 +265,12 @@ function watchEvents() {
   const es = new EventSource(`${SYNC_BASE}/events`);
   esClient = es;
 
+  es.onopen = () => {
+    console.log(`[世界书同步] 事件流已连接（${SYNC_BASE}/events${sseDrops > 0 ? `，第 ${sseDrops} 次重连` : ''}）`);
+  };
   es.addEventListener('hello', (ev) => {
     const { revision } = JSON.parse(ev.data);
+    console.log(`[世界书同步] 服务端 hello：r${revision}（本地 ${lastRevision === null ? '首次' : `r${lastRevision}`}）`);
     if (lastRevision !== null && revision !== lastRevision) {
       // 断线重连或服务重启导致错过变更 → 全量对齐兜底
       console.log(`[世界书同步] 检测到错过变更（本地 r${lastRevision} → 服务端 r${revision}），自动全量对齐`);
@@ -239,8 +287,13 @@ function watchEvents() {
       enqueue('增量同步', () => applyChanges(names, removed ?? []));
     }
   });
-  es.onerror = () => console.warn(`[世界书同步] 事件流断开（目标: ${SYNC_BASE}），浏览器将自动重连`);
-  console.log(`[世界书同步] 已连接实时事件流（${SYNC_BASE}/events），等待 worldbooks/ 变更推送`);
+  es.onerror = () => {
+    sseDrops++;
+    // readyState 0=CONNECTING（浏览器正在自动重连） 2=CLOSED（不会再重连，需手动 watchEvents）
+    const state = es.readyState === 2 ? '已关闭，不再自动重连' : '浏览器将自动重连';
+    console.warn(`[世界书同步] 事件流断开 #${sseDrops}（目标: ${SYNC_BASE}），${state}`);
+  };
+  console.log(`[世界书同步] 正在连接实时事件流（${SYNC_BASE}/events），等待 worldbooks/ 变更推送`);
 }
 
 // ---------- 启动 ----------

@@ -32,6 +32,35 @@ import {
 } from '../engines/settleFloor';
 import type { TransactionItem } from '../engines/transactionEngine';
 
+/* ═══════════════ G3-04 实际双入口集成 ═══════════════ */
+
+describe('G3-04 · 正式与统一编排科研同源', () => {
+  it.each(['主基地', ''])('基地id与名称/无绑定(%s)共享同一物理供给', secondBase => {
+    const catalog = mkCatalog({
+      researches: [
+        { name: '高性能计算工学', line: '工业基础', tier: 1, workload: { days: 10, tflops: 20 } } as never,
+        { name: '基础步兵训练学', line: '人员', tier: 1, workload: { days: 10, tflops: 20 } } as never,
+      ],
+      buildings: [
+        { name: '矿石精炼厂', cost: 2000, power: 50 } as never,
+        { name: '兵营', cost: 500, power: 20 } as never,
+        { name: '科研计算节点', cost: 1000, power: 10, outputs: { virtual: { compute: { tflops: 10, tops: 0 } } } } as never,
+      ],
+    });
+    const state = mkStat({ bases: [{ id: 'B1', name: '主基地', power: { gen: 2000, use: 0 }, buildings: [
+      { name: '矿石精炼厂', state: '运转' }, { name: '兵营', state: '运转' }, { name: '科研计算节点', state: '运转' },
+    ] }], queues: [
+      mkTxn({ type: '研究', item: '高性能计算工学', base: 'B1', total_minutes: 10000, spent_minutes: 5000, progress: 50 }),
+      mkTxn({ type: '研究', item: '基础步兵训练学', base: secondBase, total_minutes: 10000, spent_minutes: 5000, progress: 50 }),
+    ] });
+    const settled = settleFloor(state, structuredClone(state), '<timePast>0 D 1 H 0 M</timePast>', { catalog });
+    const unified = orchestrateFloorTasks(state, 60, { catalog });
+    expect(settled.data.queues.map(q => q.spent_minutes)).toEqual([5070.5, 5070.5]);
+    expect(unified.tickResult.nextTasks.filter(t => t.domain === 'research').map(t => t.workload.spentMinutes)).toEqual([5070.5, 5070.5]);
+    expect(state.queues.map(q => q.spent_minutes)).toEqual([5000, 5000]);
+  });
+});
+
 /* ═══════════════ 工具 ═══════════════ */
 
 function mkTxn(partial: Partial<TransactionItem> & Pick<TransactionItem, 'type' | 'item'>): TransactionItem {

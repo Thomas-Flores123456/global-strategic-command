@@ -714,6 +714,13 @@ describe('UI-BUILD-GRID-01 · ConsoleBuildGrid 建造/生产双面板双铁律�
     expect(setupState.tabCount('生产')).toBe(0);
   });
 
+  it('2A. 机娘/基地建造权限不能绕过科技前置：UI 只接受 deriveBuildableWithContext 的解锁结果', () => {
+    const source = readFileSync(BUILD_GRID_SFC_PATH, 'utf8');
+    expect(source).toContain('if (derivedBuildingNames.has(b.name))');
+    expect(source).not.toContain('if (derivedBuildingNames.has(b.name) || authCheck.grantedByGirlSkill)');
+    expect(source).toContain('机娘特许不能绕过研究解锁');
+  });
+
   it('3. 当 bases[0].buildings 加入 { name: "盟军兵营", state: "运转" } 时，生产面板立即展示基础步兵，但未研发前置科技的高阶步兵不展示', async () => {
     setupStandardCatalogFixture();
 
@@ -801,10 +808,12 @@ describe('UI-BUILD-GRID-01 · ConsoleBuildGrid 建造/生产双面板双铁律�
       eta: '2h',
       prereqs: [],
       need_buildings: ['空军指挥部'],
+      // 研究前置建筑全基地口径；显式 requirements 按其自身 scope 评估，故这里写 global。
+      // （旧版写 current 仍能过，是因为 panelTechHelpers 把全基地建筑塞进选中基地的消费端补丁；该补丁已随源头修复删除）
       requirements: {
         kind: 'building' as const,
         name: '空军指挥部',
-        scope: 'current' as const,
+        scope: 'global' as const,
         state: 'existing' as const,
       },
     };

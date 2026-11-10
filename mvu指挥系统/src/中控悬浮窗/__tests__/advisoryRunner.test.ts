@@ -465,6 +465,59 @@ describe('FD-31 PKG-B · createStrategicFeedforwardRunner 战区全局态势与�
     ffRunner.stop();
   });
 
+  describe('本轮玩家意图来源（ST Generate 在 AFTER_COMMANDS 之后才 push 用户楼）', () => {
+    const intentFloors = () => [user(), ai(validStat)];
+    const injectedContent = (h: ReturnType<typeof harness>) =>
+      String((h.deps.injectPrompts as ReturnType<typeof vi.fn>).mock.calls[0][0][0].content);
+
+    it('normal 发送且末楼是助手楼 → 回退读 #send_textarea，意图按输入框文本判定', () => {
+      const h = harness(intentFloors(), {}, {
+        readHostSendInput: vi.fn(() => '立项研究航空工学基础并排产标枪套件'),
+      });
+      const ffRunner = createStrategicFeedforwardRunner(h.deps as any);
+      ffRunner.start();
+      h.emit(EVENTS.GENERATION_STARTED, 'normal', coreOptions(), false);
+      h.emit(EVENTS.GENERATION_AFTER_COMMANDS, 'normal', coreOptions(), false);
+
+      expect(h.deps.readHostSendInput).toHaveBeenCalledTimes(1);
+      expect(injectedContent(h)).toContain('本轮玩家意图：玩家本轮倾向「基建/排产/科研」');
+      ffRunner.stop();
+    });
+
+    it('末楼已是用户楼（ActionBar 先建楼路径）→ 读用户楼，不碰输入框', () => {
+      const h = harness(
+        [ai(validStat), { role: 'user', is_hidden: false, message: '带队侦察周边矿脉', data: {} } as any],
+        {},
+        { readHostSendInput: vi.fn(() => '输入框残留文本') },
+      );
+      const ffRunner = createStrategicFeedforwardRunner(h.deps as any);
+      ffRunner.start();
+      h.emit(EVENTS.GENERATION_STARTED, 'normal', coreOptions(), false);
+      h.emit(EVENTS.GENERATION_AFTER_COMMANDS, 'normal', coreOptions(), false);
+
+      expect(h.deps.readHostSendInput).not.toHaveBeenCalled();
+      expect(injectedContent(h)).toContain('玩家本轮倾向「环境踏勘/侦察」');
+      ffRunner.stop();
+    });
+
+    it('swipe / regenerate 不会发送输入框内容 → 不读输入框，不输出意图行', () => {
+      for (const type of ['swipe', 'regenerate']) {
+        const h = harness([user(), ai(validStat), ai(validStat)], {}, {
+          readHostSendInput: vi.fn(() => '输入框残留文本'),
+        });
+        const ffRunner = createStrategicFeedforwardRunner(h.deps as any);
+        ffRunner.start();
+        h.emit(EVENTS.GENERATION_STARTED, type, coreOptions(), false);
+        h.emit(EVENTS.GENERATION_AFTER_COMMANDS, type, coreOptions(), false);
+
+        expect(h.deps.readHostSendInput).not.toHaveBeenCalled();
+        expect(h.deps.injectPrompts).toHaveBeenCalledTimes(1);
+        expect(injectedContent(h)).not.toContain('本轮玩家意图');
+        ffRunner.stop();
+      }
+    });
+  });
+
   it('ModalSettings 挂载 PanelFeedforwardSettings（「参谋前馈」分组及 policy/preview 双子页）', () => {
     const dir = join(__dirname, '..');
     const modalSfc = readFileSync(join(dir, 'modals/ModalSettings.vue'), 'utf8');

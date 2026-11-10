@@ -159,6 +159,54 @@ describe('laneFor 四级判定（§2 Q2）', () => {
     expect(r.warn?.type).toBe('unknown_catalog_lane');
   });
 
+  it('第 2 级：建筑 lane 缺省时以目录 system=defense 三环工事回填防御线；「内核」非战斗组不回填', () => {
+    const laneOf = prodLaneIndexFromCatalog({
+      buildings: [
+        { name: '迫击炮巢', system: 'defense', system_group: '中圈·中程防空与反甲火力网' },
+        { name: '纳米诱饵设施', system: 'defense' }, // 无 system_group 也视为作战工事
+        { name: '磁暴线圈', system: 'defense', lane: 'lane.other_building' }, // 显式 lane 优先于 system
+        { name: '野战医疗站', system: 'defense', system_group: '内核·地下掩体/医疗后勤/C4ISR' },
+        { name: '强化地下掩蔽所', system: 'defense', system_group: '内核·地下掩体/医疗后勤/C4ISR' },
+        { name: '水培车间', system: 'agro' },
+      ],
+    });
+    const build = (item: string) => laneFor(txn({ type: '建造', item }) as ProdTxnView, laneOf);
+    expect(build('迫击炮巢')).toEqual({ laneId: 'lane.defense', matched: 'catalog' });
+    expect(build('纳米诱饵设施')).toEqual({ laneId: 'lane.defense', matched: 'catalog' });
+    expect(build('磁暴线圈')).toEqual({ laneId: 'lane.other_building', matched: 'catalog' });
+    // 内核组交第 3 级名字推导：医疗站→其他建筑线；「掩蔽」不命中正则也→其他建筑线（按名字选举）
+    expect(build('野战医疗站')).toEqual({ laneId: 'lane.other_building', matched: 'derived' });
+    expect(build('强化地下掩蔽所')).toEqual({ laneId: 'lane.other_building', matched: 'derived' });
+    // 非 defense 体系不回填
+    expect(build('水培车间')).toEqual({ laneId: 'lane.other_building', matched: 'derived' });
+  });
+
+  it('第 2 级：建筑 tags「主建筑」回填主建筑建造线（真机第 2026-11-09 反馈：空军指挥部/磁能反应炉误落其他线）', () => {
+    const laneOf = prodLaneIndexFromCatalog({
+      buildings: [
+        { name: '空军指挥部', system: 'military', system_group: '航空母港与空天线', tags: ['载具建造', '主建筑', '空军生产'] },
+        { name: '苏联磁能反应炉', system: 'industry', system_group: '发电与储能电网', tags: ['电力设施', '主建筑', '能源'] },
+        { name: '盟军建造厂', system: 'military', tags: ['主建筑'] },
+        // 内核组主建筑 tag 设施：B 口径保留其他建筑线（design 口径：defense 体系不进主线）
+        { name: '深层地下综合体', system: 'defense', system_group: '内核·地下掩体/医疗后勤/C4ISR', tags: ['主建筑'] },
+        // 主建筑 tag ＋ 三环作战工事：防御体系优先
+        { name: '区域防御要塞', system: 'defense', system_group: '中圈·中程防空与反甲火力网', tags: ['主建筑', '防御工事'] },
+        // 无主建筑 tag 的战略设施仍落其他建筑线
+        { name: '天基超级光棱炮', system: 'research_space', tags: ['战略超武', '天基建筑'] },
+        // 显式 lane 仍最高优先
+        { name: '作战实验室', system: 'research_space', lane: 'lane.other_building', tags: ['主建筑'] },
+      ],
+    });
+    const build = (item: string) => laneFor(txn({ type: '建造', item }) as ProdTxnView, laneOf);
+    expect(build('空军指挥部')).toEqual({ laneId: 'lane.main', matched: 'catalog' });
+    expect(build('苏联磁能反应炉')).toEqual({ laneId: 'lane.main', matched: 'catalog' });
+    expect(build('盟军建造厂')).toEqual({ laneId: 'lane.main', matched: 'catalog' });
+    expect(build('深层地下综合体')).toEqual({ laneId: 'lane.other_building', matched: 'derived' });
+    expect(build('区域防御要塞')).toEqual({ laneId: 'lane.defense', matched: 'catalog' });
+    expect(build('天基超级光棱炮')).toEqual({ laneId: 'lane.other_building', matched: 'derived' });
+    expect(build('作战实验室')).toEqual({ laneId: 'lane.other_building', matched: 'catalog' });
+  });
+
   it('第 3 级推导：建造按防御/MCV/其他三分', () => {
     expect(laneFor(txn({ type: '建造', item: '机枪碉堡' }) as ProdTxnView).laneId).toBe('lane.defense');
     expect(laneFor(txn({ type: '建造', item: '建造厂核心（副核心）' }) as ProdTxnView).laneId).toBe('lane.main');

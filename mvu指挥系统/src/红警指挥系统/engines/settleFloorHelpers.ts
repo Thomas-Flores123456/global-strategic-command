@@ -35,6 +35,7 @@ import {
 import { evaluateCommandHQModifiers } from './settleFloorPhases';
 import { resolveEffectiveBaseWeather } from './timezoneWeatherEngine';
 import type { TransactionItem } from './transactionEngine';
+import type { ResearchComputeContext } from './researchSharedCompute';
 import type { ComputeBudget, TwoStageEvent, TwoStageSpec } from './twoStageAssemblyEngine';
 
 export { checkAssetQueueCross, checkDeploymentVehicleCross };
@@ -444,6 +445,19 @@ export function deductNanitesStock(data: StatData, totalDeducted: number): StatD
         ...(data.economy.resources as NonNullable<StatData['economy']['resources']>),
         nanites: nextNanites as NonNullable<StatData['economy']['resources']>['nanites'],
       },
+    },
+  };
+}
+
+/** G3-04：每个基地仅记一次供给，id/名称引用经既有解析归一到同一物理基地。 */
+export function makeResearchComputeContext(catalog: EffectiveCatalog, data: StatData): ResearchComputeContext {
+  const bases = readBases(data);
+  const keys = new Map(bases.map((base, i) => [base, `base:${i}`]));
+  return {
+    byBase: new Map(bases.map(base => [keys.get(base)!, computeBudgetForBase(catalog, base, data)])),
+    baseKeyFor: reference => {
+      const base = baseOfIdOrName(data, reference);
+      return base ? keys.get(base) : undefined;
     },
   };
 }

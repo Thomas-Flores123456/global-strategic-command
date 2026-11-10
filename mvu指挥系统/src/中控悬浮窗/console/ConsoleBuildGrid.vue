@@ -939,7 +939,9 @@ const allItems = computed<ConsoleBuildItem[]>(() => {
       continue;
     }
     if (!conyardActive || !authCheck.allowed) continue;
-    if (derivedBuildingNames.has(b.name) || authCheck.grantedByGirlSkill) {
+    // 基地/机娘权限只决定“有资格建造”；科技、建筑、单位与协议前置仍必须由
+    // deriveBuildableWithContext 同时满足。机娘特许不能绕过研究解锁。
+    if (derivedBuildingNames.has(b.name)) {
       unlockedBuildingNames.add(b.name);
     }
   }

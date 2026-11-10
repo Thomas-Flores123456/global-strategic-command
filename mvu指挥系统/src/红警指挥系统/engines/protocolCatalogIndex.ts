@@ -821,7 +821,9 @@ export function mergeDefaultProtocolCatalog<
     item =>
       item &&
       typeof item.id === 'string' &&
-      (item.id.includes('.') || lookupProtocolCatalogEntry(defaultLookup, item.id || item.name) !== undefined),
+      (item.id.includes('.') ||
+        lookupProtocolCatalogEntry(defaultLookup, item.id) !== undefined ||
+        lookupProtocolCatalogEntry(defaultLookup, item.name) !== undefined),
   );
   if (!shouldMergeDefaults) {
     return fromCatalog;

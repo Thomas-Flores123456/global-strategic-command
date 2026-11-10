@@ -50,6 +50,8 @@ export interface RuntimeQueueLike {
   type: string;
   item: string;
   base: string;
+  /** 结算后的 done/cancelled 项会在队列里多留一楼供归档，不再占用槽位。 */
+  status?: string;
 }
 
 export interface RuntimeForcesLike {
@@ -282,7 +284,8 @@ export function buildCompletedTechAndProtocolSet(
 
 /**
  * 从 MVU 当前状态构造只读前置上下文。
- * 旧 need_buildings 的 scope 已由驾驶员冻结为 current；本函数只负责提供真实逐基地三态。
+ * 建筑/生产的 need_buildings scope 为 current（母体必须在本基地）；研究的 need_buildings scope 为 global（见 combineResearchPrerequisites）。
+ * 本函数只负责提供真实逐基地三态。
  */
 export function buildCatalogPrerequisiteContext(input: {
   bases: readonly RuntimeBaseLike[];
@@ -343,18 +346,23 @@ export function isQueueVisibleForBase(
   return resolved.status === 'resolved' && resolved.baseId === selectedBaseId;
 }
 
-/** 研究全局去重；建造/生产只与解析到当前 Base.id 的队列比较。 */
+/** 终态队列项（已完工/已取消）不再占用槽位，与 parse/engine 层同口径。 */
+export function isQueueOccupying(queue: RuntimeQueueLike): boolean {
+  return queue.status !== 'done' && queue.status !== 'cancelled';
+}
+
+/** 研究全局去重；建造/生产只与解析到当前 Base.id 的队列比较。终态项一律不计。 */
 export function queueItemsForAction(
   queues: readonly RuntimeQueueLike[],
   type: '研究' | '建造' | '生产',
   selectedBaseId: string,
   bases: readonly RuntimeBaseLike[],
 ): string[] {
+  const live = queues.filter(queue => queue.type === type && isQueueOccupying(queue));
   if (type === '研究') {
-    return queues.filter(queue => queue.type === type).map(queue => queue.item);
+    return live.map(queue => queue.item);
   }
-  return queues
-    .filter(queue => queue.type === type)
+  return live
     .filter(queue => isQueueVisibleForBase(queue, selectedBaseId, bases))
     .map(queue => queue.item);
 }

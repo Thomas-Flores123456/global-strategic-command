@@ -691,9 +691,16 @@ export function validateLegacyRequirementFields(fields: unknown, path = 'legacy'
   return diagnostics;
 }
 
+/**
+ * 把旧字段（research/prereqs/need_buildings/need_units/requirements）编译为统一前置表达式。
+ * @param buildingScope need_buildings 的基地范围：
+ *   - 'current'（默认）：建筑/生产条目——母体建筑必须在本基地（车厂在哪才能在哪造车）
+ *   - 'global'：研究条目——研究队列本就全局，前置建筑任一基地建成即可
+ */
 export function combineLegacyPrerequisites(
   fields: LegacyRequirementFields,
   buildingState: BuildingRequirementState,
+  buildingScope: PrerequisiteScope = 'current',
 ): unknown {
   if (validateLegacyRequirementFields(fields).length) {
     return { invalidLegacyRequirements: true };
@@ -739,7 +746,7 @@ export function combineLegacyPrerequisites(
     ...expandedNeedBuildings.map(name => ({
       kind: 'building' as const,
       name,
-      scope: 'current' as const,
+      scope: buildingScope,
       state: buildingState,
     })),
     ...(fields.need_units ?? []).map(name => ({
@@ -763,7 +770,7 @@ export function combineLegacyPrerequisites(
         conditions.push({
           kind: 'building',
           name: fields.requirements.building.trim(),
-          scope: 'current',
+          scope: buildingScope,
           state: buildingState,
         });
       }
@@ -772,6 +779,11 @@ export function combineLegacyPrerequisites(
     }
   }
   return { op: 'all', conditions };
+}
+
+/** 研究条目的前置编译：前置建筑全基地、建成即可（非运转）。所有研究可立项判定统一走这里。 */
+export function combineResearchPrerequisites(fields: LegacyRequirementFields): unknown {
+  return combineLegacyPrerequisites(fields, 'completed', 'global');
 }
 
 export {

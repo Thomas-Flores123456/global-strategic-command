@@ -106,7 +106,7 @@ export const FCV_STANDARD_WHITELIST_NAMES: ReadonlySet<string> = new Set([
   '野战物资库',
   '前线综合后勤站',
   '野战医疗站',
-  '深井泵站与水文净化设施',
+  '战勤炊事中心',
   '模块化战勤生活营区',
   '临时羁押与特种看押所',
   '环境监测站',
@@ -167,6 +167,8 @@ export const MAIN_BASE_EXCLUSIVE_BUILDING_NAMES: ReadonlySet<string> = new Set([
   '扩大版自动化战车工厂',
   '全自动军工综合体',
   '巨型联合兵工厂',
+  '国家总动员兵工城',
+  '苏维埃工业工厂',
   '空军指挥部',
   '盟军空军指挥部',
   '苏联空军指挥部',
@@ -246,6 +248,29 @@ export const MAIN_BASE_EXCLUSIVE_BUILDING_NAMES: ReadonlySet<string> = new Set([
   '环形磁流体飞碟整备与微波充能巢',
   '半潜消磁船坞与龟背重弹装填栈桥',
 ]);
+
+/**
+ * 主基地专属建筑的名称关键词启发式（兼容 DLC / 动态 codex 中未入精确集的同族建筑）。
+ * 与 MAIN_BASE_EXCLUSIVE_BUILDING_NAMES 共同构成「需正规建造厂核心」的单一判据。
+ */
+export const MAIN_BASE_EXCLUSIVE_NAME_PATTERN =
+  /建造厂|兵营|战车工厂|空军指挥|造船厂|船坞|战斗实验室|科学城|设计局|超算|发射场|发射港|超时空|天气控制|铁幕|核弹|心灵控制|基因突变|要塞巨炮|纳米合成工坊|弹药制造厂|装备制造所|兵工城|总动员/;
+
+/**
+ * 判定建筑是否属「主基地专属」（军工生产母体／科研中枢／战略超武／巨构）。
+ * 精确集优先（含阵营前缀剥离），未入集的同族建筑走名称关键词启发式。
+ * FCV 前沿工地与前哨节点均不得营建此类建筑（除非驻地机娘核心权能显式特许），
+ * 非此类主建筑则允许现地筑城——两侧共用本判据，避免白名单/产线各持一份口径。
+ */
+export function isMainBaseExclusiveBuildingName(rawName: string | undefined | null): boolean {
+  const raw = String(rawName ?? '').trim();
+  if (!raw) return false;
+  const stripped = stripFactionBuildingPrefix(raw);
+  if (MAIN_BASE_EXCLUSIVE_BUILDING_NAMES.has(raw) || MAIN_BASE_EXCLUSIVE_BUILDING_NAMES.has(stripped)) {
+    return true;
+  }
+  return MAIN_BASE_EXCLUSIVE_NAME_PATTERN.test(raw);
+}
 
 /** 判定载具名称是否为「前沿基地建设车（FCV）」 */
 export function isFcvVehicleName(name: string | undefined | null): boolean {
@@ -397,7 +422,7 @@ const FCV_SKILL_GRANT_RULES: ReadonlyArray<{
   {
     label: '营舍',
     probe: /营舍|生活营区|营房|宿舍|兵舍|人员休整|独立现地筑城|不占主基地队列/,
-    buildings: ['模块化战勤生活营区', '前线综合后勤站', '野战医疗站', '强化地下掩蔽所'],
+    buildings: ['模块化战勤生活营区', '前线综合后勤站', '野战医疗站', '战勤炊事中心', '强化地下掩蔽所'],
     keywords: ['营舍', '生活营区', '营房', '宿舍', '休整'],
   },
   {
@@ -593,8 +618,10 @@ export function parseFcvGirlEmpowerment(
   }
 
   // 若机娘属于 FCV 机体但当前快照尚未加载详细 special_skills 描述，回退赋予 FCV 母板标准六类现地筑城权能
-  if (grantedLabels.length === 0) {
+  // （仅凭 duty/status/traits 片语命中部分规则不能视为已加载完整权能清单）
+  if (grantedLabels.length === 0 || skills.length === 0) {
     for (const rule of FCV_SKILL_GRANT_RULES) {
+      if (grantedLabels.includes(rule.label)) continue;
       grantedLabels.push(rule.label);
       for (const b of rule.buildings) grantedBuildingNames.add(b);
       for (const kw of rule.keywords) grantedKeywords.add(kw);
@@ -977,7 +1004,7 @@ export function checkBuildingAllowedByAuthority(params: {
   }
 
   // 2. 若命中主基地专属黑名单（兵营/战车工厂/空指部/造船厂/实验室/超武等），严格拦截
-  if (MAIN_BASE_EXCLUSIVE_BUILDING_NAMES.has(rawName) || MAIN_BASE_EXCLUSIVE_BUILDING_NAMES.has(stripped)) {
+  if (isMainBaseExclusiveBuildingName(rawName)) {
     return {
       allowed: false,
       grantedByGirlSkill: false,
@@ -1005,14 +1032,7 @@ export function checkBuildingAllowedByAuthority(params: {
   const tags = building.tags ?? [];
   const probe = `${rawName} ${building.desc ?? ''} ${tags.join(' ')}`;
 
-  // 严禁高阶科研、航天发射、战略超武、军工总装母厂
-  if (/建造厂|兵营|战车工厂|空军指挥|造船厂|船坞|战斗实验室|科学城|设计局|超算|发射场|发射港|超时空|天气控制|铁幕|核弹|心灵控制|基因突变|要塞巨炮|纳米合成工坊|弹药制造厂|装备制造所/.test(rawName)) {
-    return {
-      allowed: false,
-      grantedByGirlSkill: false,
-      lockReason: '超出 FCV 现地筑城权限（需主基地建造厂核心）',
-    };
-  }
+  // 主基地专属建筑已在第 2 步统一拦截（精确集＋名称启发式同一判据）
 
   // 允许 T0/T1 基础电力、防御工事、物流仓储、公共民生与农畜水培设施
   if (tier <= 1) {

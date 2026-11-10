@@ -20,6 +20,7 @@
 
 import {
   combineLegacyPrerequisites,
+  combineResearchPrerequisites,
   evaluatePrerequisite,
   type PrerequisiteCondition,
   type PrerequisiteContext,
@@ -136,7 +137,7 @@ export const T1_RESEARCH_NAMES: readonly string[] = [
   '强化工事工学',
   '战场态势感知学',
   '战场医疗工学',
-  '情报分析工学',
+  '战地给养工学',
   '电子对抗工学',
   '地下掩蔽工学',
   '压制火炮工学',
@@ -355,7 +356,7 @@ export function deriveResearchableWithContext(
     item =>
       !context.techDone.has(item.name) &&
       !queued.includes(item.name) &&
-      evaluatePrerequisite(combineLegacyPrerequisites(item, 'completed'), context).satisfied,
+      evaluatePrerequisite(combineResearchPrerequisites(item), context).satisfied,
   );
 }
 
@@ -393,7 +394,7 @@ export function deriveResearchable(
       item.requirements === undefined &&
       !done.includes(item.name) &&
       !queued.includes(item.name) &&
-      evaluatePrerequisite(combineLegacyPrerequisites(item, 'completed'), context).satisfied,
+      evaluatePrerequisite(combineResearchPrerequisites(item), context).satisfied,
   );
 }
 

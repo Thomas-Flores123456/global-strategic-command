@@ -22,6 +22,7 @@ import {
   type GenerationEntry,
 } from '../parse/floorScanner';
 import { canon } from '../parse/parseCommon';
+import { flattenResearchUnlocks, resolveResearchUnlocks } from '../core/researchUnlocks';
 import { calcDailyNet } from '../engines/chainEngine';
 import { resolveBuildingRelativeCoord } from '../engines/buildingCoordEngine';
 import * as exposureMoraleMod from '../engines/exposureMoraleEngine';
@@ -1259,52 +1260,29 @@ function deriveUnlockedHighlightsForTech(
   rawTechKey: string,
   catalog?: EffectiveCatalog | null,
 ): string[] {
-  const highlights: string[] = [];
-  const seen = new Set<string>();
+  // 单一真源：反向扫描目录引用（core/researchUnlocks）；仅在零下游时回退作者手写 unlocks 文案
+  const derived = resolveResearchUnlocks([techDisplayName, rawTechKey], catalog);
+  if (derived.hasDownstream) return flattenResearchUnlocks(derived).slice(0, 4);
+
   const tCanon = canon(techDisplayName);
   const rawCanon = canon(rawTechKey);
-
-  const pushHighlight = (label: string) => {
-    const clean = String(label ?? '').trim();
-    if (!clean) return;
-    const k = canon(clean);
-    if (!k || k === tCanon || k === rawCanon || seen.has(k)) return;
-    seen.add(k);
-    highlights.push(clean);
-  };
-
   const resDef = (catalog?.researches ?? []).find(
     r =>
       canon(r.name) === tCanon ||
       canon(r.name) === rawCanon ||
       canon(String((r as { id?: string }).id ?? '')) === rawCanon,
   );
-  if (resDef?.unlocks) {
-    for (const part of resDef.unlocks.split(/[,，、/；;|｜+]+/)) {
-      pushHighlight(part);
-    }
+  const written = String(resDef?.unlocks ?? '').trim();
+  if (!written || /^无/.test(written)) return [];
+  const highlights: string[] = [];
+  const seen = new Set<string>();
+  for (const part of written.split(/[,，、/；;|｜+]+/)) {
+    const clean = part.trim();
+    const k = canon(clean);
+    if (!k || k === tCanon || k === rawCanon || seen.has(k)) continue;
+    seen.add(k);
+    highlights.push(clean);
   }
-
-  const matchesTech = (req: string) => {
-    const rc = canon(req);
-    return Boolean(rc && (rc === tCanon || rc === rawCanon));
-  };
-
-  for (const prod of catalog?.productions ?? []) {
-    if ((prod.prereqs ?? []).some(matchesTech)) pushHighlight(prod.name);
-  }
-  for (const bld of catalog?.buildings ?? []) {
-    if ((bld.prereqs ?? []).some(matchesTech) || (bld.research && matchesTech(bld.research))) {
-      pushHighlight(bld.name);
-    }
-  }
-  for (const nextRes of catalog?.researches ?? []) {
-    if ((nextRes.prereqs ?? []).some(matchesTech)) pushHighlight(nextRes.name);
-  }
-  for (const retro of catalog?.retrofits ?? []) {
-    if (retro.research && matchesTech(retro.research)) pushHighlight(retro.name);
-  }
-
   return highlights.slice(0, 4);
 }
 

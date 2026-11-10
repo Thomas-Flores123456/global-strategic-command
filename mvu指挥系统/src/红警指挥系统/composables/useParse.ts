@@ -377,6 +377,7 @@ export async function runParseFor(
       }
       const settled = settleFloor(baseline?.stat_data, stat_data, raw, {
         catalog,
+        hasExplicitMoraleInput: result.hasExplicitMoraleInput,
         extraDeltaMinutes: extraDeltaMinutes > 0 ? extraDeltaMinutes : undefined,
         // CTRL-DISPATCH-PARSE-01：解析出的本楼调度令直通结算（缺省/空数组时 settleFloor 不注入，行为零变化）
         orders: result.orders,

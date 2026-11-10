@@ -71,8 +71,11 @@ const TEST_LINES: Record<string, string> = {
   光学瞄准工学: '装备',
   基础水培农业: '农畜业',
   畜牧集成学: '农畜业',
-  基础环境工程学: '环保与公共设施',
+  生活污水处理工学: '环保与公共设施',
   废弃电子回收学: '环保与公共设施',
+  // 开槽入门科技归「通用」线在主建筑槽研（与装甲载具工学/个人装备工程学同约定），否则锚定建筑←科技←槽自锁
+  基础环境工程学: '通用',
+  封闭生态与副食工学: '通用',
   火箭推进基础工学: '航天工业',
   拟态全息工学: '盟军特色',
   磁暴线圈工学: '苏联特色',
@@ -227,12 +230,23 @@ describe('② 开通门：锚定建筑在场检测', () => {
   it('农畜业/环保先例槽的锚定建筑各自独立开通', () => {
     const agriOnly = stateWith(
       ['生态副食与水循环保障站'],
-      [txn({ item: '基础水培农业' }), txn({ item: '基础环境工程学' })],
+      [txn({ item: '基础水培农业' }), txn({ item: '生活污水处理工学' })],
     );
     const r = settleTransactions(agriOnly, 60, adjudicator(agriOnly));
     const byItem = Object.fromEntries(r.next.queues.map(q => [q.item, q.status]));
     expect(byItem['基础水培农业']).toBe('active'); // 农畜业槽已开通
-    expect(byItem['基础环境工程学']).toBe('queued'); // 环保槽无分拣站，冻结
+    expect(byItem['生活污水处理工学']).toBe('queued'); // 环保槽无分拣站，冻结
+  });
+
+  it('开槽入门科技（通用线）仅需主建筑槽：锚定建筑未建也能研，不自锁', () => {
+    const mainOnly = stateWith(
+      ['盟军建造厂'],
+      [txn({ item: '基础环境工程学' }), txn({ item: '生活污水处理工学' })],
+    );
+    const r = settleTransactions(mainOnly, 60, adjudicator(mainOnly));
+    const byItem = Object.fromEntries(r.next.queues.map(q => [q.item, q.status]));
+    expect(byItem['基础环境工程学']).toBe('active'); // 通用线→主建筑槽，建造厂在场即可
+    expect(byItem['生活污水处理工学']).toBe('queued'); // 环保线后续科技仍需分拣站开槽
   });
 
   it('非研究事务不受开通门影响（委托现行规则恒 1）', () => {
@@ -373,14 +387,14 @@ describe('③ 双层门：全局 tier 门 × 槽内恒 1', () => {
     const state = stateWith(ALL_ANCHORS, [
       txn({ item: '基础水培农业' }),
       txn({ item: '畜牧集成学' }), // 同农畜业槽
-      txn({ item: '基础环境工程学' }),
+      txn({ item: '生活污水处理工学' }),
       txn({ item: '废弃电子回收学' }), // 同环保槽
     ]);
     const r = settleTransactions(state, 60, adjudicator(state, { tier: 3 }));
     const byItem = Object.fromEntries(r.next.queues.map(q => [q.item, q.status]));
     expect(byItem['基础水培农业']).toBe('active');
     expect(byItem['畜牧集成学']).toBe('queued');
-    expect(byItem['基础环境工程学']).toBe('active');
+    expect(byItem['生活污水处理工学']).toBe('active');
     expect(byItem['废弃电子回收学']).toBe('queued');
   });
 
@@ -613,7 +627,7 @@ describe('⑦ 锚定名对齐：实况名「盟军建造厂」（不含「核心
       ['苏联兵营', 'slot.personnel', '军犬行为工程学'],
       ['个人装备制造所', 'slot.equipment', '光学瞄准工学'],
       ['水培站', 'slot.agri', '基础水培农业'],
-      ['基础废物分拣站', 'slot.eco', '基础环境工程学'],
+      ['基础废物分拣站', 'slot.eco', '生活污水处理工学'],
       ['航天发射中心', 'slot.aerospace', '火箭推进基础工学'],
       ['机娘接口设施', 'slot.mecha', '相变微流道散热工学'],
     ];

@@ -28,6 +28,10 @@ import {
   type UnmetPrerequisite,
 } from '../core/prerequisites';
 import {
+  evaluateBaseBuildAuthority,
+  checkBuildingAllowedByAuthority,
+} from '../core/buildAuthority';
+import {
   inferDefaultProductionMotherBuilding,
   ROOT_CONYARD_BUILDINGS,
   setHasEquivalentBuilding,
@@ -50,7 +54,8 @@ export type PlanningBlockedReasonCode =
   | 'lane_occupied'
   | 'facility_offline'
   | 'base_retired'
-  | 'base_not_found';
+  | 'base_not_found'
+  | 'already_present';
 
 export interface PlanningBlockedDetail {
   code: PlanningBlockedReasonCode;
@@ -129,6 +134,60 @@ export interface BuildPlanningContextOptions {
 
 function cleanText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function isLocalOnlyEntry(entry: unknown): boolean {
+  if (!entry || typeof entry !== 'object') return false;
+  const raw = entry as Record<string, unknown>;
+  return raw.local_only === true || raw.scope === 'current' || raw.scope === 'local';
+}
+
+function authorityAllowsBuilding(
+  state: StatData,
+  base: StatData['bases'][number],
+  entry: BuildingDef,
+): boolean {
+  const authority = evaluateBaseBuildAuthority({
+    base: {
+      ...(base as unknown as Parameters<typeof evaluateBaseBuildAuthority>[0]['base']),
+      forces: { vehicles: state.forces?.vehicles ?? [] },
+    },
+    snapshot: state as unknown as Parameters<typeof evaluateBaseBuildAuthority>[0]['snapshot'],
+  });
+  const raw = entry as unknown as Record<string, unknown>;
+  return checkBuildingAllowedByAuthority({
+    building: {
+      id: typeof raw.id === 'string' ? raw.id : undefined,
+      name: entry.name,
+      tier: typeof raw.tier === 'number' ? raw.tier : undefined,
+      cost: entry.cost,
+      power: entry.power,
+      desc: entry.desc,
+      tags: entry.tags,
+    },
+    authority,
+  }).allowed;
+}
+
+function addSharedRunningBuildings(
+  bases: RuntimeBaseLike[],
+  selectedBaseId: string,
+): RuntimeBaseLike[] {
+  const shared = new Set<string>();
+  for (const base of bases) {
+    for (const building of base.buildings) {
+      if (building.state === '运转' && cleanText(building.name)) shared.add(cleanText(building.name));
+    }
+  }
+  return bases.map(base => {
+    if (base.id !== selectedBaseId) return base;
+    const names = new Set(base.buildings.map(building => cleanText(building.name)));
+    const buildings = [...base.buildings];
+    for (const name of shared) {
+      if (!names.has(name)) buildings.push({ name, state: '运转' });
+    }
+    return { ...base, buildings };
+  });
 }
 
 interface ParsedUnmetBuckets {
@@ -670,7 +729,7 @@ export function buildPlanningContext(
   const bases = state.bases ?? [];
   if (bases.length === 0) return null;
 
-  const runtimeBases: RuntimeBaseLike[] = bases.map(b => {
+  const localRuntimeBases: RuntimeBaseLike[] = bases.map(b => {
     const bId = cleanText(b.id) || cleanText(b.name);
     const bName = cleanText(b.name) || bId;
     const bldList = (b.buildings ?? []).map(bld => ({
@@ -702,7 +761,7 @@ export function buildPlanningContext(
   // 1. 解析目标基地（未传 targetBaseRef 时默认取首个非 '废弃' 基地）
   let targetBase = bases[0];
   if (cleanText(options?.targetBaseRef)) {
-    const resolved = resolveBaseReference(runtimeBases, options!.targetBaseRef);
+      const resolved = resolveBaseReference(localRuntimeBases, options!.targetBaseRef);
     if (resolved.status !== 'resolved') {
       return null;
     }
@@ -722,11 +781,23 @@ export function buildPlanningContext(
   const baseId = cleanText(targetBase.id) || cleanText(targetBase.name);
   const baseName = cleanText(targetBase.name) || baseId;
   const baseState = cleanText(targetBase.status) || '隐蔽中';
+  const runtimeBases = addSharedRunningBuildings(localRuntimeBases, baseId);
 
   // 2. 复用同源纯函数构建前置上下文与完成科技/协议并集
   const protocolsInput = (state.protocols ?? undefined) as RuntimeProtocolsInput;
   const completedTechAndProtocols = buildCompletedTechAndProtocolSet(state.tech?.done ?? [], protocolsInput);
 
+  const localPrereqContext = buildCatalogPrerequisiteContext({
+    bases: localRuntimeBases,
+    selectedBaseId: baseId,
+    techDone: state.tech?.done ?? [],
+    forces: {
+      troops: state.forces?.troops ?? {},
+      vehicles: state.forces?.vehicles ?? [],
+    },
+    protocols: protocolsInput,
+    catalogResearches: catalog.researches,
+  });
   const prereqContext = buildCatalogPrerequisiteContext({
     bases: runtimeBases,
     selectedBaseId: baseId,
@@ -736,12 +807,20 @@ export function buildPlanningContext(
       vehicles: state.forces?.vehicles ?? [],
     },
     protocols: protocolsInput,
+    catalogResearches: catalog.researches,
   });
-  if (!prereqContext) return null;
+  if (!prereqContext || !localPrereqContext) return null;
 
   // 补充协议目录供 evaluatePrerequisite 双向解析协议 ID ↔ 名称
   const enrichedPrereqContext = {
     ...prereqContext,
+    protocols: catalog.protocols ?? [],
+    catalog: {
+      protocols: catalog.protocols ?? [],
+    },
+  };
+  const localEnrichedPrereqContext = {
+    ...localPrereqContext,
     protocols: catalog.protocols ?? [],
     catalog: {
       protocols: catalog.protocols ?? [],
@@ -779,7 +858,7 @@ export function buildPlanningContext(
 
   for (const q of state.queues ?? []) {
     if (q.status === 'done' || q.status === 'cancelled') continue;
-    if (q.type !== '研究' && !isQueueVisibleForBase(q, baseId, runtimeBases)) {
+    if (q.type !== '研究' && !isQueueVisibleForBase(q, baseId, localRuntimeBases)) {
       continue;
     }
     activeQueueSummary.push({
@@ -822,7 +901,7 @@ export function buildPlanningContext(
   const factionDefs = catalog.factionDefs ?? [];
   const unlockedFactions = resolveUnlockedFactions(state, catalog, completedTechAndProtocols);
   const codexNames = new Set((state.codex ?? []).map(c => cleanText(c.name)).filter(Boolean));
-  const baseBuildingState = prereqContext.bases.get(baseId);
+  const localBaseBuildingState = localPrereqContext.bases.get(baseId);
 
   const produceableItems: PlanningCandidateItem[] = [];
   const nearUnlockItems: PlanningCandidateItem[] = [];
@@ -897,6 +976,42 @@ export function buildPlanningContext(
       const laneKey = laneView?.laneKey ?? rawLaneKey;
       const laneName = laneView?.displayName ?? (kind === '建造' ? '其他建筑建造线' : '默认生产序列');
 
+      const isRootBuilding = kind === '建造' && ROOT_CONYARD_BUILDINGS.has(name);
+      if (
+        isRootBuilding &&
+        localBaseBuildingState &&
+        [...ROOT_CONYARD_BUILDINGS].some(root =>
+          setHasEquivalentBuilding(localBaseBuildingState.existing, root),
+        )
+      ) {
+        // 根建造核心幂等门：目标基地已有根核心（含在建/排队占位）时，不再作为可建候选，
+        // 仅留在 blockedCatalogItems 供沙盒点名时给出明确的 already_present 归因
+        blockedCatalogItems.push({
+          id,
+          name,
+          kind,
+          category: '基地建筑',
+          unitCost: typeof entry.cost === 'number' && Number.isFinite(entry.cost) ? entry.cost : 0,
+          unitMinutes: 0,
+          laneKey,
+          laneName,
+          canProduceNow: false,
+          blocked: {
+            code: 'already_present',
+            reason: `${baseName}已具备建造核心，无需重复建设「${name}」`,
+            impact: '排产已跳过重复的根建造核心立项',
+            nextStep: '请直接排产该基地的具体建筑或单位',
+            missingItems: [],
+          },
+        });
+        continue;
+      }
+      const authorityBuildAllowed =
+        kind === '建造' && authorityAllowsBuilding(state, targetBase, entry as BuildingDef);
+      if (kind === '建造' && !authorityBuildAllowed) {
+        continue;
+      }
+
       const hasExplicitNeedBuildings =
         (Array.isArray(entry.need_buildings) && entry.need_buildings.some(b => cleanText(b).length > 0)) ||
         cleanText((entry as { need_building?: unknown }).need_building).length > 0;
@@ -915,24 +1030,34 @@ export function buildPlanningContext(
             : entry;
 
       const combinedCondition = combineLegacyPrerequisites(normalizedEntryForPrereq, buildingReqState);
-      const prereqEval = evaluatePrerequisite(combinedCondition, enrichedPrereqContext);
+      const prereqEval = evaluatePrerequisite(
+        combinedCondition,
+        isLocalOnlyEntry(entry) ? localEnrichedPrereqContext : enrichedPrereqContext,
+      );
 
       const faction = inferItemFaction(entry, factionDefs);
       const tier = inferItemTier(entry, catalog);
       const category = inferItemCategory(kind, laneName, entry);
       const activeInLaneCount = activeInLaneCounts.get(laneKey) ?? 0;
 
-      if (prereqEval.satisfied && !laneView?.locked) {
+      const laneLockedByMissingConyard =
+        Boolean(laneView?.locked) && /建造厂|MCV/.test(cleanText(laneView?.lockedReason));
+      const effectiveLaneView =
+        authorityBuildAllowed && laneLockedByMissingConyard
+          ? { ...laneView!, locked: false, lockedReason: undefined }
+          : laneView;
+
+      if (prereqEval.satisfied && !effectiveLaneView?.locked) {
         const blocker = classifyPlanningBlocker({
           itemName: name,
           kind,
           baseName,
           baseState,
           prerequisiteEval: prereqEval,
-          lane: laneView,
+          lane: effectiveLaneView,
           activeInLaneCount,
-          completedBuildings: baseBuildingState?.completed,
-          runningBuildings: baseBuildingState?.running,
+          completedBuildings: localBaseBuildingState?.completed,
+          runningBuildings: localBaseBuildingState?.running,
           unitCost,
           credits,
         });
@@ -980,10 +1105,10 @@ export function buildPlanningContext(
         baseName,
         baseState,
         prerequisiteEval: prereqEval,
-        lane: laneView,
+        lane: effectiveLaneView,
         activeInLaneCount,
-        completedBuildings: baseBuildingState?.completed,
-        runningBuildings: baseBuildingState?.running,
+        completedBuildings: localBaseBuildingState?.completed,
+        runningBuildings: localBaseBuildingState?.running,
         unitCost,
         credits,
       });
@@ -1007,7 +1132,7 @@ export function buildPlanningContext(
 
         const missingCount = blocker.missingItems.length;
         const isNearUnlock =
-          (prereqEval.satisfied && Boolean(laneView?.locked)) ||
+            (prereqEval.satisfied && Boolean(effectiveLaneView?.locked)) ||
           (missingCount >= 1 && missingCount <= 2);
 
         if (isNearUnlock) {

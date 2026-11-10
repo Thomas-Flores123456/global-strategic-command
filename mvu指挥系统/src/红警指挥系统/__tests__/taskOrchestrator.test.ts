@@ -30,6 +30,20 @@ import {
   type UnifiedTask,
 } from '../engines/taskOrchestrator';
 
+describe('G3-04 · 共享研究完成批次回写', () => {
+  it.each(['before_integration', 'after_integration'] as const)('%s保留单件完成数，不将UTO已完成批次写回0', promotionTiming => {
+    const task = makeTask({ domain: 'research', name: '研究完成', laneKey: 'research:test', status: 'active',
+      workload: { totalMinutes: 10, spentMinutes: 0 }, batch: { totalQty: 1, completedQty: 0 } });
+    const r = tickTaskOrchestration([task], [makeLane({ domain: 'research', laneKey: 'research:test' })], {
+      deltaMinutes: 20, promotionTiming,
+      researchCompute: { byBase: new Map(), baseKeyFor: () => undefined },
+    });
+    expect(r.nextTasks[0].status).toBe('settling');
+    expect(r.nextTasks[0].batch?.completedQty).toBe(1);
+    expect(task.batch?.completedQty).toBe(0);
+  });
+});
+
 /* ═══════════════ 测试工具 ═══════════════ */
 
 /** 深冻结（含嵌套对象/数组；函数跳过），用于入参不可变性断言 */

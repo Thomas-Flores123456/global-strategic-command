@@ -20,9 +20,8 @@ import {
   isDebugUnlockAllFactionsActive,
 } from '../../composables/useDebugMode';
 import {
-  combineLegacyPrerequisites,
+  combineResearchPrerequisites,
   evaluatePrerequisite,
-  type PrerequisiteBaseState,
   type PrerequisiteContext,
   type PrerequisiteProtocolSource,
   type UnmetPrerequisite,
@@ -147,15 +146,6 @@ export function extractMissingPrereqsFromUnmet(
   return chips;
 }
 
-function expandWithStrippedFactionName(targetSet: Set<string>, rawName: string): void {
-  const trimmed = rawName.trim();
-  if (!trimmed) return;
-  targetSet.add(trimmed);
-  const m = /^(?:盟军|苏联|苏军|苏维埃|尤里)(.+)$/.exec(trimmed);
-  const stripped = m?.[1]?.trim();
-  if (stripped && stripped.length >= 2) targetSet.add(stripped);
-}
-
 export function evaluateTechCardPrerequisites(
   researchDef: Partial<ResearchDef> | undefined,
   stateInput: {
@@ -185,35 +175,6 @@ export function evaluateTechCardPrerequisites(
       })
     : null;
 
-  if (baseCtx && normalizedBases.length > 0) {
-    const mergedExisting = new Set<string>();
-    const mergedCompleted = new Set<string>();
-    const mergedRunning = new Set<string>();
-    for (const st of baseCtx.bases.values()) {
-      for (const name of st.existing) expandWithStrippedFactionName(mergedExisting, name);
-      for (const name of st.completed) expandWithStrippedFactionName(mergedCompleted, name);
-      for (const name of st.running) expandWithStrippedFactionName(mergedRunning, name);
-    }
-    for (const b of normalizedBases) {
-      for (const bld of b.buildings ?? []) {
-        const bName = bld?.name?.trim();
-        if (!bName) continue;
-        expandWithStrippedFactionName(mergedExisting, bName);
-        if (bld.state !== '建造中' && bld.state !== '损毁' && bld.state !== '被毁') {
-          expandWithStrippedFactionName(mergedCompleted, bName);
-        }
-        if (bld.state === '运转') {
-          expandWithStrippedFactionName(mergedRunning, bName);
-        }
-      }
-    }
-    (baseCtx.bases as Map<string, PrerequisiteBaseState>).set(baseCtx.selectedBaseId, {
-      existing: mergedExisting,
-      completed: mergedCompleted,
-      running: mergedRunning,
-    });
-  }
-
   const ctx: PrerequisiteContext = baseCtx
     ? { ...baseCtx, protocols: catalogProtocols }
     : {
@@ -227,7 +188,7 @@ export function evaluateTechCardPrerequisites(
 
   const normalizedDef = researchDef.requirements ? { ...researchDef, need_buildings: [] } : researchDef;
 
-  const evalResult = evaluatePrerequisite(combineLegacyPrerequisites(normalizedDef, 'completed'), ctx);
+  const evalResult = evaluatePrerequisite(combineResearchPrerequisites(normalizedDef), ctx);
   if (evalResult.satisfied) {
     return { prereqMet: true, missingPrereqs: [] };
   }

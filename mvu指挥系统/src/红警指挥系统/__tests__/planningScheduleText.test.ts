@@ -224,3 +224,155 @@ describe('PLN-SCHED-01 · <当前工程日程> 参谋排产回执前馈渲染', 
     expect(staleText).toContain('· 核验说明：基地队列已在第 8 楼发生变更');
   });
 });
+
+describe('CTRL-RECEIPT-RECONCILE-01 · 回执实时对账（产线同源 + 实况标签）', () => {
+  const laneOpts = {
+    laneKeyFor: (item: TransactionItem) => `${item.base} lane.${item.type === '建造' ? 'main' : 'train'}`,
+    laneNameFor: (key: string) => (key.endsWith('lane.main') ? '主建筑建造线' : '人员训练线'),
+  };
+
+  function committedReceipt(): ReturnType<typeof PlanningReceipt.parse> {
+    return PlanningReceipt.parse({
+      request_ref: 'req_02',
+      fingerprint: 'fp_02',
+      mode: 'delegate_once',
+      status: 'committed',
+      base_ref: 'b1',
+      total_cost_credits: 4200,
+      summary: '单次托管排产已核准入列（共 3 项，耗资 4200）',
+      actions: [
+        {
+          op: 'enqueue',
+          target: '空军指挥部',
+          base: 'b1',
+          quantity: 1,
+          cost_credits: 1500,
+          est_minutes: 7200,
+          status: 'accepted',
+          eta_note: '预计耗时 7200 分钟（产线：其他建筑线）',
+        },
+        {
+          op: 'enqueue',
+          target: '战术通信兵',
+          base: 'b1',
+          quantity: 1,
+          cost_credits: 400,
+          est_minutes: 2160,
+          status: 'accepted',
+          eta_note: '预计耗时 2160 分钟（产线：人员训练线）',
+        },
+        {
+          op: 'enqueue',
+          target: '炊事兵',
+          base: 'b1',
+          quantity: 6,
+          cost_credits: 1500,
+          est_minutes: 8640,
+          status: 'accepted',
+          eta_note: '预计耗时 8640 分钟（产线：人员训练线）',
+        },
+      ],
+    });
+  }
+
+  const ledger = {
+    queues: [
+      { type: '建造', item: '空军指挥部', base: 'b1', status: 'queued' },
+      { type: '生产', item: '炊事兵', base: 'b1', status: 'active' },
+    ],
+    buildingNames: ['建造厂核心'],
+    troopNames: ['战术通信兵'],
+    vehicleNames: [],
+  };
+
+  it('历史 eta_note 里冻结的旧产线名被剥除，改用注入时现算的产线名', () => {
+    const text = buildScheduleText([txn()], {
+      bases: BASES,
+      clock: { day: 202, time: '15:45' },
+      planningReceipt: committedReceipt(),
+      receiptLedger: ledger,
+      ...laneOpts,
+    });
+
+    expect(text).toContain('（产线：主建筑建造线）');
+    expect(text).not.toContain('其他建筑线');
+  });
+
+  it('算不出归类时不出产线括号（宁缺不错标）', () => {
+    const text = buildScheduleText([txn()], {
+      bases: BASES,
+      planningReceipt: committedReceipt(),
+    });
+
+    expect(text).not.toContain('产线：');
+    expect(text).toContain('预计耗时 7200 分钟）');
+  });
+
+  it('逐项对账：候列/在编/已完工入列三态各自打标，方案状态改为部分已完工口径', () => {
+    const text = buildScheduleText([txn()], {
+      bases: BASES,
+      planningReceipt: committedReceipt(),
+      receiptLedger: ledger,
+      ...laneOpts,
+    });
+
+    expect(text).toContain('实况：候列待建');
+    expect(text).toContain('实况：在编推进中');
+    expect(text).toContain('实况：已完工入列');
+    expect(text).toContain(SCHEDULE_COPY.planningStatusCommittedPartlyDone(1, 3));
+    expect(text).not.toContain('已入队待产，尚未完工入列');
+  });
+
+  it('全部已完工入列时改「已全部完工入列」；全部仍在编时改「均仍在编或候列」', () => {
+    const doneText = buildScheduleText([txn()], {
+      bases: BASES,
+      planningReceipt: committedReceipt(),
+      receiptLedger: { queues: [], buildingNames: ['空军指挥部'], troopNames: ['战术通信兵', '炊事兵'] },
+      ...laneOpts,
+    });
+    expect(doneText).toContain(SCHEDULE_COPY.planningStatusCommittedAllDone);
+    expect(doneText.match(/实况：已完工入列/g)?.length).toBe(3);
+
+    const activeText = buildScheduleText([txn()], {
+      bases: BASES,
+      planningReceipt: committedReceipt(),
+      receiptLedger: ledger,
+      ...laneOpts,
+    });
+    expect(activeText).toContain(SCHEDULE_COPY.planningStatusCommittedPartlyDone(1, 3));
+
+    const allActiveText = buildScheduleText([txn()], {
+      bases: BASES,
+      planningReceipt: committedReceipt(),
+      receiptLedger: {
+        queues: [
+          { type: '建造', item: '空军指挥部', base: 'b1', status: 'active' },
+          { type: '生产', item: '战术通信兵', base: 'b1', status: 'queued' },
+          { type: '生产', item: '炊事兵', base: 'b1', status: 'active' },
+        ],
+      },
+      ...laneOpts,
+    });
+    expect(allActiveText).toContain(SCHEDULE_COPY.planningStatusCommittedAllActive);
+  });
+
+  it('既不在队列也不在役：标「未见在编」，不谎称已完工', () => {
+    const text = buildScheduleText([txn()], {
+      bases: BASES,
+      planningReceipt: committedReceipt(),
+      receiptLedger: { queues: [], buildingNames: [], troopNames: [], vehicleNames: [] },
+      ...laneOpts,
+    });
+    expect(text.match(/实况：未见在编/g)?.length).toBe(3);
+    expect(text).not.toContain('实况：已完工入列');
+  });
+
+  it('未提供 receiptLedger 时回执措辞与旧版逐字节一致（向后兼容）', () => {
+    const withoutLedger = buildScheduleText([txn()], {
+      bases: BASES,
+      planningReceipt: committedReceipt(),
+    });
+    expect(withoutLedger).toContain('已入队待产，尚未完工入列');
+    expect(withoutLedger).not.toContain('实况：');
+  });
+});

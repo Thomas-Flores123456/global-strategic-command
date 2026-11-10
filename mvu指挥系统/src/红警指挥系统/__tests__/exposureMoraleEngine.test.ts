@@ -11,6 +11,7 @@ import {
   resolveMoraleStage,
   settleExposureAndMorale,
 } from '../engines/exposureMoraleEngine';
+import { settleFloor } from '../engines/settleFloor';
 import { parseMessageText } from '../parse/parsePipeline';
 import { deriveStrategicFeedforward, formatStrategicFeedforwardPrompt } from '../planning/strategicFeedforward';
 
@@ -247,6 +248,45 @@ describe('FD-36 PKG-A: 暴露度双驱更新引擎 (EL-0~EL-4 / 常驻底线 / �
       deltaMinutes: 2880,
     });
     expect(settledOutage.morale.value).toBe(7.4);
+  });
+});
+
+describe('G8-15 显式民心输入与设施结算门禁', () => {
+  const civicState = (outage = false, morale = 7.5) => Schema.parse({
+    morale: { value: morale, engaged: true },
+    bases: [{
+      id: '民生基地', name: '民生基地', status: '警戒',
+      power: { gen: outage ? 50 : 200, use: 100 },
+      buildings: [{ name: '净水与供水站', state: '运转' }],
+    }],
+  });
+  const settleParsed = (prev: ReturnType<typeof civicState>, fields: string) => {
+    const raw = `<态势>\n${fields}\n</态势>\n<timePast>30 D 0 H 0 M</timePast>`;
+    const parsed = parseMessageText(raw, prev);
+    return { parsed, settled: settleFloor(prev, parsed.data, raw, {
+      catalog: null, hasExplicitMoraleInput: parsed.hasExplicitMoraleInput,
+    }) };
+  };
+
+  it('零增量、同值和边界钳制不变仍是显式输入，跳过滋养及断供反噬', () => {
+    for (const [fields, outage, morale] of [
+      ['民心变化: 0', false, 7.5], ['民心: 7.5', false, 7.5],
+      ['民心变化: 0', true, 7.5], ['民心变化: -1', true, 0],
+      ['民心变化: 0\n</态势>\n<态势>\n民心趋势: 平稳', false, 7.5],
+    ] as const) {
+      const { parsed, settled } = settleParsed(civicState(outage, morale), fields);
+      expect(settled.data.morale.value, fields).toBe(morale);
+      expect(parsed.hasExplicitMoraleInput, fields).toBe(true);
+    }
+  });
+
+  it('无有效全局数值输入时照常滋养或反噬，局部民心和说明不拦截', () => {
+    for (const fields of ['', '民心趋势: 平稳\n民心事件: 日常', '基地:\n  - 名称: 民生基地\n    民心: 7.8', '民心: 无变化', '民心: "Infinity"', '民心变化: "Infinity"']) {
+      const { parsed, settled } = settleParsed(civicState(), fields);
+      expect(settled.data.morale.value, fields).toBe(7.65);
+      expect(parsed.hasExplicitMoraleInput, fields).not.toBe(true);
+    }
+    expect(settleParsed(civicState(true), '').settled.data.morale.value).toBe(6);
   });
 });
 

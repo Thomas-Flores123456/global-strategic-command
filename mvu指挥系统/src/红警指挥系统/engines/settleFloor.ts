@@ -83,6 +83,7 @@ import {
   evalBaseBuildings,
   eventToIssue,
   eventToParseEvent,
+  makeResearchComputeContext,
   makeTxnEffFor,
   pruneCompletedQueuesFromPrevFloor,
   readBases,
@@ -165,6 +166,8 @@ export {
 /* ═══════════════ 主入口 ═══════════════ */
 
 export interface SettleFloorOptions {
+  /** G8-15：解析层已接受全局民心数值输入时，跳过本楼设施滋养/断供反噬；缺省表示无显式输入。 */
+  hasExplicitMoraleInput?: boolean;
   /**
    * 有效目录快照（调用方在解析时读 useCatalog 模块级缓存；null/缺席 = 读不到，
    * 整体退引擎默认值：eff 恒 1、lane=base+type、并行 1、全局∞、无装配/工期回填）。
@@ -445,6 +448,7 @@ export function settleFloor(
     // §4.2 加速系数接入积分链：实际推进分钟×系数 ⇒ 实际生产时间＝基础÷系数；
     // twoStageAssemblyEngine 分装减免经 makeTwoStageEffFor 在本 effFor 之上乘法叠加（最终＝基础÷系数×(1−减免)）
     settleOptions.effFor = txn => txnEffFor(txn) * laneHub.resolveAccelEffForTxn(txn, laneEnv);
+    settleOptions.researchCompute = makeResearchComputeContext(catalog, nextData);
     settleOptions.computeFor = txn =>
       txn.base
         ? computeBudgetForBase(catalog, baseOfTxn(nextData, txn), nextData)
@@ -1012,13 +1016,8 @@ export function settleFloor(
 
   // FD-55 · 在役民生与环保公共设施确定性滋养与断供反噬（Δt > 0 且本楼未显式变动民心时按日折算）
   if (deltaMinutes > 0 && isMoraleEngaged(projSynced.next.morale, projSynced.next.exposure?.value ?? 0)) {
-    const prevMoraleVal = (prevData as Partial<StatData> | undefined)?.morale?.value;
     const curMoraleVal = projSynced.next.morale?.value;
-    const moraleExplicitlyChanged =
-      typeof prevMoraleVal === 'number' &&
-      typeof curMoraleVal === 'number' &&
-      Math.abs(curMoraleVal - prevMoraleVal) > 1e-6;
-    if (!moraleExplicitlyChanged) {
+    if (!options.hasExplicitMoraleInput) {
       const civicEval = evaluateCivicFacilities(readBases(projSynced.next), {
         moraleEngaged: true,
         moraleValue: curMoraleVal ?? 5.0,
@@ -1541,6 +1540,7 @@ export function orchestrateFloorTasks(
       const evals = evalBaseBuildings(catalog, base, data);
       return evals.length > 0 ? Math.min(...evals.map(e => e.efficiency)) : 1;
     },
+    researchCompute: catalog ? makeResearchComputeContext(catalog, data) : undefined,
     computeFor: catalog
       ? task =>
           task.leadBaseId
@@ -1580,7 +1580,8 @@ export function orchestrateFloorTasks(
 }
 
 /**
- * 与 settleFloor 主推进循环 100% 语义等价的 UTO 步进包装函数（UTO-MAIN-01）：
+ * 与 settleFloor 采用相同尾部升格时点的 UTO 包装函数（UTO-MAIN-01）。
+ * 注入 researchCompute 时研究使用共同事件核心；非研究历史调度差异不在此函数消除。
  * 默认采用 `promotionTiming: 'after_integration'`（先对存量 active 积分推进并转 settling，
  * 再执行带宽回检与 queued → active 升格，新升格任务不双吃同楼层 Δt）与 `evictEventType: 'demoted'`。
  */

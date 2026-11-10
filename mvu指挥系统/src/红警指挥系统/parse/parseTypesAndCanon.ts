@@ -82,6 +82,8 @@ export interface OperationCompletion {
 export interface ParseResult {
   data: StatData; // Schema.parse 归一后、可直接落盘的完整状态
   applied: boolean; // 是否有任何增量成功应用
+  /** G8-15：本楼已接受全局民心数值输入（含 0/同值），仅供结算门禁，不落存档。 */
+  hasExplicitMoraleInput?: boolean;
   events: ParseEvent[]; // 🟢🟡 修复留痕
   issues: CheckIssue[]; // R17(语法修复) / R18(归一化)
   quarantine: QuarantineItem[]; // 🔴 未入库
@@ -110,6 +112,8 @@ export interface Ctx {
   issues: CheckIssue[];
   quarantine: QuarantineItem[];
   appliedCount: number;
+  /** G8-15：跨块累计已接受的全局民心数值输入。 */
+  hasExplicitMoraleInput?: boolean;
   /** F2-乙：操作.完成 收讫声明收集槽（不动账本，移交三色门） */
   operationCompletions: OperationCompletion[];
   /** CTRL-DISPATCH-PARSE-01：调度令收集槽（解析层只构造、不执行，执行归引擎调度接口） */

@@ -33,6 +33,7 @@
 import {
   isFcvSiteBuildingName,
   isFcvVehicleName,
+  isMainBaseExclusiveBuildingName,
   isOutpostNodeBuildingName,
   isOutpostNodeVehicleName,
 } from '../core/buildAuthority';
@@ -243,7 +244,7 @@ const PRODUCTION_DERIVE_TABLE: ReadonlyArray<readonly [RegExp, LaneId]> = [
   [/舰|艇|潜艇|航母|驱逐舰|巡洋舰|船/, 'lane.vehicle_naval'],
   [/战机|直升机|无人机|侦察机|轰炸机|运输机|飞行器/, 'lane.vehicle_air'],
   [/坦克|装甲车|机甲|战车|履带车|履带底盘|卡车|吉普|摩托|自行火炮|机动平台/, 'lane.vehicle_land'],
-  [/步兵|大兵|工程兵|间谍|狙击|军犬|士兵|军官|机娘|突击队|医疗队|兵种/, 'lane.personnel'],
+  [/步兵|大兵|工程兵|炊事兵|间谍|狙击|军犬|士兵|军官|机娘|突击队|医疗队|兵种/, 'lane.personnel'],
   [/装备|武器|枪械|弹药|瞄准|外骨骼|军服|护具|防具/, 'lane.equipment'],
 ];
 
@@ -333,15 +334,42 @@ function stripMassProdSuffixForLane(name: string): string {
   return name.replace(/\s*[（(](?:量产体|量产型步兵)[）)]\s*$/u, '').trim();
 }
 
+/** 防御体系中的非战斗分环（地下掩体/医疗后勤/C4ISR）：不进防御辅助建造线 */
+const DEFENSE_NON_COMBAT_GROUP_PATTERN = /^内核/;
+
+/** 目录建筑是否属于防御体系的作战工事分环（外圈/中圈/内圈） */
+function isDefenseRingBuilding(e: { system?: string; system_group?: string }): boolean {
+  if (e.system !== 'defense') return false;
+  const group = typeof e.system_group === 'string' ? e.system_group.trim() : '';
+  return !DEFENSE_NON_COMBAT_GROUP_PATTERN.test(group);
+}
+
+/** 世界书建筑条目自带的「主建筑」tag（作者标注的主建筑类；147 条建筑中 88 条带此标） */
+const MAIN_BUILDING_TAG = '主建筑';
+
+/**
+ * 目录建筑是否属主建筑类（Q2 第 2 级回填）：以世界书条目的 tags 为准，而非名字关键词。
+ * 世界书建筑条目一律不填 lane 字段（实况 147/147 空），若只靠名字推导，只有「建造厂核心/MCV」
+ * 能命中，发电厂/兵营/战斗实验室/空军指挥部/磁能反应炉等全部误落其他建筑线（真机反馈 2026-11-09）。
+ * defense 体系（含内核组）不在此列：防御环走 lane.defense，内核组非战斗设施留在其他建筑线。
+ */
+function isMainBuildingTagged(e: { system?: string; tags?: readonly string[] }): boolean {
+  if (e.system === 'defense') return false;
+  return Array.isArray(e.tags) && e.tags.some(t => typeof t === 'string' && t.trim() === MAIN_BUILDING_TAG);
+}
+
 /**
  * 从 catalog 形状构建 laneOf 查找（Q2 第 2 级）：
  * 1. 优先读取显式 lane 字段（若填写为锚定建筑名如「兵营」/「战车工厂」则自动归一为对应 laneId，非法值原样返回以触发 warn）；
+ *    建筑条目未填显式 lane 时，以目录 system/system_group/tags（FD-18 五大体系＋世界书标注）回填：
+ *    defense 体系外/中/内三环作战工事 → lane.defense；tags 含「主建筑」（且非 defense 体系）→ lane.main；
+ *    「内核」组非战斗设施与其余体系交第 3 级推导；
  * 2. 生产条目未填显式 lane 时，按其 need_building / need_buildings 锚定的生产建筑同源反推所属产线
  *    （兵营→lane.personnel、战车工厂→lane.vehicle_land、空军指挥部→lane.vehicle_air、造船厂→lane.vehicle_naval、工坊→lane.equipment），
  *    并同步索引 aliases 与去量产后缀名（BUG-LIVE-27）。
  */
 export function prodLaneIndexFromCatalog(pools: {
-  buildings?: ReadonlyArray<{ name: string; lane?: string }>;
+  buildings?: ReadonlyArray<{ name: string; lane?: string; system?: string; system_group?: string; tags?: readonly string[] }>;
   productions?: ReadonlyArray<{
     name: string;
     aliases?: readonly string[];
@@ -352,7 +380,15 @@ export function prodLaneIndexFromCatalog(pools: {
   retrofits?: ReadonlyArray<{ name: string; lane?: string }>;
 }): LaneOf {
   const index = new Map<string, string>();
-  for (const e of pools.buildings ?? []) if (e.lane) index.set(`建造 ${e.name}`, e.lane);
+  for (const e of pools.buildings ?? []) {
+    // 显式 lane 优先；缺省时以目录 system/system_group/tags 回填：
+    // defense 体系外/中/内三环作战工事 → lane.defense；tags「主建筑」且非 defense 体系 → lane.main；
+    // 「内核」组（地下掩体/医疗后勤/C4ISR）与其余体系交第 3 级名字推导
+    const lane =
+      e.lane ??
+      (isDefenseRingBuilding(e) ? 'lane.defense' : isMainBuildingTagged(e) ? 'lane.main' : undefined);
+    if (lane) index.set(`建造 ${e.name}`, lane);
+  }
   for (const e of pools.productions ?? []) {
     let resolvedLane: string | undefined;
     const explicitLane = typeof e.lane === 'string' ? e.lane.trim() : '';
@@ -569,8 +605,10 @@ function hasFieldVehicleMatch(rawVehicles: unknown): boolean {
 
 /**
  * 判定目标基地是否驻扎有在役 FCV（前沿基地建设车 / FCV 机娘如白芷）或前哨基地展开车。
- * 用于在基地尚未生成虚拟「前沿工地」建筑条目时，为该基地的 `lane.defense`（防御辅助建造线）
- * 与 `lane.other_building`（其他建筑线）提供 1 个现地筑城工位容量（绝不解锁 `lane.main` 主建筑建造线）。
+ * 用于在基地尚未生成对应锚定建筑时，为该基地的 `lane.main`（主建筑建造线）、`lane.defense`
+ * 与 `lane.other_building` 各提供 1 个现地筑城工位。
+ * 主建筑线虽开放工位，但军工生产母体／科研中枢／战略超武／巨构仍需正规建造厂核心，
+ * 由 makeProdParallelLimitFor 配合 isMainBaseExclusiveBuildingName 按件拦回容量 0。
  */
 export function hasFieldConstructionUnitInBase(state: LaneStateView, baseRef: string): boolean {
   const base = resolveBase(state, baseRef);
@@ -648,19 +686,17 @@ export function hasFieldConstructionUnitInBase(state: LaneStateView, baseRef: st
 }
 
 /**
- * 某基地某产线容量＝该基地该品类「生产模式」锚定建筑数（§2 Q3 canon 原生容量）；
+ * 某基地某产线「锚定建筑」容量＝该基地该品类「生产模式」锚定建筑数（§2 Q3 canon 原生容量）；
  * 全部加速＝0（队列滞留，待任一切回生产）。基地不可解析返回 undefined（fail-open 由调用方兜底 1）。
  * E2b：锚定命中走双通道（buildingMatchesLaneAnchor），deployOf 未注入时与 v1 逐字节一致。
- * FCV / 前哨展开车补强：当 `lane.defense` 或 `lane.other_building` 在 `buildings[]` 中无直接锚定建筑（count===0），
- * 但该基地驻扎有在役 FCV（如「前沿基地建设车」或机娘「白芷」）或前哨展开车时，提供 1 个现地筑城工位容量。
+ * 本函数只数锚定建筑，不包含下部现地筑城兜底，供「是否只有 FCV 支撑」的判断复用。
  */
-export function laneCapacityInBase(
+function anchorCapacityInBase(
   state: LaneStateView,
   baseRef: string,
   def: LaneDef,
   deployOf?: DeployOf,
 ): number | undefined {
-  if (def.laneId === 'lane.default') return 1;
   const base = resolveBase(state, baseRef);
   if (!base) return undefined;
   let count = 0;
@@ -669,14 +705,42 @@ export function laneCapacityInBase(
     if (!buildingMatchesLaneAnchor(building.name, def, deployOf)) continue;
     if (isProductionMode(building, def)) count += 1;
   }
+  return count;
+}
+
+/**
+ * 现场筑城可支撑的产线：FCV / 前哨展开车在场且该线无锚定建筑时给 1 个现地工位。
+ * lane.main 同样可现地施工——设计上 FCV 不得营建的只是「军工生产母体／科研中枢／战略超武／巨构」，
+ * 发电厂、精炼厂、仓储、民生等主建筑仍可建；该类越权由 makeProdParallelLimitFor 按件拦回 0
+ * （判据 isMainBaseExclusiveBuildingName，与 buildAuthority 同源）。
+ */
+const FIELD_BUILDABLE_LANE_IDS: ReadonlySet<LaneId> = new Set<LaneId>([
+  'lane.main',
+  'lane.defense',
+  'lane.other_building',
+]);
+
+/**
+ * 某基地某产线容量：锚定建筑数；无锚定时若该基地驻有在役 FCV / 前哨展开车，
+ * 可在主建筑线与防御、其他建筑线上各得 1 个现地筑城工位。
+ */
+export function laneCapacityInBase(
+  state: LaneStateView,
+  baseRef: string,
+  def: LaneDef,
+  deployOf?: DeployOf,
+): number | undefined {
+  if (def.laneId === 'lane.default') return 1;
+  const anchored = anchorCapacityInBase(state, baseRef, def, deployOf);
+  if (anchored === undefined) return undefined;
   if (
-    count === 0 &&
-    (def.laneId === 'lane.defense' || def.laneId === 'lane.other_building') &&
+    anchored === 0 &&
+    FIELD_BUILDABLE_LANE_IDS.has(def.laneId) &&
     hasFieldConstructionUnitInBase(state, baseRef)
   ) {
     return 1;
   }
-  return count;
+  return anchored;
 }
 
 /** §4.2 递减加速表：第 1 座 +0.50｜第 2 座 +0.30｜第 3 座 +0.20｜第 4 座起 +0.05/座 */
@@ -760,6 +824,14 @@ export function makeProdParallelLimitFor(
     const def = LANE_BY_ID.get(resolution.laneId);
     if (!def || def.laneId === 'lane.default') return 1;
     const cap = laneCapacityInBase(state, txn.base, def, options.deployOf) ?? 1;
+    // 主基地专属建筑（军工生产母体／科研中枢／战略超武／巨构）必须有正规建造厂核心才能营建：
+    // 基地无建造厂锚定建筑时按件拦回容量 0，即便工位来自 FCV 现地筑城（与 buildAuthority 同一判据）。
+    if (txn.type === '建造' && isMainBaseExclusiveBuildingName(txn.item)) {
+      const mainDef = LANE_BY_ID.get('lane.main');
+      if (mainDef && (anchorCapacityInBase(state, txn.base, mainDef, options.deployOf) ?? 1) === 0) {
+        return 0;
+      }
+    }
     if (cap === 0 && txn.type === '建造') {
       const base = resolveBase(state, txn.base);
       const blds = base?.buildings ?? [];

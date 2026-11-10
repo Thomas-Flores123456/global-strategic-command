@@ -208,6 +208,26 @@
           </div>
 
           <div class="flex items-center gap-1.5">
+            <div class="ob-seg" role="group" aria-label="预览视图" data-test="ff-preview-view-toggle">
+              <button
+                type="button"
+                class="cursor-pointer rounded-l-[2px] border border-rac-dim px-2 py-1 font-mono text-[12px] transition-colors"
+                :class="previewView === 'structured' ? 'bg-rac-dim text-rac-hi' : 'bg-rac-bg text-rac-muted hover:text-rac-hi'"
+                :aria-pressed="previewView === 'structured'"
+                @click="previewView = 'structured'"
+              >
+                分区
+              </button>
+              <button
+                type="button"
+                class="-ml-px cursor-pointer rounded-r-[2px] border border-rac-dim px-2 py-1 font-mono text-[12px] transition-colors"
+                :class="previewView === 'raw' ? 'bg-rac-dim text-rac-hi' : 'bg-rac-bg text-rac-muted hover:text-rac-hi'"
+                :aria-pressed="previewView === 'raw'"
+                @click="previewView = 'raw'"
+              >
+                原文
+              </button>
+            </div>
             <button
               type="button"
               data-test="ff-btn-refresh-preview"
@@ -229,9 +249,64 @@
         </div>
 
         <pre
+          v-if="previewView === 'raw'"
           data-test="ff-preview-content"
           class="max-h-[48vh] overflow-auto rounded-[2px] border border-rac-dim/70 bg-rac-bg p-2.5 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-rac-hi select-text"
         >{{ previewPromptText }}</pre>
+
+        <div
+          v-else
+          data-test="ff-preview-structured"
+          class="ff-doc max-h-[48vh] overflow-auto rounded-[2px] border border-rac-dim/70 bg-rac-bg select-text"
+        >
+          <template v-if="previewDoc.sections.length === 0">
+            <p class="p-2.5 font-mono text-[12px] text-rac-muted">{{ previewPromptText }}</p>
+          </template>
+          <template v-else>
+            <header class="ff-doc__head">
+              <div class="ff-doc__title">{{ previewDoc.title }}</div>
+              <p v-for="(m, i) in previewDoc.meta" :key="i" class="ff-doc__meta">
+                <template v-for="(seg, j) in splitPipeSegments(m)" :key="j">
+                  <span v-if="j > 0" class="ff-doc__pipe">｜</span>{{ seg }}
+                </template>
+              </p>
+            </header>
+
+            <details
+              v-for="(sec, si) in previewDoc.sections"
+              :key="si"
+              class="ff-sec"
+              :open="si < 3"
+            >
+              <summary class="ff-sec__summary">
+                <span class="ff-sec__idx">{{ sec.index || '·' }}</span>
+                <span class="ff-sec__title">{{ sec.title }}</span>
+                <span class="ff-sec__count ob-num">{{ sec.lines.length + (sec.lead ? 1 : 0) }}</span>
+              </summary>
+              <div class="ff-sec__body">
+                <p v-if="sec.lead" class="ff-line ff-line--lead">
+                  <template v-for="(seg, j) in splitPipeSegments(sec.lead)" :key="j">
+                    <span v-if="j > 0" class="ff-doc__pipe">｜</span>{{ seg }}
+                  </template>
+                </p>
+                <template v-for="(ln, li) in sec.lines" :key="li">
+                  <div v-if="ln.kind === 'diag'" class="ff-diag" :data-priority="ln.priority">
+                    <span class="ff-diag__tag ob-tag"><b>{{ ln.priority }}</b><i>{{ ln.label }}</i></span>
+                    <div class="ff-diag__body">
+                      <div class="ff-diag__headline">{{ ln.text }}</div>
+                      <div v-if="ln.detail" class="ff-diag__detail">{{ ln.detail }}</div>
+                    </div>
+                  </div>
+                  <p v-else class="ff-line" :class="`ff-line--${ln.kind}`">
+                    <template v-for="(seg, j) in splitPipeSegments(ln.text)" :key="j">
+                      <span v-if="j > 0" class="ff-doc__pipe">｜</span>{{ seg }}
+                    </template>
+                  </p>
+                </template>
+              </div>
+            </details>
+          </template>
+        </div>
       </div>
     </template>
   </section>
@@ -251,6 +326,7 @@ const sharedPrefs = ref<FeedforwardPreferences>(getFeedforwardPreferences());
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
 import Icon from '../../红警指挥系统/ui/Icon.vue';
+import { parseFeedforwardPreview, splitPipeSegments } from './feedforwardPreviewModel';
 import { SCHEMA_VERSION, Schema, type StatData } from '../../红警指挥系统/core/schema';
 import { readDlcOverlaysFromRegistry, type DlcOverlay } from '../../红警指挥系统/core/catalogEffective';
 import { dynamicCatalogSnapshot } from '../../红警指挥系统/composables/useCatalog';
@@ -259,7 +335,6 @@ import { scanLatestValidFloor } from '../../红警指挥系统/parse/floorScanne
 import {
   deriveStrategicFeedforward,
   formatStrategicFeedforwardPrompt,
-  getFeedforwardPreferences,
   readBootChoicesHintFromVars,
   resolveCampaignPhase,
   setFeedforwardPreferences,
@@ -517,6 +592,10 @@ const previewPromptText = computed<string>(() => {
 
 const previewCharCount = computed(() => previewPromptText.value.length);
 
+/** 预览视图：分区折叠（默认）/ 原文 pre；两者共用同一份 previewPromptText，复制始终复制原文 */
+const previewView = ref<'structured' | 'raw'>('structured');
+const previewDoc = computed(() => parseFeedforwardPreview(previewPromptText.value));
+
 /** 粗略估算中英混合 Token 数（中文字符约 0.65 token，ASCII 约 0.28 token） */
 const previewTokenEstimate = computed(() => {
   const text = previewPromptText.value;
@@ -550,7 +629,156 @@ async function onCopyPreview() {
 .text-rac-focus { color: var(--rac-focus); }
 .bg-rac-bg { background: var(--rac-bg); }
 .bg-rac-panel { background: var(--rac-panel); }
+.bg-rac-dim { background: var(--rac-dim); }
 .border-rac-dim { border-color: var(--rac-dim); }
+
+/* ── 分区预览：报文按【分区】折叠，条目按层级缩进，诊断按优先级着色 ── */
+.ff-doc {
+  font-family: var(--rac-font-num), ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--rac-text);
+}
+.ff-doc__head {
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--rac-dim);
+  background: var(--rac-panel);
+}
+.ff-doc__title {
+  color: var(--rac-hi);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+.ff-doc__meta {
+  margin: 3px 0 0;
+  color: var(--rac-muted);
+}
+.ff-doc__pipe {
+  color: var(--rac-dim);
+  margin: 0 2px;
+}
+
+.ff-sec {
+  border-bottom: 1px solid var(--rac-dim);
+}
+.ff-sec:last-child {
+  border-bottom: 0;
+}
+.ff-sec__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  background: var(--rac-panel-2);
+  color: var(--rac-hi);
+}
+.ff-sec__summary::-webkit-details-marker {
+  display: none;
+}
+.ff-sec__summary::before {
+  content: '▸';
+  color: var(--rac-muted);
+  width: 10px;
+  flex: none;
+  transition: transform 120ms ease;
+}
+.ff-sec[open] > .ff-sec__summary::before {
+  transform: rotate(90deg);
+}
+.ff-sec__idx {
+  flex: none;
+  min-width: 1.4em;
+  text-align: center;
+  padding: 0 4px;
+  border: 1px solid var(--rac-dim);
+  color: var(--rac-muted);
+  font-size: 11px;
+}
+.ff-sec__title {
+  flex: 1;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.ff-sec__count {
+  color: var(--rac-muted);
+  font-size: 11px;
+}
+.ff-sec__body {
+  padding: 4px 10px 8px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ff-line {
+  margin: 0;
+  position: relative;
+  overflow-wrap: anywhere;
+}
+.ff-line--lead {
+  color: var(--rac-hi);
+}
+.ff-line--item::before {
+  content: '·';
+  position: absolute;
+  left: -12px;
+  color: var(--rac-focus);
+}
+.ff-line--sub {
+  margin-left: 14px;
+  color: var(--rac-muted);
+}
+.ff-line--sub::before {
+  content: '–';
+  position: absolute;
+  left: -12px;
+  color: var(--rac-dim);
+}
+.ff-line--note {
+  margin-top: 2px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--rac-warn);
+  background: var(--rac-surface-tint);
+  color: var(--rac-muted);
+}
+
+.ff-diag {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 5px 0;
+}
+.ff-diag + .ff-diag {
+  border-top: 1px dashed var(--rac-dim);
+}
+.ff-diag__tag {
+  flex: none;
+  margin-top: 1px;
+}
+.ff-diag[data-priority='P0'] .ff-diag__tag > b {
+  background: var(--rac-alert);
+  color: var(--rac-bg);
+}
+.ff-diag[data-priority='P1'] .ff-diag__tag > b {
+  background: var(--rac-warn);
+  color: var(--rac-bg);
+}
+.ff-diag__body {
+  flex: 1;
+  min-width: 0;
+}
+.ff-diag__headline {
+  color: var(--rac-hi);
+  overflow-wrap: anywhere;
+}
+.ff-diag__detail {
+  margin-top: 2px;
+  color: var(--rac-muted);
+  overflow-wrap: anywhere;
+}
 .hover\:border-rac-line:hover { border-color: var(--rac-line); }
 .hover\:text-rac-hi:hover { color: var(--rac-hi); }
 .hover\:text-rac-focus:hover { color: var(--rac-focus); }

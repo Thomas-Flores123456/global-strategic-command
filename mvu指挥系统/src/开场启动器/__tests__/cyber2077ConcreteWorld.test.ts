@@ -41,6 +41,7 @@ describe('cyber2077 · 具象世界契约、全球战区部署与 2042 默认纪
 
     const bookNames = manifest!.worldbook_group.map(b => b.name);
     expect(bookNames).toContain('具象世界·赛博朋克2077');
+    expect(bookNames).toContain('具象世界·赛博朋克2077·军备');
     expect(bookNames).not.toContain('赛博朋克2042·世界适配');
     expect(bookNames).not.toContain('修真·世界适配');
   });

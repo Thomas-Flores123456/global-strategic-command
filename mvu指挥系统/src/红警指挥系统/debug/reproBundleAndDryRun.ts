@@ -185,6 +185,7 @@ export function runDryRunPipeline(input: DryRunPipelineInput): DryRunPipelineRes
 
   const settled = settleFloor(initialSnap, s2Input, input.rawText, {
     catalog,
+    hasExplicitMoraleInput: parsedResult.hasExplicitMoraleInput,
     extraDeltaMinutes: input.extraDeltaMinutes,
     orders: parsedResult.orders,
     deployOrders: parsedResult.deployOrders,

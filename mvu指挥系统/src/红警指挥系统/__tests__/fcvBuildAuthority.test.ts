@@ -8,6 +8,7 @@ import {
   checkBuildingAllowedByAuthority,
   evaluateBaseBuildAuthority,
   isFcvVehicleName,
+  isMainBaseExclusiveBuildingName,
   isMainMcvVehicleName,
   isOutpostNodeVehicleName,
 } from '../core/buildAuthority';
@@ -504,7 +505,7 @@ describe('FCV-AUTH-04 · 实况存档复现：基地驻有 FCV 载具/机娘（�
       ],
     });
 
-  it('hasFieldConstructionUnitInBase 与 laneCapacityInBase：识别 base.forces.vehicles 与 forces.girls 中的 FCV，开通 lane.other_building 与 lane.defense（不越权开通 lane.main）', () => {
+  it('hasFieldConstructionUnitInBase 与 laneCapacityInBase：识别 base.forces.vehicles 与 forces.girls 中的 FCV，现地筑城开通 lane.main / lane.defense / lane.other_building', () => {
     const state = mkBase2LiveState();
     expect(hasFieldConstructionUnitInBase(state, 'base_2')).toBe(true);
 
@@ -512,7 +513,7 @@ describe('FCV-AUTH-04 · 实况存档复现：基地驻有 FCV 载具/机娘（�
     const defDef = LANE_REGISTRY.find(d => d.laneId === 'lane.defense')!;
     const otherDef = LANE_REGISTRY.find(d => d.laneId === 'lane.other_building')!;
 
-    expect(laneCapacityInBase(state, 'base_2', mainDef)).toBe(0);
+    expect(laneCapacityInBase(state, 'base_2', mainDef)).toBe(1);
     expect(laneCapacityInBase(state, 'base_2', defDef)).toBe(1);
     expect(laneCapacityInBase(state, 'base_2', otherDef)).toBe(1);
 
@@ -520,6 +521,58 @@ describe('FCV-AUTH-04 · 实况存档复现：基地驻有 FCV 载具/机娘（�
     expect(limitFor({ type: '建造', item: '生态副食与水循环保障站', base: 'base_2' })).toBe(1);
     expect(limitFor({ type: '建造', item: '盟军碉堡', base: 'base_2' })).toBe(1);
     expect(limitFor({ type: '建造', item: '建造厂核心', base: 'base_2' })).toBe(0);
+  });
+
+  it('FCV 现地筑城：非军工主建筑可建，军备母体 / 军校 / 科研中枢 / 战略超武 / 巨构按件拦回 0', () => {
+    const state = mkBase2LiveState();
+    const limitFor = makeProdParallelLimitFor(state);
+
+    for (const allowed of ['发电厂', '盟军发电厂', '苏联磁能反应炉', '矿石精炼厂']) {
+      expect(limitFor({ type: '建造', item: allowed, base: 'base_2' }), allowed).toBe(1);
+    }
+
+    for (const blocked of [
+      '兵营',
+      '战车工厂',
+      '扩大版自动化战车工厂',
+      '空军指挥部',
+      '海军造船厂',
+      '简易船坞',
+      '扩大版造船厂',
+      '个人装备制造所',
+      '陆军军校',
+      '战斗实验室',
+      '红星实验设计局综合体',
+      '超算中心',
+      '量子超算中心',
+      '全自动军工综合体',
+      '巨型联合兵工厂',
+      '国家总动员兵工城',
+      '苏维埃工业工厂',
+      '超时空传送仪（初级）',
+      '铁幕装置',
+    ]) {
+      expect(limitFor({ type: '建造', item: blocked, base: 'base_2' }), blocked).toBe(0);
+    }
+  });
+
+  it('正规建造厂锚定后，同类军备母体不再被 FCV 物品级门阻挡', () => {
+    const state = mkBase2LiveState();
+    const base = state.bases.find(b => b.id === 'base_2')!;
+    base.buildings.push({ ...base.buildings[0], name: '盟军建造厂' });
+    const limitFor = makeProdParallelLimitFor(state);
+    expect(limitFor({ type: '建造', item: '兵营', base: 'base_2' })).toBe(1);
+    expect(limitFor({ type: '建造', item: '发电厂', base: 'base_2' })).toBe(1);
+  });
+
+  it('isMainBaseExclusiveBuildingName：精确集、阵营前缀剥离与名称启发式同源判定', () => {
+    expect(isMainBaseExclusiveBuildingName('兵营')).toBe(true);
+    expect(isMainBaseExclusiveBuildingName('盟军兵营')).toBe(true);
+    expect(isMainBaseExclusiveBuildingName('小型纳米合成工坊')).toBe(true);
+    expect(isMainBaseExclusiveBuildingName('超时空传送仪（初级）')).toBe(true); // 仅启发式命中
+    expect(isMainBaseExclusiveBuildingName('苏联磁能反应炉')).toBe(false);
+    expect(isMainBaseExclusiveBuildingName('发电厂')).toBe(false);
+    expect(isMainBaseExclusiveBuildingName('')).toBe(false);
   });
 
   it('schedulePanelModel：base_2 的「其他建筑线」容量为 1、stranded 为 false、dualModeSummary.productionCount 为 1，不再误报「缺少对应生产建筑，队列已暂停」', () => {

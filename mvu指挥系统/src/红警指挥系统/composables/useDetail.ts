@@ -25,6 +25,7 @@ import { classifyBuildingRing, ringToCnLabel } from '../engines/buildingCoordEng
 import { BUILTIN_BUILDING_UPGRADE_SPECS } from '../engines/productionReconciliation';
 import { durationFromEntry } from '../engines/settleFloorHelpers';
 import { canon } from '../parse/parseTypesAndCanon';
+import { resolveResearchUnlocksText, type ResearchUnlockCatalogLike } from '../core/researchUnlocks';
 import { useCatalogStore } from './useCatalog';
 
 export interface DetailData {
@@ -425,6 +426,9 @@ function openProductionDetail(
 
 function openResearchDetail(r: CatalogResearchLike): DetailData {
   const etaDisplay = resolveResearchEtaDisplay(r);
+  // 解锁栏与前馈「现已解锁」同源：反向扫描有效目录，而非只读世界书手写 unlocks 字面
+  const catalog = useCatalogStore();
+  const unlocksText = resolveResearchUnlocksText(r, catalog as unknown as ResearchUnlockCatalogLike);
   const params: [string, string][] = [
     ['费用', String(r.cost)],
     ['工期', etaDisplay],
@@ -433,7 +437,7 @@ function openResearchDetail(r: CatalogResearchLike): DetailData {
     // 阵营特色线命名约定：'X特色'（盟军/焚风/…）——DLC 规范同此约定
     ['归属', r.line.endsWith('特色') ? '阵营特色 · 需MCV在场' : '通用理论 · 全阵营生效'],
     ['前置', r.prereq || '无（基础科技）'],
-    ['解锁', r.unlocks || '——'],
+    ['解锁', unlocksText || '无（研究线终点）'],
   ];
   if (r.workload && (r.workload.tflops || r.workload.tops)) {
     const parts: string[] = [];

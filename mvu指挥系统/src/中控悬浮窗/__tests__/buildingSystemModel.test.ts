@@ -528,27 +528,27 @@ describe('FD-18 基地建筑五大体系模型与红警蓝图化契约 (building
       }
     }
 
-    expect(realBuildings.length).toBe(239);
-    // 验证世界书全部 239 座建筑的 <数据> 块均已写入显式 system 与 system_group 分类字段
+    expect(realBuildings.length).toBe(240);
+    // 验证世界书全部 240 座建筑的 <数据> 块均已写入显式 system 与 system_group 分类字段
     expect(realBuildings.filter(b => Boolean(b.system && b.system_group)).length).toBeGreaterThanOrEqual(231);
     const wbNameSet = new Set(realBuildings.map(b => b.name));
 
     const model = buildBuildingOverviewModel(Schema.parse({}), { buildings: realBuildings });
     const allCatalogCount = Object.values(model.systems).reduce((s, sys) => s + sys.catalogEntries.length, 0);
-    expect(allCatalogCount).toBe(239);
-    // 验证全部 239 座世界书建筑（通用 137 + 盟军 33 + 苏联 35 + 尤里 34）100% 挂载进 SVG 蓝图节点的 clusterItems 聚合簇（零漏挂）
+    expect(allCatalogCount).toBe(240);
+    // 验证全部 240 座世界书建筑（通用 138 + 盟军 33 + 苏联 35 + 尤里 34）100% 挂载进 SVG 蓝图节点的 clusterItems 聚合簇（零漏挂）
     const totalClusterCount = Object.values(model.systems)
       .flatMap(sys => sys.nodes)
       .reduce((s, node) => s + node.clusterItems.length, 0);
-    expect(totalClusterCount).toBe(239);
-    // 精确核对五大体系建筑数量分布（总和 = 239）与典型易混淆建筑归类
+    expect(totalClusterCount).toBe(240);
+    // 精确核对五大体系建筑数量分布（总和 = 240）与典型易混淆建筑归类
     expect(
       model.systems.military.catalogEntries.length +
         model.systems.defense.catalogEntries.length +
         model.systems.agro.catalogEntries.length +
         model.systems.industry.catalogEntries.length +
         model.systems.research_space.catalogEntries.length,
-    ).toBe(239);
+    ).toBe(240);
     expect(model.systems.military.catalogEntries.length).toBeGreaterThanOrEqual(41);
     expect(model.systems.defense.catalogEntries.length).toBeGreaterThanOrEqual(65);
     expect(model.systems.agro.catalogEntries.length).toBeGreaterThanOrEqual(28);

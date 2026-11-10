@@ -123,14 +123,19 @@ describe('基地→产线两级（laneBoard 直呈＋predicateFor 同源）', ()
     expect(land.stranded).toBe(false);
   });
 
-  it('谓语与 predicateFor（同 effFor 实参）逐字同值；queued 带「列于」前序', () => {
+  it('谓语与 predicateFor（同 effFor、同 clock 实参）逐字同值；queued 带「列于」前序', () => {
     const effFor = makeTxnEffFor(CATALOG, st as never);
     const land = m.bases[0].lanes.find(l => l.name === '陆地载具生产线')!;
     expect(land.txns.length).toBe(2);
-    expect(land.txns[0].predicate).toBe(predicateFor(queues[0] as unknown as TransactionItem, undefined, effFor));
-    expect(land.txns[1].predicate).toBe(
-      predicateFor(queues[1] as unknown as TransactionItem, queues[0] as unknown as TransactionItem, effFor),
+    // 面板已接时钟（ETA 同源）：同源断言必须传同一 clock，否则比较的不是同一输入
+    expect(land.txns[0].predicate).toBe(
+      predicateFor(queues[0] as unknown as TransactionItem, undefined, effFor, st.clock),
     );
+    expect(land.txns[1].predicate).toBe(
+      predicateFor(queues[1] as unknown as TransactionItem, queues[0] as unknown as TransactionItem, effFor, st.clock),
+    );
+    // 在产行带绝对完工时点：23:00 + 6h → 次日 05:00
+    expect(land.txns[0].predicate).toBe('进度 40%；尚需 6小时；预计完工：第 3 日 05:00');
     expect(land.txns[1].predicate).toBe('已立项待产，列于「犀牛坦克」之后');
     expect(land.txns[0].tone).toBe('run');
     expect(land.txns[1].tone).toBe('idle');

@@ -415,7 +415,7 @@ describe('FD-49 · 苏盟武备 141:141 对称考据充实、通用人员池收�
     return m ? (JSON.parse(m[1]) as Record<string, unknown>) : null;
   };
 
-  it('《武备·盟军》（142 项）、《武备·苏联》（144 项）、《武备·尤里》（31 项）启用 production 数量平衡，且《特色科技·盟军》扩充至 35 条', () => {
+  it('《武备·盟军》（153 项）、《武备·苏联》（156 项）、《武备·尤里》（31 项）启用 production 数量平衡，且《特色科技·盟军》扩充至 35 条', () => {
     const allyUnits = Object.values(readBook('武备·盟军_世界书.json').entries)
       .filter(e => !e.disable)
       .map(e => extractData(e.content))
@@ -433,19 +433,20 @@ describe('FD-49 · 苏盟武备 141:141 对称考据充实、通用人员池收�
       .map(e => extractData(e.content))
       .filter(d => d?.type === 'research');
 
-    expect(allyUnits).toHaveLength(142);
-    expect(sovUnits).toHaveLength(144);
+    expect(allyUnits).toHaveLength(153);
+    expect(sovUnits).toHaveLength(156);
     expect(Math.abs(allyUnits.length - sovUnits.length)).toBeLessThan(10);
     expect(yuriUnits).toHaveLength(31);
     expect(allyTechs).toHaveLength(35);
   });
 
-  it('《通用·人员》承接 8 项通用职能步兵（共 12 项启用 production），《通用·空中载具》UID 28..31 转为合规存根', () => {
+  it('《通用·人员》承接 9 项通用职能步兵（共 13 项启用 production，含炊事兵），《通用·空中载具》UID 28..31 转为合规存根', () => {
     const commonPersonnel = Object.values(readBook('通用·人员_世界书.json').entries)
       .filter(e => !e.disable)
       .map(e => extractData(e.content))
       .filter(d => d?.type === 'production');
-    expect(commonPersonnel).toHaveLength(12);
+    expect(commonPersonnel).toHaveLength(13);
+    expect(commonPersonnel.map(d => d?.id)).toContain('炊事兵');
 
     const commonAir = readBook('通用·空中载具_世界书.json').entries;
     for (const uid of ['28', '29', '30', '31']) {

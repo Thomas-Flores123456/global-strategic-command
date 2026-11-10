@@ -96,6 +96,8 @@ export interface SettleEvent {
   item: string;
   base: string;
   detail?: string;
+  /** 本次调度后队列的瞬态实例索引，仅用于批次事件回填，不落盘。 */
+  queueIndex?: number;
 }
 
 export interface SettleOptions {
@@ -117,6 +119,11 @@ export interface SettleOptions {
   orders?: DispatchOrder[];
   /** 游戏内当前日历时刻；提供时为新升格/started_at 为空的 active 事务补记开工时刻 */
   now?: string;
+  /** 研究批次积分策略；输入已执行调度令，策略负责研究回检、积分与升格。非研究走原路径。 */
+  advanceResearch?: (queues: readonly TransactionItem[], deltaMinutes: number) => {
+    queues: TransactionItem[];
+    events: SettleEvent[];
+  };
 }
 
 export interface SettleResult<S extends { queues: TransactionItem[] }> {
@@ -387,6 +394,15 @@ export function settleTransactions<S extends { queues: TransactionItem[] }>(
   }
 
   let queues = dispatch.next.map(txn => cloneTxn(txn));
+  if (options.advanceResearch) {
+    const indices = queues.flatMap((q, i) => q.type === '研究' ? [i] : []);
+    const research = options.advanceResearch(indices.map(i => queues[i]), safeDelta);
+    let index = 0;
+    queues = queues.map(q => q.type === '研究' ? research.queues[index++] : q);
+    events.push(...research.events.map(event => event.queueIndex === undefined ? event : {
+      ...event, queueIndex: indices[event.queueIndex],
+    }));
+  }
 
   // ② & ③′ & ③：既成 active 先过 lane/全局带宽回检（超编或 limit<=0 者降格回 queued 且不吃本轮 Δt），
   // 通过回检的 active 项执行 Δt×eff 积分进度；
@@ -438,6 +454,7 @@ export function settleTransactions<S extends { queues: TransactionItem[] }>(
           item: txn.item,
           base: txn.base,
           detail: `批次流水 ${doneNow}/${txn.qty}`,
+          ...(options.advanceResearch ? { queueIndex: idx } : {}),
         });
       }
     }
@@ -449,6 +466,7 @@ export function settleTransactions<S extends { queues: TransactionItem[] }>(
 
   for (let i = 0; i < queues.length; i++) {
     const txn = queues[i];
+    if (options.advanceResearch && txn.type === '研究') continue;
     if (txn.status === 'active') {
       const key = laneKeyFor(txn);
       const laneLimit = Math.max(0, limitFor(txn));
@@ -542,6 +560,7 @@ export function settleTransactions<S extends { queues: TransactionItem[] }>(
     }
   }
   queues = queues.map(txn => {
+    if (options.advanceResearch && txn.type === '研究') return txn;
     if (txn.status !== 'queued' || txn.hold) return txn;
     const key = laneKeyFor(txn);
     const limit = Math.max(0, limitFor(txn));

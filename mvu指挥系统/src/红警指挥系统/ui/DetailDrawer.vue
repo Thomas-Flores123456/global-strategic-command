@@ -390,7 +390,7 @@ import {
   queueItemsForAction,
 } from '../core/catalogRuntimeContext';
 import {
-  combineLegacyPrerequisites,
+  combineResearchPrerequisites,
   evaluatePrerequisite,
   UNIT_EQUIVALENT_GROUPS,
   type PrerequisiteContext,
@@ -683,7 +683,8 @@ const researchGate = computed<{ allowed: boolean; canDispatch: boolean; reason: 
       q.item === title &&
       ACTIVE_OR_QUEUED_RESEARCH_STATUSES.has(q.status ?? 'active'),
   );
-  if (inQueueByStatus || (queued.includes(title) && !(stateData.queues ?? []).some(q => q.item === title && (q.status === 'done' || q.status === 'cancelled')))) {
+  // queueItemsForAction 已过滤 done/cancelled，命中即代表真在研发/排队中（无需再判终态）
+  if (inQueueByStatus || queued.includes(title)) {
     return { allowed: false, canDispatch: false, reason: '该科技已在研发或排队序列中' };
   }
 
@@ -729,7 +730,7 @@ const researchGate = computed<{ allowed: boolean; canDispatch: boolean; reason: 
   const targetDef = researchDef ?? (paramPrereqs.length > 0 ? { name: title, prereqs: paramPrereqs } : null);
 
   if (targetDef) {
-    const evalResult = evaluatePrerequisite(combineLegacyPrerequisites(targetDef, 'completed'), ctx);
+    const evalResult = evaluatePrerequisite(combineResearchPrerequisites(targetDef), ctx);
     if (!evalResult.satisfied || (researchDef && baseCtx && deriveResearchableWithContext([researchDef], ctx, []).length === 0)) {
       const missingNames = formatUnmetPrereqNames(evalResult.unmet);
       const suffix = missingNames.length > 0 ? missingNames.join('、') : '前置科技、战略协议或实验室设施未就绪';

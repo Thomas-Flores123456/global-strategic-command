@@ -94,6 +94,7 @@ export const WORLD_MANIFESTS: Record<string, WorldManifest> = {
       ...盟军阵营组,
       协议书,
       { name: '具象世界·赛博朋克2077', required: true },
+      { name: '具象世界·赛博朋克2077·军备', required: true },
       { name: 'EVA·动态档案', required: false },
     ],
     technology_baseline:

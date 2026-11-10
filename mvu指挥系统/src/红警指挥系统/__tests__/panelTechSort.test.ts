@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  evaluateTechCardPrerequisites,
   getTechLinePriority,
   parseTechMetaCost,
   sortTechByLineGroups,
@@ -141,5 +142,46 @@ describe('panelTechHelpers · 科技领域战略主次与卡片多维智能排�
     const byLine = sortTechResearches(items, stateOf, 'line');
     expect(byLine.map(r => r.name)).toEqual(['T1通用科技', 'T2通用科技', 'T1环保科技']);
     expect(parseTechMetaCost('350 · 约3日')).toBe(350);
+  });
+});
+
+describe('evaluateTechCardPrerequisites · 研究前置建筑全基地口径', () => {
+  // 存档场景：生态副食与水循环保障站在 base_2，主基地 base_1 没有
+  const bases = [
+    { id: 'base_1', name: '暗河地下主基地', buildings: [{ name: '建造厂核心', state: '运转' }] },
+    { id: 'base_2', name: '三十八号矿坑前哨', buildings: [{ name: '生态副食与水循环保障站', state: '运转' }] },
+  ];
+  const aquaculture = {
+    name: '封闭水产养殖学',
+    cost: 450,
+    eta: '约4-5日',
+    line: '农畜业',
+    tier: 1,
+    unlocks: '可建造：封闭式水产养殖池',
+    prereq: '封闭生态与副食工学',
+    prereqs: ['封闭生态与副食工学'],
+    need_buildings: ['生态副食与水循环保障站'],
+    desc: '',
+  };
+
+  it('前置建筑在副基地也算满足（研究队列全局）', () => {
+    const r = evaluateTechCardPrerequisites(aquaculture, { bases, techDone: ['封闭生态与副食工学'] });
+    expect(r).toEqual({ prereqMet: true, missingPrereqs: [] });
+  });
+
+  it('前置建筑停机也算建成；建造中不算', () => {
+    const idle = bases.map(b => ({ ...b, buildings: b.buildings.map(x => ({ ...x, state: '停机' })) }));
+    expect(evaluateTechCardPrerequisites(aquaculture, { bases: idle, techDone: ['封闭生态与副食工学'] }).prereqMet).toBe(true);
+    const building = bases.map(b => ({ ...b, buildings: b.buildings.map(x => ({ ...x, state: '建造中' })) }));
+    const r = evaluateTechCardPrerequisites(aquaculture, { bases: building, techDone: ['封闭生态与副食工学'] });
+    expect(r.prereqMet).toBe(false);
+    expect(r.missingPrereqs).toEqual([{ name: '生态副食与水循环保障站', kind: 'building' }]);
+  });
+
+  it('全基地都没有时报缺建筑', () => {
+    const none = bases.map(b => ({ ...b, buildings: b.buildings.filter(x => x.name !== '生态副食与水循环保障站') }));
+    const r = evaluateTechCardPrerequisites(aquaculture, { bases: none, techDone: ['封闭生态与副食工学'] });
+    expect(r.prereqMet).toBe(false);
+    expect(r.missingPrereqs.map(c => c.name)).toEqual(['生态副食与水循环保障站']);
   });
 });

@@ -1,5 +1,6 @@
 import type { BuildingDef, ProductionDef, ResearchDef } from '../core/catalog';
 import { RESEARCHES } from '../core/catalog'; // 兼容旧单测注入槽；生产环境优先走世界书 effectiveCatalogSnapshot
+import { resolveResearchUnlocksText } from '../core/researchUnlocks';
 import { checkOverlayData, lintBookContent, tav, type CheckIssue } from '../parse/systemCheck';
 import {
   dynamicCatalogSnapshot,
@@ -671,13 +672,15 @@ export function renderDataCardEntry(m: DlcManifest): { comment: string; keys: st
   if (rs.length) {
     lines.push('研究：');
     for (const r of rs) {
+      // 解锁文案与面板/前馈同源：在本 DLC 数据包内反向扫描，零下游时才回退作者手写 unlocks
+      const unlocksText = resolveResearchUnlocksText(r, { researches: rs, buildings: bs, productions: ps });
       const bits = [
         `${r.cost}`,
         r.eta,
         `T${r.tier}`,
         r.line,
         r.prereq ? `前置:${r.prereq}` : '',
-        r.unlocks ? `解锁:${r.unlocks}` : '',
+        unlocksText ? `解锁:${unlocksText}` : '',
       ].filter(Boolean);
       lines.push(`· ${r.name}｜${bits.join('｜')}`);
     }

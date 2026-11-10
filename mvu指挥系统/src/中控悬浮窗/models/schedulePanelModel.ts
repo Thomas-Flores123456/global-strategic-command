@@ -513,6 +513,8 @@ export function computeNextMilestoneBanner(snapshot: SchedulePanelInput | null |
 function buildTxnRows(
   items: readonly ResolvedScheduledTask[],
   effFor: (t: TransactionItem) => number,
+  clock?: { day: number; time: string },
+  calendarDate?: string,
 ): ScheduleTxnRow[] {
   return items.map(({ task, qView }, i) => {
     const gantt = resolveGanttMetrics(task, qView);
@@ -538,6 +540,8 @@ function buildTxnRows(
         qView as unknown as TransactionItem,
         items[i - 1]?.qView as unknown as TransactionItem | undefined,
         effFor,
+        clock,
+        calendarDate,
       ),
       ganttPct: gantt.ganttPct,
       ganttState: gantt.ganttState,
@@ -570,6 +574,7 @@ export function schedulePanelModel(
   const queues = (stat.queues ?? []) as QueueItem[];
   const projects = stat.projects ?? [];
   const clock = stat.clock;
+  const calendarDate = stat.meta?.date;
 
   const safeCatalog: EffectiveCatalog = {
     ...catalog,
@@ -732,7 +737,7 @@ export function schedulePanelModel(
         view.capacity > 0 && rawDualModeSummary.productionCount === 0 && rawDualModeSummary.accelCount === 0
           ? { ...rawDualModeSummary, productionCount: view.capacity }
           : rawDualModeSummary;
-      const rawTxns = buildTxnRows(tasks, effFor);
+      const rawTxns = buildTxnRows(tasks, effFor, clock, calendarDate);
       const laneEff =
         rawTxns.length > 0 && rawTxns[0].effectiveAccel !== undefined
           ? rawTxns[0].effectiveAccel
@@ -774,7 +779,7 @@ export function schedulePanelModel(
       const activeCount = activeItems.length;
       const queuedCount = tasks.filter(t => t.task.status === 'queued' || t.task.status === 'held').length;
       const dualModeSummary = summarizeLaneDualModeBuildings(bases, baseRefKey, stationId, 1, globalAccelByLane);
-      const rawTxns = buildTxnRows(tasks, effFor);
+      const rawTxns = buildTxnRows(tasks, effFor, clock, calendarDate);
       const laneEff =
         rawTxns.length > 0 && rawTxns[0].effectiveAccel !== undefined
           ? rawTxns[0].effectiveAccel
@@ -830,7 +835,7 @@ export function schedulePanelModel(
     const queuedCount = tasks.filter(t => t.task.status === 'queued' || t.task.status === 'held').length;
     const stranded = capacity === 0 && (activeCount > 0 || queuedCount > 0 || tasks.length > 0);
     const dualModeSummary = summarizeLaneDualModeBuildings(bases, rawBase, stationId, 1, globalAccelByLane);
-    const rawTxns = buildTxnRows(tasks, effFor);
+    const rawTxns = buildTxnRows(tasks, effFor, clock, calendarDate);
     const laneEff =
       rawTxns.length > 0 && rawTxns[0].effectiveAccel !== undefined
         ? rawTxns[0].effectiveAccel
@@ -877,7 +882,7 @@ export function schedulePanelModel(
     const queuedCount = tasks.filter(t => t.task.status === 'queued' || t.task.status === 'held').length;
     const slotBaseMult = view.accelMultiplier ?? 1;
     const slotEffFor = (t: TransactionItem) => effFor(t) * slotBaseMult;
-    const rawTxns = buildTxnRows(tasks, slotEffFor);
+    const rawTxns = buildTxnRows(tasks, slotEffFor, clock, calendarDate);
     const slotEff =
       rawTxns.length > 0 && rawTxns[0].effectiveAccel !== undefined
         ? Math.max(slotBaseMult, rawTxns[0].effectiveAccel)
@@ -908,7 +913,7 @@ export function schedulePanelModel(
   // 序列表之外的研究 lane（槽注册表缺漏）兜底列尾，不丢事务
   for (const [key, tasks] of researchTasksByKey) {
     if (researchSlots.some(r => r.key === key)) continue;
-    const rawTxns = buildTxnRows(tasks, effFor);
+    const rawTxns = buildTxnRows(tasks, effFor, clock, calendarDate);
     const slotEff = rawTxns.length > 0 && rawTxns[0].effectiveAccel !== undefined ? rawTxns[0].effectiveAccel : 1;
     const trackResult = scheduleLaneSubTracks(rawTxns, 1, slotEff, clock, draftTasks);
     if (trackResult.maxEndOffsetMin > maxEndOffsetMin) {
@@ -1004,7 +1009,7 @@ export function schedulePanelModel(
 
   return {
     clock,
-    clockText: clock ? SCHEDULE_COPY.clockLine(clock.day, clock.time) : undefined,
+    clockText: clock ? SCHEDULE_COPY.clockLine(clock.day, clock.time, calendarDate) : undefined,
     allEmpty: rawScheduled.length === 0 && pendingTransfers.length === 0,
     allEmptyText: SCHEDULE_COPY.allEmpty,
     bases: baseList,

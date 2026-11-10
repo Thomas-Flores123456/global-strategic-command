@@ -84,7 +84,7 @@ describe('S1-B catalog 运行时上下文', () => {
     ).toBe(true);
   });
 
-  it('旧 need_buildings 在研究/建造/生产三类均只认当前基地，显式 global 才可跨基地', () => {
+  it('旧 need_buildings：建造/生产只认当前基地；研究全基地任一建成即可（不要求运转）', () => {
     const context = buildCatalogPrerequisiteContext({
       bases,
       selectedBaseId: 'alpha-id',
@@ -119,17 +119,25 @@ describe('S1-B catalog 运行时上下文', () => {
       need_buildings: ['异地工厂'],
       desc: '测试',
     };
-    expect(deriveResearchableWithContext([research], context, [])).toEqual([]);
+    // 研究队列全局：前置建筑在其他基地也算数
+    expect(deriveResearchableWithContext([research], context, [])).toEqual([research]);
+    // 建造/生产母体必须在本基地
     expect(deriveBuildableWithContext([building], context, [])).toEqual([]);
     expect(deriveProducibleWithContext([production], context)).toEqual([]);
 
-    const explicitGlobal: ResearchDef = {
+    // 研究前置建筑只要建成（停机也行），不要求运转；建造中不算
+    const needIdle: ResearchDef = { ...research, name: '需停机楼', need_buildings: ['停机楼'] };
+    const needBuilding: ResearchDef = { ...research, name: '需施工楼', need_buildings: ['施工楼'] };
+    expect(deriveResearchableWithContext([needIdle, needBuilding], context, [])).toEqual([needIdle]);
+
+    // 显式 requirements 仍按其自身 scope/state 评估，不被研究默认值覆盖
+    const explicitCurrent: ResearchDef = {
       ...research,
-      name: '显式全局研究',
+      name: '显式本地研究',
       need_buildings: [],
-      requirements: { kind: 'building', name: '异地工厂', scope: 'global', state: 'completed' },
+      requirements: { kind: 'building', name: '异地工厂', scope: 'current', state: 'completed' },
     };
-    expect(deriveResearchableWithContext([explicitGlobal], context, [])).toEqual([explicitGlobal]);
+    expect(deriveResearchableWithContext([explicitCurrent], context, [])).toEqual([]);
   });
 
   it('unitPresent 只统计正数 troops 与 vehicles；不接受机娘或首产推断源', () => {
@@ -140,13 +148,16 @@ describe('S1-B catalog 运行时上下文', () => {
     expect(Object.fromEntries(units)).toEqual({ 工程兵: 2, 'F-16C战隼': 2, 机动雷达车: 1 });
   });
 
-  it('研究全局去重，建造/生产按当前基地 ID 去重并兼容唯一旧名称', () => {
+  it('研究全局去重，建造/生产按当前基地 ID 去重并兼容唯一旧名称；终态项不占槽', () => {
     const queues = [
       { type: '研究', item: '研究A', base: 'beta-id' },
-      { type: '研究', item: '研究B', base: '' },
+      { type: '研究', item: '研究B', base: '', status: 'active' },
+      { type: '研究', item: '研究已完工', base: '', status: 'done' },
+      { type: '研究', item: '研究已取消', base: '', status: 'cancelled' },
       { type: '建造', item: '工厂A', base: 'alpha-id' },
+      { type: '建造', item: '工厂已完工', base: 'alpha-id', status: 'done' },
       { type: '建造', item: '工厂B', base: '南港基地' },
-      { type: '生产', item: '载具A', base: '北坡基地' },
+      { type: '生产', item: '载具A', base: '北坡基地', status: 'settling' },
       { type: '生产', item: '载具B', base: 'beta-id' },
     ];
     expect(queueItemsForAction(queues, '研究', 'alpha-id', bases)).toEqual(['研究A', '研究B']);

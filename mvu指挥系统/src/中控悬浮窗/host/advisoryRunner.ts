@@ -34,6 +34,7 @@ import {
 } from '../../红警指挥系统/planning/strategicFeedforward';
 import { dynamicCatalogSnapshot } from '../../红警指挥系统/composables/useCatalog';
 import { debugState } from '../../红警指挥系统/composables/useDebugMode';
+import { readHostSendInput } from '../../红警指挥系统/worldbook/hostSendInput';
 import type { ParsedWorldbookCatalog } from '../models/worldbookCatalogParser';
 
 type Listener = (...args: any[]) => void;
@@ -63,6 +64,12 @@ export interface AdvisoryDeps {
   getVariables: (option: { type: 'chat' }) => Record<string, unknown> | undefined;
   /** R3：世界书动态目录取件（可选注入，便于测试与宿主替换；缺省读 useCatalog 模块级缓存） */
   readDynamicCatalog?: () => ParsedWorldbookCatalog | DynamicWorldbookCatalog | null;
+  /**
+   * 读宿主 #send_textarea 当前文本（可选注入；缺省走 hostSendInput.readHostSendInput）。
+   * ST 的 Generate() 在 emit GENERATION_AFTER_COMMANDS 之后才读输入框并 push 用户楼，
+   * 所以正常发送路径下本轮用户文本只能从输入框读到（真机实测 ST 1.19.0）。
+   */
+  readHostSendInput?: () => string;
   events: AdvisoryEventNames;
 }
 
@@ -83,6 +90,7 @@ export function defaultAdvisoryDeps(): Omit<AdvisoryDeps, 'events'> {
     getChatMessages: id => getChatMessages(id),
     getVariables: option => getVariables(option),
     readDynamicCatalog: defaultReadDynamicCatalog,
+    readHostSendInput,
   };
 }
 
@@ -295,14 +303,29 @@ export function createStrategicFeedforwardRunner(
     }
   }
 
-  function readLatestUserMessage(lastMessageId: number): string {
-    if (!Number.isInteger(lastMessageId) || lastMessageId < 0) return '';
+  /**
+   * 本轮玩家输入：
+   * - ActionBar 等路径先建用户楼再触发生成 → 末楼就是用户楼，直接读；
+   * - 普通发送（type normal/undefined）→ AFTER_COMMANDS 时用户楼尚未入 chat，回退读 #send_textarea；
+   * - swipe/regenerate/continue/quiet/impersonate → ST 不会把输入框内容发出去，不读输入框。
+   */
+  function readLatestUserMessage(lastMessageId: number, generationType: string | undefined): string {
+    if (Number.isInteger(lastMessageId) && lastMessageId >= 0) {
+      try {
+        const msg = deps.getChatMessages(lastMessageId)?.[0];
+        if (msg && msg.role === 'user') {
+          if (typeof msg.message === 'string') return msg.message;
+          if (typeof msg.mes === 'string') return msg.mes;
+          return '';
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    const sendsTextarea = generationType === undefined || generationType === 'normal';
+    if (!sendsTextarea) return '';
     try {
-      const msg = deps.getChatMessages(lastMessageId)?.[0];
-      if (!msg || msg.role !== 'user') return '';
-      if (typeof msg.message === 'string') return msg.message;
-      if (typeof msg.mes === 'string') return msg.mes;
-      return '';
+      return deps.readHostSendInput?.() ?? '';
     } catch {
       return '';
     }
@@ -337,7 +360,7 @@ export function createStrategicFeedforwardRunner(
       const lastMessageId = deps.getLastMessageId();
       const chatVars = readChatVars();
       const bootChoices = readBootChoices(chatVars);
-      const latestUserMessage = readLatestUserMessage(lastMessageId);
+      const latestUserMessage = readLatestUserMessage(lastMessageId, type);
       const plan = planStrategicFeedforward({
         generation,
         lastMessageId,

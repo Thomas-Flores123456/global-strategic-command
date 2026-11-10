@@ -29,16 +29,30 @@ export const PLANNING_ACTION_OP_VERB: Readonly<Record<string, string>> = {
   resume: '复工',
 };
 
+/** 距今天数文案（ETA 公历锚点的副注；当日→「今日」，次日→「明日」，其余→「距今 N 天」） */
+export function daysAheadLabel(daysAhead: number | undefined): string {
+  if (typeof daysAhead !== 'number' || !Number.isFinite(daysAhead) || daysAhead <= 0) return '今日';
+  return daysAhead === 1 ? '明日' : `距今 ${daysAhead} 天`;
+}
+
 export const SCHEDULE_COPY = {
   /* ── 骨架 ── */
   tagOpen: '<当前工程日程>',
   tagClose: '</当前工程日程>',
-  /** 战区时钟行（stat_data.clock 照实呈现；无 clock 不出行） */
-  clockLine: (day: number, time: string) => `◆ 战区时：第 ${day} 日 ${time}`,
+  /** 战区时钟行（stat_data.clock 照实呈现；无 clock 不出行；带公历日期时以日期为主锚、「第 N 日」为副注，免使模型自行换算） */
+  clockLine: (day: number, time: string, date?: string) =>
+    date ? `◆ 战区时：${date} ${time}（第 ${day} 日）` : `◆ 战区时：第 ${day} 日 ${time}`,
   baseHeader: (baseName: string) => `◆ 基地「${baseName}」`,
   /** 事务 base 无法解析到任何在册基地时的兜底组名（照实呈现原始 base 值，空值才用此行） */
   baseUnnamed: '（未标注属地的工程）',
   researchSectionHeader: '◆ 战区科研调度',
+  /** 科研全局并行行（§4.2 tier 门：科技资格定全球同时在研上限；数字全部由调用方从引擎同源算出） */
+  researchGlobalLine: (activeCount: number, limitText: string, tier: 1 | 2 | 3, remainingText: string) =>
+    `▸ 战区全局并行：在研 ${activeCount}/${limitText}（科技资格 T${tier} 门限，余量 ${remainingText}）`,
+  /** 全局并行已达顶（升格受阻时的世界内提示；不占位则零注入） */
+  researchGlobalFull: (limitText: string) => `　已满编：在研 ${limitText} 项已占满全局额度，新研需候列`,
+  /** 全局并行不设上限（T3）时的读法 */
+  researchGlobalUnlimited: '▸ 战区全局并行：无硬性上限（科技资格 T3 门限）',
 
   /* ── 序列头 ── */
   /** 开通序列：占用/上限照实呈现（§4.1.1）；上限非有限数（不设限）时省略上限段 */
@@ -90,6 +104,18 @@ export const SCHEDULE_COPY = {
     `节拍 ${beat}；单台尚需 ${perUnit}；全批尚需 ${total}`,
   /** 工期未知（§4.1.1） */
   unknownDuration: (progress: number) => `进度 ${progress}%；工期未核定，暂不排定时限`,
+  /** 预计完工时点（按战区时钟推算；追加在在产/在研谓语尾；无时钟或时刻不可解析时不出）。
+   *  带公历日期时以日期为主锚并标明距今天数：正文只有公历日期锚点，模型无法把「第 N 日」换算回当日，
+   *  曾将「第 203 日 11:00」误读为「今日 11:00」而提前宣布研究结项（真机第 116–122 楼）。 */
+  etaSuffix: (day: number, time: string, date?: string, daysAhead?: number) =>
+    date
+      ? `；预计完工：${date} ${time}（第 ${day} 日，${daysAheadLabel(daysAhead)}）`
+      : `；预计完工：第 ${day} 日 ${time}`,
+  /** 批次预计全批完工时点 */
+  etaBatchSuffix: (day: number, time: string, date?: string, daysAhead?: number) =>
+    date
+      ? `；预计全批完工：${date} ${time}（第 ${day} 日，${daysAheadLabel(daysAhead)}）`
+      : `；预计全批完工：第 ${day} 日 ${time}`,
   /** 停摆（eff≤0，§4.1.1） */
   stalled: (progress: number) => `进度 ${progress}%；因工况中断，进度冻结`,
   stalledBatch: (progress: number, done: number, qty: number) =>
@@ -159,7 +185,8 @@ export const SCHEDULE_COPY = {
     typeof budgetCap === 'number'
       ? `· 经费测算：合计耗资 ${totalCost} 点（预算上限 ${budgetCap} 点）`
       : `· 经费测算：合计耗资 ${totalCost} 点`,
-  /** 排产回执动作明细行——入队成功/预览：`· [入队] 基地「X」：Y ×N（测算耗资 C 点；预计工期 T）` */
+  /** 排产回执动作明细行——入队成功/预览：`· [入队] 基地「X」：Y ×N（测算耗资 C 点；预计工期 T）`
+   *  reconciledTag 为实时对账标签（在编/候列/已完工/未见在编）；缺席时逐字节保持历史构形 */
   planningActionAcceptedLine: (
     baseName: string,
     target: string,
@@ -167,10 +194,31 @@ export const SCHEDULE_COPY = {
     costCredits: number,
     durationText: string,
     opVerb = '入队',
-  ) =>
-    baseName
-      ? `· [${opVerb}] 基地「${baseName}」：${target} ×${qty}（测算耗资 ${costCredits} 点；预计工期 ${durationText}）`
-      : `· [${opVerb}] ${target} ×${qty}（测算耗资 ${costCredits} 点；预计工期 ${durationText}）`,
+    reconciledTag?: string,
+  ) => {
+    const tagSuffix = reconciledTag && reconciledTag.trim() ? `；实况：${reconciledTag.trim()}` : '';
+    return baseName
+      ? `· [${opVerb}] 基地「${baseName}」：${target} ×${qty}（测算耗资 ${costCredits} 点；预计工期 ${durationText}）${tagSuffix}`
+      : `· [${opVerb}] ${target} ×${qty}（测算耗资 ${costCredits} 点；预计工期 ${durationText}）${tagSuffix}`;
+  },
+  /* ── 排产回执实时对账（回执是「最近一次」快照，措辞须按当前队列/在役实况校正） ── */
+  /** 逐项实况标签——仍在产线占位（status=active） */
+  planningReceiptTagActive: '在编推进中',
+  /** 逐项实况标签——已立项候列（status=queued） */
+  planningReceiptTagQueued: '候列待建',
+  /** 逐项实况标签——已完工待落账（status=settling） */
+  planningReceiptTagSettling: '已完工待落账',
+  /** 逐项实况标签——已在役/已落账 */
+  planningReceiptTagDone: '已完工入列',
+  /** 逐项实况标签——既不在队列也不在役（可能已撤销或未落账） */
+  planningReceiptTagMissing: '未见在编',
+  /** committed 回执全部项目已完工入列时的状态表述 */
+  planningStatusCommittedAllDone: '单次委托所列入列项已全部完工入列',
+  /** committed 回执全部项目仍在编或候列时的状态表述 */
+  planningStatusCommittedAllActive: '单次委托已核准入列排程（所列入列项均仍在编或候列，尚未完工入列）',
+  /** committed 回执部分项目已完工入列时的状态表述 */
+  planningStatusCommittedPartlyDone: (done: number, total: number) =>
+    `单次委托已核准入列排程（所列入列项 ${total} 项中 ${done} 项已完工入列，其余仍在编或候列）`,
   /** 排产回执动作明细行——被拒阻塞：`· [驳回] Y——原因：{reason}；建议：{nextStep}` */
   planningActionRejectedLine: (target: string, reason: string, nextStep?: string) =>
     nextStep && nextStep.trim().length > 0

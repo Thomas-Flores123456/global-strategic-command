@@ -189,7 +189,7 @@ describe('deriveResearchAdvisory（§3.7 多基地分组推导）', () => {
     expect(names).toEqual(authorityResearchable(snap.data, 'b1', NO_OVERLAYS));
   });
 
-  it('多基地：每个 Base.id 独立推导，建筑前置只看本基地', () => {
+  it('多基地：每个 Base.id 独立分组，但研究前置建筑全基地口径——主基地的兵营让前哨也能研个人装备工程学', () => {
     const snap = snapshotOf({
       economy: { credits: 1000 },
       bases: [initialBase('b1', '主基地', [{ name: '兵营', state: '运转' }]), initialBase('b2', '前哨', [])],
@@ -201,7 +201,7 @@ describe('deriveResearchAdvisory（§3.7 多基地分组推导）', () => {
     ]);
     const [main, outpost] = advisory.groups;
     expect(main.candidates.map(c => c.name)).toContain('个人装备工程学');
-    expect(outpost.candidates.map(c => c.name)).not.toContain('个人装备工程学');
+    expect(outpost.candidates.map(c => c.name)).toContain('个人装备工程学');
     expect(main.candidates.map(c => c.name)).toEqual(authorityResearchable(snap.data, 'b1', NO_OVERLAYS));
     expect(outpost.candidates.map(c => c.name)).toEqual(authorityResearchable(snap.data, 'b2', NO_OVERLAYS));
   });

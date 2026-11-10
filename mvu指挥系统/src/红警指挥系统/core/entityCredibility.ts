@@ -682,7 +682,8 @@ export function buildEntityCredibilityIndex(
             registerAlias(baseTitle, name, domain, true);
           }
         }
-        if (name === '通用履带底盘与空降轻装族') {
+        if (name === '通用履带底盘与空降轻装族' || name === 'MT-LB通用两栖装甲牵引输送车') {
+          registerAlias('通用履带底盘与空降轻装族', name, domain, true);
           registerAlias('防空履带车', name, domain, true);
           registerAlias('苏联防空履带车', name, domain, true);
           registerAlias('履带防空车', name, domain, true);

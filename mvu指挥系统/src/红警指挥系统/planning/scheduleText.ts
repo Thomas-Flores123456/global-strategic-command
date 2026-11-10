@@ -29,7 +29,7 @@ import {
   type GenerationEntry,
 } from '../parse/floorScanner';
 import { canon } from '../parse/parsePipeline';
-import { resolveGenerationEntry, type GenerationDescriptor } from './researchAdvisory';
+import { resolveGenerationEntry, deriveGlobalResearchLimit, type GenerationDescriptor } from './researchAdvisory';
 import { lineIndexFromCatalog, makeLaneKeyFor, makeParallelLimitFor, slotBoard, SLOT_REGISTRY } from '../engines/researchSlots';
 import {
   deployIndexFromCatalog,
@@ -99,6 +99,21 @@ export interface ScheduleResearchLane {
   lockedReason?: string;
 }
 
+/**
+ * 回执实时对账账本：用当前队列与在役实体校正「最近一次」排产回执的措辞。
+ * 全部字段可缺省：缺什么就少对哪一维，不做推测。
+ */
+export interface ReceiptLedgerLike {
+  /** 当前队列（含 cancelled/done：仅根据 status 判定，不自行假设收面） */
+  queues?: ReadonlyArray<{ type?: string; item?: string; base?: string; status?: string }>;
+  /** 已完工（非「建造中」）建筑名全集，用于判定建造项是否已入列 */
+  buildingNames?: readonly string[];
+  /** 在役部队名（forces.troops 的键） */
+  troopNames?: readonly string[];
+  /** 在役载具名（forces.vehicles） */
+  vehicleNames?: readonly string[];
+}
+
 /** 前馈日程生成选项（回调全部可注入，缺席时退引擎默认口径） */
 export interface ScheduleOptions {
   /** 工况效率回调（default 恒 1）；倒计时按 1/eff 投影为墙钟口径，eff<=0 记停摆 */
@@ -113,8 +128,14 @@ export interface ScheduleOptions {
   bases?: readonly ScheduleBaseLike[];
   /** 研究序列表（提供后研究事务单列「战区科研调度」一节；缺席时研究按普通 lane 落基地组） */
   researchLanes?: readonly ScheduleResearchLane[];
+  /** 战区全局研究并行上限（§4.2 tier 门；算法同源 GLOBAL_RESEARCH_LIMITS[techTier(state)]）。
+   *  缺席时不出全局并行行（向后兼容）；提供时在科研章节头下补一行——单序列上限之外，
+   *  引擎另有一层跨序列的全球同时在研门，不写进前馈模型会误以为可无限开新序列。 */
+  researchGlobalLimit?: { techTier: 1 | 2 | 3; globalLimit: number };
   /** 战区内时钟（stat_data.clock；缺席不出时钟行） */
   clock?: { day: number; time: string };
+  /** 战区公历日期（stat_data.meta.date，`YYYY-MM-DD`；提供时时钟行与 ETA 以公历日期为主锚） */
+  calendarDate?: string;
   /** 协议五态运行时账本（PRT-SCHED-01 · stat_data.protocols；无演训活动时整节省略，零注入污染） */
   protocols?: ReadonlyArray<Partial<ProtocolInstance>>;
   /** 当前可用协议点储备（PRT-SCHED-01 · stat_data.protocol_points；缺省从 protocolState 读取或兑底 0） */
@@ -125,6 +146,9 @@ export interface ScheduleOptions {
   protocolState?: ProtocolEngineStateView;
   /** 参谋排产回执（PLN-SCHED-01 · stat_data.planning?.latest_receipt；空或无有效内容时整节省略） */
   planningReceipt?: PlanningReceipt | null;
+  /** 回执实时对账账本（可选）：回执是「最近一次」快照，措辞容易与当前战况脱节。
+   *  提供后逐项标注在编/候列/已完工，并改用注入时现算的产线名；缺席时回执保持历史原文，零行为变化。 */
+  receiptLedger?: ReceiptLedgerLike;
   /** 重大工程与改装项目运行时账本（FD-45 · stat_data.projects；无在建或本轮新竣工工程时整节省略，零注入污染） */
   projects?: ReadonlyArray<Project>;
   /** 上一有效楼重大工程快照（FD-45 · 用于判定本轮刚竣工的工程及阶段跃迁） */
@@ -153,6 +177,45 @@ export function fmtMinutes(minutes: number): string {
 
 function safeQty(txn: TransactionItem): number {
   return txn.qty > 0 ? txn.qty : 1;
+}
+
+/**
+ * 战区时钟 + 尚需分钟 → 绝对完成时点（day/time 同形制）。
+ * 纯算术，不做时区/昼夜推导（那是 timezoneWeatherEngine 的职责）。
+ * clock 缺席、或 time 不符合 `HH:mm` （与 stat_data 实存形制一致）→ null（不出 ETA，防造时间）。
+ * 提供 calendarDate（stat_data.meta.date，`YYYY-MM-DD`）时同步给出公历日期与距今天数：
+ * 正文只有公历日期锚点，模型无法把「第 N 日」换算回当日，曾将「第 203 日 11:00」误读成「今日 11:00」。
+ */
+export function projectEtaPoint(
+  clock: { day: number; time: string } | undefined,
+  plusMinutes: number,
+  calendarDate?: string,
+): { day: number; time: string; date?: string; daysAhead: number } | null {
+  if (!clock || typeof clock.time !== 'string') return null;
+  const m = clock.time.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hh = Number(m[1]);
+  const mm = Number(m[2]);
+  if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  if (!Number.isFinite(plusMinutes)) return null;
+
+  const day0 = Number.isFinite(clock.day) ? Math.max(0, Math.trunc(clock.day)) : 0;
+  const total = hh * 60 + mm + Math.max(0, Math.round(plusMinutes));
+  const dayShift = Math.floor(total / 1440);
+  const wrapped = ((total % 1440) + 1440) % 1440;
+  const time = `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
+  const date = shiftCalendarDate(calendarDate, dayShift);
+  return { day: day0 + dayShift, time, ...(date ? { date } : {}), daysAhead: dayShift };
+}
+
+/** `YYYY-MM-DD` + 天数 → `YYYY-MM-DD`（形制不合 / 缺席 → undefined，不造日期） */
+function shiftCalendarDate(date: string | undefined, days: number): string | undefined {
+  if (typeof date !== 'string') return undefined;
+  const m = date.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (!m) return undefined;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days));
+  if (Number.isNaN(d.getTime())) return undefined;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
 /** 物理已下线台数（批次口径，钳制在 [0, qty]） */
@@ -399,6 +462,123 @@ function renderProtocolSection(options: ScheduleOptions): string[] {
   return lines;
 }
 
+/** 回执 eta_note 里被冻结的产线标注（入队当时写死；旧归类/旧版本会永久错下去） */
+const ETA_LANE_NOTE_PATTERN = /（产线：[^）]*）/;
+
+/** 剥除回执原文里的产线标注（残余标点/空白一并收尾） */
+function stripLaneNote(note: string): string {
+  return note.replace(ETA_LANE_NOTE_PATTERN, '').replace(/，\s*$/, '').replace(/[、，]\s*$/, '').trim();
+}
+
+/** 回执单项的对账结果 */
+interface ReceiptActionState {
+  /** 注入时现算的产线名（算不出就不出） */
+  laneName?: string;
+  /** 逐项实况标签（仅提供 receiptLedger 时才有） */
+  tag?: string;
+  /** 是否已完工入列 */
+  done: boolean;
+}
+
+/** 回执动作归类：先看队列同项（最可靠），再看建筑/部队/载具在役名 */
+function inferReceiptItemType(
+  target: string,
+  baseRef: string,
+  ledger: ReceiptLedgerLike | undefined,
+): '建造' | '生产' | '研究' | undefined {
+  const targetCanon = canon(target);
+  if (!targetCanon) return undefined;
+  const baseCanon = canon(baseRef);
+  for (const q of ledger?.queues ?? []) {
+    if (!q || canon(String(q.item ?? '')) !== targetCanon) continue;
+    const qBase = canon(String(q.base ?? ''));
+    if (baseCanon && qBase && qBase !== baseCanon) continue;
+    const type = String(q.type ?? '').trim();
+    if (type === '建造' || type === '生产' || type === '研究') return type;
+  }
+  if ((ledger?.buildingNames ?? []).some(n => canon(n) === targetCanon)) return '建造';
+  if (
+    (ledger?.troopNames ?? []).some(n => canon(n) === targetCanon) ||
+    (ledger?.vehicleNames ?? []).some(n => canon(n) === targetCanon)
+  ) {
+    return '生产';
+  }
+  return undefined;
+}
+
+/** 从队列实况取标签（无队列记录时返 undefined，交上层继续判在役） */
+function receiptQueueTag(status: string): string | undefined {
+  const s = status.trim();
+  if (s === 'active') return SCHEDULE_COPY.planningReceiptTagActive;
+  if (s === 'queued') return SCHEDULE_COPY.planningReceiptTagQueued;
+  if (s === 'settling') return SCHEDULE_COPY.planningReceiptTagSettling;
+  if (s === 'done') return SCHEDULE_COPY.planningReceiptTagDone;
+  return undefined;
+}
+
+/**
+ * 回执单项对账（纯函数）：
+ * - 产线名一律用当前目录重算（不消费历史字符串，历史错标自动钞正）；
+ * - 提供 ledger 时再追加实况标签，并告诉调用方该项是否已完工。
+ */
+function reconcileReceiptAction(
+  target: string,
+  baseRef: string,
+  options: ScheduleOptions,
+): ReceiptActionState {
+  const ledger = options.receiptLedger;
+  const type = inferReceiptItemType(target, baseRef, ledger);
+
+  let laneName: string | undefined;
+  if (type && options.laneKeyFor) {
+    const synth = { type, item: target, base: baseRef } as unknown as TransactionItem;
+    const laneKey = options.laneKeyFor(synth);
+    if (laneKey) {
+      const name = options.laneNameFor
+        ? options.laneNameFor(laneKey, synth)
+        : defaultLaneName(laneKey, synth);
+      const trimmed = typeof name === 'string' ? name.trim() : '';
+      if (trimmed) laneName = trimmed;
+    }
+  }
+
+  if (!ledger) return { laneName, done: false };
+
+  const targetCanon = canon(target);
+  const baseCanon = canon(baseRef);
+  const queued = (ledger.queues ?? []).find(q => {
+    if (!q || canon(String(q.item ?? '')) !== targetCanon) return false;
+    const qBase = canon(String(q.base ?? ''));
+    return !(baseCanon && qBase && qBase !== baseCanon);
+  });
+  if (queued) {
+    const tag = receiptQueueTag(String(queued.status ?? ''));
+    return { laneName, tag: tag ?? SCHEDULE_COPY.planningReceiptTagMissing, done: false };
+  }
+
+  const owned =
+    (ledger.buildingNames ?? []).some(n => canon(n) === targetCanon) ||
+    (ledger.troopNames ?? []).some(n => canon(n) === targetCanon) ||
+    (ledger.vehicleNames ?? []).some(n => canon(n) === targetCanon);
+  return {
+    laneName,
+    tag: owned ? SCHEDULE_COPY.planningReceiptTagDone : SCHEDULE_COPY.planningReceiptTagMissing,
+    done: owned,
+  };
+}
+
+/** 回执动作是否被驳回（单项驳回与整单驳回同口径） */
+function isReceiptActionRejected(
+  action: { status?: string; blocker_reason?: string },
+  receipt: PlanningReceipt,
+): boolean {
+  return (
+    action.status === 'rejected' ||
+    receipt.status === 'rejected' ||
+    Boolean(typeof action.blocker_reason === 'string' && action.blocker_reason.trim().length > 0)
+  );
+}
+
 /** 渲染 `◆ 参谋部排产方案与执行回执` 章节行（PLN-SCHED-01；无排产回执或无有效内容时严格返回 []） */
 export function renderPlanningReceiptSection(options: ScheduleOptions): string[] {
   const receipt = options.planningReceipt;
@@ -432,7 +612,22 @@ export function renderPlanningReceiptSection(options: ScheduleOptions): string[]
 
   const lines: string[] = [SCHEDULE_COPY.planningSectionHeader];
 
-  const statusText =
+  // 逐项对账（仅入队类动作参与方案进度统计；驳回项另有自己的行口径）
+  const actionStates = validActions.map(action => {
+    const target = String(action.target ?? '').trim();
+    const rejected = isReceiptActionRejected(action, receipt);
+    const state =
+      rejected || !target
+        ? null
+        : reconcileReceiptAction(target, String(action.base || receipt.base_ref || '').trim(), options);
+    return { rejected, state };
+  });
+  const enqueueStates = actionStates
+    .filter((entry, i) => !entry.rejected && (validActions[i]?.op ?? 'enqueue') === 'enqueue')
+    .map(entry => entry.state)
+    .filter((state): state is ReceiptActionState => Boolean(state));
+
+  let statusText: string =
     receipt.status === 'committed'
       ? SCHEDULE_COPY.planningStatusCommitted
       : receipt.status === 'awaiting_approval'
@@ -442,6 +637,18 @@ export function renderPlanningReceiptSection(options: ScheduleOptions): string[]
           : receipt.status === 'stale_snapshot'
             ? SCHEDULE_COPY.planningStatusStaleSnapshot
             : SCHEDULE_COPY.planningStatusAdvisoryReady;
+
+  // 回执是「最近一次」快照：有账本时按当前队列/在役实况纠正方案状态措辞（防模型把已完工项当在排队）
+  if (options.receiptLedger && receipt.status === 'committed' && enqueueStates.length > 0) {
+    const total = enqueueStates.length;
+    const doneCount = enqueueStates.filter(state => state.done).length;
+    statusText =
+      doneCount === total
+        ? SCHEDULE_COPY.planningStatusCommittedAllDone
+        : doneCount > 0
+          ? SCHEDULE_COPY.planningStatusCommittedPartlyDone(doneCount, total)
+          : SCHEDULE_COPY.planningStatusCommittedAllActive;
+  }
 
   lines.push(SCHEDULE_COPY.planningStatusLine(statusText));
 
@@ -472,14 +679,11 @@ export function renderPlanningReceiptSection(options: ScheduleOptions): string[]
     return matched ? matched.name : trimmed;
   };
 
-  for (const action of validActions) {
+  for (const [index, action] of validActions.entries()) {
     const target = String(action.target ?? '').trim() || '未命名项目';
-    const isRejected =
-      action.status === 'rejected' ||
-      receipt.status === 'rejected' ||
-      Boolean(typeof action.blocker_reason === 'string' && action.blocker_reason.trim().length > 0);
+    const rejected = actionStates[index]?.rejected ?? isReceiptActionRejected(action, receipt);
 
-    if (isRejected) {
+    if (rejected) {
       const rejectReason =
         (typeof action.blocker_reason === 'string' && action.blocker_reason.trim()) ||
         reason ||
@@ -502,12 +706,20 @@ export function renderPlanningReceiptSection(options: ScheduleOptions): string[]
       typeof action.est_minutes === 'number' && Number.isFinite(action.est_minutes)
         ? Math.max(0, action.est_minutes)
         : 0;
-    const etaNote = typeof action.eta_note === 'string' ? action.eta_note.trim() : '';
+    const rawEtaNote = typeof action.eta_note === 'string' ? action.eta_note.trim() : '';
+    // 产线名不消费历史字符串：一律用当前目录重算（入队当时写死的旧归类会永久错下去），算不出就不打括号
+    const etaNote = stripLaneNote(rawEtaNote);
+    const laneName = actionStates[index]?.state?.laneName;
+    const laneSuffix = laneName ? `（产线：${laneName}）` : '';
     const durationText =
-      estMinutes > 0 ? (etaNote ? `${fmtMinutes(estMinutes)}，${etaNote}` : fmtMinutes(estMinutes)) : etaNote || '待核定';
+      (estMinutes > 0 ? (etaNote ? `${fmtMinutes(estMinutes)}，${etaNote}` : fmtMinutes(estMinutes)) : etaNote || '待核定') +
+      laneSuffix;
     const opVerb = PLANNING_ACTION_OP_VERB[action.op ?? 'enqueue'] ?? '入队';
+    const reconciledTag = actionStates[index]?.state?.tag;
 
-    lines.push(SCHEDULE_COPY.planningActionAcceptedLine(baseName, target, qty, costCredits, durationText, opVerb));
+    lines.push(
+      SCHEDULE_COPY.planningActionAcceptedLine(baseName, target, qty, costCredits, durationText, opVerb, reconciledTag),
+    );
   }
 
   return lines;
@@ -768,6 +980,8 @@ export function predicateFor(
   txn: TransactionItem,
   prevInLane: TransactionItem | undefined,
   effFor: (txn: TransactionItem) => number,
+  clock?: { day: number; time: string },
+  calendarDate?: string,
 ): string {
   const progress = Math.round(txn.progress);
   const qty = safeQty(txn);
@@ -803,15 +1017,21 @@ export function predicateFor(
     const beat = fmtMinutes(unit / eff);
     const perUnit = fmtMinutes(nextUnitIn / eff);
     const total = fmtMinutes(remaining / eff);
-    return eff !== 1
-      ? SCHEDULE_COPY.activeBatchEff(progress, done, qty, supplyPct, beat, perUnit, total)
-      : SCHEDULE_COPY.activeBatch(progress, done, qty, beat, perUnit, total);
+    const body =
+      eff !== 1
+        ? SCHEDULE_COPY.activeBatchEff(progress, done, qty, supplyPct, beat, perUnit, total)
+        : SCHEDULE_COPY.activeBatch(progress, done, qty, beat, perUnit, total);
+    const etaPt = projectEtaPoint(clock, remaining / eff, calendarDate);
+    return etaPt ? `${body}${SCHEDULE_COPY.etaBatchSuffix(etaPt.day, etaPt.time, etaPt.date, etaPt.daysAhead)}` : body;
   }
 
   const need = fmtMinutes(remaining / eff);
-  return eff !== 1
-    ? SCHEDULE_COPY.activeSingleEff(progress, need, supplyPct)
-    : SCHEDULE_COPY.activeSingle(progress, need);
+  const single =
+    eff !== 1
+      ? SCHEDULE_COPY.activeSingleEff(progress, need, supplyPct)
+      : SCHEDULE_COPY.activeSingle(progress, need);
+  const etaPoint = projectEtaPoint(clock, remaining / eff, calendarDate);
+  return etaPoint ? `${single}${SCHEDULE_COPY.etaSuffix(etaPoint.day, etaPoint.time, etaPoint.date, etaPoint.daysAhead)}` : single;
 }
 
 /* ═══════════════ 两级分组渲染（§4.1.1 冻结骨架） ═══════════════ */
@@ -839,11 +1059,31 @@ function groupByLane(txns: TransactionItem[], laneKeyFor: (txn: TransactionItem)
   return lanes;
 }
 
+/**
+ * 渲染科研章节的全局并行行（§4.2 tier 门）：科技资格 T1/T2/T3 → 同时全局在研上限 2/4/不限。
+ * 在研数口径与引擎升格门同源：只算 status==='active'（settling 不占额度）。
+ * 未供上限时返回空数组（不出行）；满编时额外一行世界内提示（升格受阻的真因，模型无需自行推导）。
+ */
+function renderGlobalResearchLine(
+  limit: ScheduleOptions['researchGlobalLimit'],
+  activeCount: number,
+): string[] {
+  if (!limit) return [];
+  const { techTier, globalLimit } = limit;
+  if (!Number.isFinite(globalLimit)) return [SCHEDULE_COPY.researchGlobalUnlimited];
+  const cap = Math.max(0, Math.trunc(globalLimit));
+  const remaining = Math.max(0, cap - activeCount);
+  const line = SCHEDULE_COPY.researchGlobalLine(activeCount, `${cap}`, techTier, `${remaining}`);
+  return remaining === 0 ? [line, SCHEDULE_COPY.researchGlobalFull(`${cap}`)] : [line];
+}
+
 /** 渲染一个 lane 区块（序列头＋条目行）；limit/lockedReason 由调用方按 lane 来源供给 */
 function renderLane(
   lane: LaneGroup,
   header: { name: string; limit: number; lockedReason?: string },
   effFor: (txn: TransactionItem) => number,
+  clock?: { day: number; time: string },
+  calendarDate?: string,
 ): string[] {
   const lines: string[] = [];
   const activeCount = lane.txns.filter(isOccupying).length;
@@ -853,7 +1093,12 @@ function renderLane(
       : SCHEDULE_COPY.laneHeader(header.name, activeCount, header.limit),
   );
   for (let i = 0; i < lane.txns.length; i++) {
-    lines.push(SCHEDULE_COPY.itemLine(lane.txns[i].item, predicateFor(lane.txns[i], lane.txns[i - 1], effFor)));
+    lines.push(
+      SCHEDULE_COPY.itemLine(
+        lane.txns[i].item,
+        predicateFor(lane.txns[i], lane.txns[i - 1], effFor, clock, calendarDate),
+      ),
+    );
   }
   return lines;
 }
@@ -901,7 +1146,7 @@ export function buildScheduleText(queues: readonly TransactionItem[], options: S
     transferLines.length === 0;
 
   const lines: string[] = [SCHEDULE_COPY.tagOpen];
-  if (options.clock) lines.push(SCHEDULE_COPY.clockLine(options.clock.day, options.clock.time));
+  if (options.clock) lines.push(SCHEDULE_COPY.clockLine(options.clock.day, options.clock.time, options.calendarDate));
 
   // 全空态（§4.1.1）：一行收口，不出骨架（若存在协议演训活动、排产回执、重大工程或在途调配章节，照常追加对应章节）
   if (scheduled.length === 0) {
@@ -969,6 +1214,8 @@ export function buildScheduleText(queues: readonly TransactionItem[], options: S
           lane,
           { name: laneNameFor(lane.key, lane.txns[0]), limit: Math.max(0, limitFor(lane.txns[0])) },
           effFor,
+          options.clock,
+          options.calendarDate,
         ),
       );
     }
@@ -977,6 +1224,7 @@ export function buildScheduleText(queues: readonly TransactionItem[], options: S
   /* ── 单列一节：战区科研调度（槽位制；序列表全量呈现，含未开通序列的世界内理由） ── */
   if (researchLanes.length > 0) {
     lines.push(SCHEDULE_COPY.researchSectionHeader);
+    lines.push(...renderGlobalResearchLine(options.researchGlobalLimit, researchTxns.filter(isOccupying).length));
     const lanesByKey = new Map<string, LaneGroup>();
     for (const lane of groupByLane(researchTxns, laneKeyFor)) lanesByKey.set(lane.key, lane);
     const renderedKeys = new Set<string>();
@@ -984,7 +1232,9 @@ export function buildScheduleText(queues: readonly TransactionItem[], options: S
     for (const def of researchLanes) {
       const lane = lanesByKey.get(def.key) ?? { key: def.key, txns: [] };
       renderedKeys.add(def.key);
-      lines.push(...renderLane(lane, { name: def.name, limit: def.limit, lockedReason: def.lockedReason }, effFor));
+      lines.push(
+        ...renderLane(lane, { name: def.name, limit: def.limit, lockedReason: def.lockedReason }, effFor, options.clock, options.calendarDate),
+      );
     }
     // 序列表之外的 research: lane（调用方列表缺漏）兜底列后，不丢事务
     for (const lane of lanesByKey.values()) {
@@ -994,6 +1244,8 @@ export function buildScheduleText(queues: readonly TransactionItem[], options: S
           lane,
           { name: laneNameFor(lane.key, lane.txns[0]), limit: Math.max(0, limitFor(lane.txns[0])) },
           effFor,
+          options.clock,
+          options.calendarDate,
         ),
       );
     }
@@ -1128,6 +1380,22 @@ export function planScheduleInjection(input: {
     };
   });
 
+  // 回执实时对账账本：队列实况 + 已完工建筑 + 在役部队/载具（同一快照同源，不另读楼层）
+  const rawForces = rawSnapRec.forces as
+    | { troops?: Record<string, number>; vehicles?: ReadonlyArray<unknown> }
+    | undefined;
+  const receiptLedger: ReceiptLedgerLike = {
+    queues,
+    buildingNames: (data.bases ?? []).flatMap(base =>
+      (base.buildings ?? [])
+        .filter(bld => String((bld as unknown as { state?: string }).state ?? '运转').trim() !== '建造中')
+        .map(bld => String((bld as unknown as { name?: string }).name ?? '').trim())
+        .filter(Boolean),
+    ),
+    troopNames: Object.keys(rawForces?.troops ?? {}),
+    vehicleNames: Array.isArray(rawForces?.vehicles) ? rawForces.vehicles.map(item => String(item)) : [],
+  };
+
   const text = buildScheduleText(queues, {
     effFor: makeTxnEffFor(catalog, snapshot.data),
     // ENG-SLOT-01：'工程' 走 engineeringSlots 分流（与 settleFloor 组合口径一致），不进 laneFor 推导
@@ -1139,11 +1407,14 @@ export function planScheduleInjection(input: {
     bases: data.bases,
     researchLanes,
     clock: data.clock,
+    calendarDate: data.meta?.date,
+    researchGlobalLimit: deriveGlobalResearchLimit(slotView),
     protocols: data.protocols,
     protocolPoints: data.protocol_points,
     protocolCatalog: catalog.protocols,
     protocolState: data,
     planningReceipt,
+    receiptLedger,
     projects: data.projects,
     prevProjects: previous?.data.projects,
     projectCatalog: [...catalog.retrofits, ...catalog.projects],

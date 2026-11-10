@@ -583,3 +583,85 @@ describe('CTRL-2STAGE-PROD-01 · 纯函数性', () => {
   });
 });
 
+
+describe('G3-04 · 研究共享算力与事件积分', () => {
+  const research = (item: string, extra: Partial<TransactionItem> = {}) =>
+    txn({ type: '研究', item, base: 'alpha', total_minutes: 10000, spent_minutes: 5000, progress: 50, ...extra });
+  const options = (supply = 10) => ({
+    researchCompute: {
+      byBase: new Map([['alpha', { tflops: supply, tops: 0 }]]),
+      baseKeyFor: (reference: string) => reference,
+    },
+    computeFor: () => ({ tflops: supply, tops: 0 }),
+    assemblyFor: () => ({ tflops: 20 }),
+    laneKeyFor: (q: TransactionItem) => q.item,
+  });
+
+  it('同池两项各需20F、供给10F：各获5F；无绑定不再获得第二份战区供给', () => {
+    const state = { queues: [research('A'), research('B', { base: '' })] };
+    const r = settleWithTwoStage(state, 60, options());
+    expect(r.next.queues.map(q => q.spent_minutes)).toEqual([5070.5, 5070.5]);
+    expect(state.queues.map(q => q.spent_minutes)).toEqual([5000, 5000]);
+  });
+
+  it('按需求而非项目数均分；F/T两轨独立，零供给保留基础进度', () => {
+    const opts = { ...options(10),
+      researchCompute: { ...options().researchCompute, byBase: new Map([['alpha', { tflops: 10, tops: 40 }]]) },
+      assemblyFor: (q: TransactionItem) => q.item === 'A' ? { tflops: 20, tops: 40 } : { tflops: 60 },
+    };
+    const state = { queues: [research('A'), research('B')] };
+    const r = settleWithTwoStage(state, 60, opts);
+    expect(r.next.queues[0].spent_minutes).toBeCloseTo(5083.25);
+    expect(r.next.queues[1].spent_minutes).toBeCloseTo(5065.25);
+    expect(settleWithTwoStage(state, 60, options(0)).next.queues.map(q => q.spent_minutes)).toEqual([5060, 5060]);
+  });
+
+  it('混合研究/生产批次的qty事件按实例回填，不因研究批次先积分而串项', () => {
+    const r = settleWithTwoStage({ queues: [
+      txn({ item: '生产项', qty: 2, total_minutes: 1000, spent_minutes: 400, progress: 40 }),
+      research('研究项', { qty: 2, total_minutes: 1000, spent_minutes: 600, progress: 60 }),
+    ] }, 200, { ...options(0), assemblyFor: () => ({ req_nanites: 100 }) });
+    expect(r.next.queues.map(q => q.qty_done)).toEqual([0, 1]);
+    expect(r.events.filter(e => e.type === 'qty_progress').map(e => e.item)).toEqual(['研究项']);
+  });
+
+  it('受限基地不拖死全战区；未知绑定不可冒充无绑定', () => {
+    const opts = { ...options(), researchCompute: { ...options().researchCompute,
+      byBase: new Map([['alpha', { tflops: 10, tops: 0 }], ['beta', { tflops: 30, tops: 0 }]]),
+    } };
+    const r = settleWithTwoStage({ queues: [research('A'), research('B', { base: '' }), research('C', { base: 'missing' })] }, 60, opts);
+    expect(r.next.queues.map(q => q.spent_minutes)).toEqual([5081, 5102, 5060]);
+  });
+
+  it('阶段一不预占；跨阶段才加入共享，完成后释放份额', () => {
+    const r = settleWithTwoStage({ queues: [research('A', { spent_minutes: 4990 }), research('B')] }, 20, options(20));
+    expect(r.next.queues[0].spent_minutes).toBeCloseTo(5013.5);
+    expect(r.next.queues[1].spent_minutes).toBeCloseTo(5030.5);
+    const completed = settleWithTwoStage({ queues: [research('short', { total_minutes: 5017 }), research('long')] }, 20, {
+      ...options(20), assemblyFor: () => ({ t_mat: 0, t_asm: 1, tflops: 20 }),
+    });
+    expect(completed.next.queues[0].status).toBe('settling');
+    expect(completed.next.queues[1].spent_minutes).toBeCloseTo(5017 + (20 - 17 / 1.35) * 1.7);
+  });
+
+  it('接棒只取剩余墙钟，跨阶段不使用整楼Δt计算效率', () => {
+    const r = settleWithTwoStage({ queues: [
+      research('A', { total_minutes: 17, spent_minutes: 0, progress: 0 }),
+      research('C', { total_minutes: 1000, spent_minutes: 490, progress: 49, status: 'queued' }),
+    ] }, 60, { ...options(20), laneKeyFor: () => 'same',
+      assemblyFor: (q: TransactionItem) => q.item === 'A' ? { t_mat: 0, t_asm: 1, tflops: 20 } : { tflops: 20 },
+    });
+    expect(r.next.queues[0].status).toBe('settling');
+    expect(r.next.queues[1].spent_minutes).toBeCloseTo(568);
+  });
+
+  it('超编/hold候列不分摊；普通尾部升格不吃Δt；0分钟不推进', () => {
+    const state = { queues: [research('A'), research('over'), research('held', { status: 'queued', hold: true }),
+      research('tail', { status: 'queued' })] };
+    const opts = { ...options(20), laneKeyFor: (q: TransactionItem) => q.item === 'over' ? 'A' : q.item };
+    const r = settleWithTwoStage(state, 60, opts);
+    expect(r.next.queues.map(q => q.spent_minutes)).toEqual([5102, 5000, 5000, 5000]);
+    expect(r.next.queues.map(q => q.status)).toEqual(['active', 'queued', 'queued', 'active']);
+    expect(settleWithTwoStage(state, 0, opts).next.queues.map(q => q.spent_minutes)).toEqual([5000, 5000, 5000, 5000]);
+  });
+});

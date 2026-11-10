@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PROTOCOL_CATALOG,
+  FULL_DEFAULT_PROTOCOL_CATALOG,
   buildProtocolCatalogLookup,
   lookupProtocolCatalogEntry,
   mergeDefaultProtocolCatalog,
@@ -138,6 +139,30 @@ describe('DEC-CATALOG-01 · protocolCatalogIndex 协议索引去重收口与同�
     ]);
     expect(merged).toHaveLength(18);
     expect(merged.find(p => p.id === 'sov.research.t2.iron_curtain_emergency_overload')?.cost_points).toBe(2);
+  });
+});
+
+describe('G3-08a 同源识别与独立目录边界', () => {
+  it('未知无点号旧id仍按同源名称合并，保留原有条目覆盖优先级', () => {
+    const defaults = FULL_DEFAULT_PROTOCOL_CATALOG;
+    const external = [{ ...defaults[0], id: 'legacy_custom', desc: '外部目录描述' }];
+    const merged = mergeDefaultProtocolCatalog(defaults, external);
+    expect(merged).toHaveLength(defaults.length);
+    expect(merged.find(p => p.name === defaults[0].name)).toMatchObject({
+      id: 'legacy_custom', desc: '外部目录描述',
+    });
+    expect(merged.some(p => p.id === defaults[1].id)).toBe(true);
+  });
+
+  it('纯自定义无点号目录保持独立，带点号目录仍扩展默认表', () => {
+    const defaults = FULL_DEFAULT_PROTOCOL_CATALOG;
+    const external = [{ ...defaults[0], id: 'custom_only', name: '独立自定义测试协议' }];
+    const independent = mergeDefaultProtocolCatalog(defaults, external);
+    expect(independent.map(p => p.id)).toEqual(['custom_only']);
+    const extended = mergeDefaultProtocolCatalog(defaults, [{ ...external[0], id: 'custom.only' }]);
+    expect(extended).toHaveLength(defaults.length + 1);
+    expect(extended.some(p => p.id === defaults[0].id)).toBe(true);
+    expect(extended.some(p => p.id === 'custom.only')).toBe(true);
   });
 });
 

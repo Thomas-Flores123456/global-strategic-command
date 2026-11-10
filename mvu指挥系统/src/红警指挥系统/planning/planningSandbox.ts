@@ -25,7 +25,11 @@ import {
   type RuntimeProtocolsInput,
 } from '../core/catalogRuntimeContext';
 import {
-  combineLegacyPrerequisites,
+  checkBuildingAllowedByAuthority,
+  evaluateBaseBuildAuthority,
+} from '../core/buildAuthority';
+import {
+  combineResearchPrerequisites,
   evaluatePrerequisite,
   BUILDING_EQUIVALENTS,
   resolveUnitEquivalentCandidates,
@@ -498,10 +502,45 @@ function resolveBuiltinFoundationBuildingCandidate(
     if (qItem) existingSet.add(qItem);
   }
 
+  const authority = evaluateBaseBuildAuthority({
+    base: {
+      ...(targetBase as unknown as Parameters<typeof evaluateBaseBuildAuthority>[0]['base']),
+      forces: { vehicles: state.forces?.vehicles ?? [] },
+    },
+    snapshot: state as unknown as Parameters<typeof evaluateBaseBuildAuthority>[0]['snapshot'],
+  });
+  const authorityAllowed = checkBuildingAllowedByAuthority({
+    building: { name: target, cost: spec.unitCost },
+    authority,
+  }).allowed;
+
   const hasConyard = [...ROOT_CONYARD_BUILDINGS].some(
     rootName => setHasEquivalentBuilding(runningSet, rootName) || setHasEquivalentBuilding(existingSet, rootName),
   );
-  if (!hasConyard) {
+  // 根建造核心幂等门：目标本身是根核心等价项且该基地已有根核心（含在建/排队）时，不生成重复建设任务
+  const targetIsRootCore =
+    ROOT_CONYARD_BUILDINGS.has(spec.canonicalName) || ROOT_CONYARD_BUILDINGS.has(target);
+  if (targetIsRootCore && hasConyard) {
+    return {
+      id: spec.canonicalName,
+      name: target,
+      kind: '建造',
+      category: '基地建筑',
+      unitCost: spec.unitCost,
+      unitMinutes: spec.unitMinutes,
+      laneKey: `${baseId} build.other`,
+      laneName: '其他建筑线',
+      canProduceNow: false,
+      blocked: {
+        code: 'already_present',
+        reason: `${baseName}已具备运转中的建造核心，无需重复建设「${target}」`,
+        impact: `排产已跳过重复的根建造核心立项`,
+        nextStep: '请直接排产该基地的具体建筑或单位',
+        missingItems: [],
+      },
+    };
+  }
+  if (!hasConyard && !authorityAllowed) {
     return {
       id: spec.canonicalName,
       name: target,
@@ -892,7 +931,7 @@ export function runPlanningSandbox(
               protocols: safeCatalog.protocols ?? [],
             },
           };
-          const combinedCondition = combineLegacyPrerequisites(researchDef, 'running');
+          const combinedCondition = combineResearchPrerequisites(researchDef);
           const prereqEval = evaluatePrerequisite(combinedCondition, enrichedPrereqContext);
           if (!prereqEval.satisfied) {
             const blocked = classifyPlanningBlocker({

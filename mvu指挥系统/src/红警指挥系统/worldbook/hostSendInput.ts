@@ -9,6 +9,27 @@
  */
 export type HostSendChannel = 'textarea' | 'setinput' | 'failed';
 
+function resolveHostSendTextarea(): HTMLTextAreaElement | null {
+  const hostDoc =
+    (window.frameElement as HTMLElement | null)?.ownerDocument ??
+    window.parent?.document ??
+    document;
+  return hostDoc?.querySelector<HTMLTextAreaElement>('#send_textarea') ?? null;
+}
+
+/**
+ * 读取宿主 #send_textarea 当前文本（不改动输入框）。
+ * 用途：GENERATION_AFTER_COMMANDS 触发时用户楼尚未入 chat，本轮输入仍在输入框中；
+ * 前馈若需感知玩家本轮意图，只能从这里读。不可达/异常一律返回空串。
+ */
+export function readHostSendInput(): string {
+  try {
+    return resolveHostSendTextarea()?.value ?? '';
+  } catch {
+    return '';
+  }
+}
+
 /**
  * 将指令文本填入宿主 #send_textarea 并聚焦；失败回退 TavernHelper triggerSlash('/setinput …')。
  * 返回实际走通的通道（'failed'=两路均不通，调用方照实提示）。
@@ -16,11 +37,7 @@ export type HostSendChannel = 'textarea' | 'setinput' | 'failed';
 export function fillHostSendInput(orderText: string): HostSendChannel {
   // 1. 优先直接向宿主酒馆主文档的 #send_textarea 注入文本并触发事件
   try {
-    const hostDoc =
-      (window.frameElement as HTMLElement | null)?.ownerDocument ??
-      window.parent?.document ??
-      document;
-    const textarea = hostDoc?.querySelector<HTMLTextAreaElement>('#send_textarea');
+    const textarea = resolveHostSendTextarea();
     if (textarea) {
       textarea.value = orderText;
       textarea.dispatchEvent(new Event('input', { bubbles: true }));

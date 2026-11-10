@@ -15,6 +15,7 @@ import {
   hasProjectScheduleActivity,
   hasProtocolScheduleActivity,
   planScheduleInjection,
+  projectEtaPoint,
   renderProjectSection,
   SCHEDULE_INJECT_CONFIG,
   SCHEDULE_INJECT_ID,
@@ -207,6 +208,59 @@ describe('CTRL-RECONCILE-01 标准① · buildScheduleText（§4.1.1 两级分�
     expect(baseSection).toContain('▸ 生产产线（在编 1/1）');
   });
 
+  describe('科研全局并行上限（§4.2 tier 门）：跨序列全球同时在研门必须进前馈', () => {
+    const lane = { key: 'research:slot.vehicle', name: '载具研究序列', limit: 1 };
+    const opts = (globalLimit: { techTier: 1 | 2 | 3; globalLimit: number }) => ({
+      bases: BASES,
+      researchLanes: [lane] as typeof RESEARCH_LANES,
+      laneKeyFor,
+      researchGlobalLimit: globalLimit,
+    });
+
+    it('T1（上限 2）：在研数与余量照实，未满编不吐满编提示', () => {
+      const text = buildScheduleText([txn({ type: '研究', item: '机动侦察工学', base: 'b1', progress: 35 })], opts({ techTier: 1, globalLimit: 2 }));
+      expect(text).toContain('▸ 战区全局并行：在研 1/2（科技资格 T1 门限，余量 1）');
+      expect(text).not.toContain('已满编');
+    });
+
+    it('满编时额外一行世界内提示（升格受阻真因直接写明，不靠模型自行推导）', () => {
+      const text = buildScheduleText(
+        [
+          txn({ type: '研究', item: 'A', base: 'b1' }),
+          txn({ type: '研究', item: 'B', base: 'b1' }),
+          txn({ type: '研究', item: 'C', base: 'b1', status: 'queued', progress: 0 }),
+        ],
+        opts({ techTier: 1, globalLimit: 2 }),
+      );
+      expect(text).toContain('▸ 战区全局并行：在研 2/2（科技资格 T1 门限，余量 0）');
+      expect(text).toContain('已满编：在研 2 项已占满全局额度，新研需候列');
+    });
+
+    it('settling 不占额度（口径同引擎升格门：只算 active）', () => {
+      const text = buildScheduleText(
+        [
+          txn({ type: '研究', item: 'A', base: 'b1' }),
+          txn({ type: '研究', item: 'B', base: 'b1', status: 'settling' }),
+        ],
+        opts({ techTier: 2, globalLimit: 4 }),
+      );
+      expect(text).toContain('▸ 战区全局并行：在研 1/4（科技资格 T2 门限，余量 3）');
+    });
+
+    it('T3（无硬性上限）不出数字；未供上限时整行省略（向后兼容）', () => {
+      const t3 = buildScheduleText([txn({ type: '研究', item: 'A', base: 'b1' })], opts({ techTier: 3, globalLimit: Infinity }));
+      expect(t3).toContain('▸ 战区全局并行：无硬性上限（科技资格 T3 门限）');
+      expect(t3).not.toMatch(/在研 \d+\/-/);
+
+      const absent = buildScheduleText([txn({ type: '研究', item: 'A', base: 'b1' })], {
+        bases: BASES,
+        researchLanes: [lane] as typeof RESEARCH_LANES,
+        laneKeyFor,
+      });
+      expect(absent).not.toContain('战区全局并行');
+    });
+  });
+
   it('F1 措辞档：未开通序列下存在在册条目时，序列头挂「（遗留 N 项在册）」；零条目不挂', () => {
     const qs = [
       txn({ type: '研究', item: '精炼工艺改良', base: 'b1', status: 'queued' }),
@@ -266,6 +320,108 @@ describe('CTRL-RECONCILE-01 标准① · buildScheduleText（§4.1.1 两级分�
     expect(withClock).toContain('◆ 战区时：第 3 日 14:05');
     const without = buildScheduleText(qs, { bases: BASES });
     expect(without).not.toContain('战区时');
+  });
+
+  describe('预计完工时点（clock 推算）', () => {
+    it('projectEtaPoint：跨日进位、同日内不进位、非法形制返 null', () => {
+      expect(projectEtaPoint({ day: 3, time: '14:05' }, 90)).toEqual({ day: 3, time: '15:35', daysAhead: 0 });
+      expect(projectEtaPoint({ day: 3, time: '23:30' }, 90)).toEqual({ day: 4, time: '01:00', daysAhead: 1 });
+      expect(projectEtaPoint({ day: 5, time: '08:00' }, 1440)).toEqual({ day: 6, time: '08:00', daysAhead: 1 });
+      expect(projectEtaPoint(undefined, 60)).toBeNull();
+      expect(projectEtaPoint({ day: 3, time: '下午三点' }, 60)).toBeNull();
+      expect(projectEtaPoint({ day: 3, time: '25:00' }, 60)).toBeNull();
+    });
+
+    it('projectEtaPoint：提供 meta.date 时同步给出公历日期（跨月/跨年进位；形制不合不造日期）', () => {
+      expect(projectEtaPoint({ day: 201, time: '09:00' }, 3000, '2043-01-03')).toEqual({
+        day: 203,
+        time: '11:00',
+        date: '2043-01-05',
+        daysAhead: 2,
+      });
+      expect(projectEtaPoint({ day: 10, time: '23:00' }, 120, '2042-12-31')).toMatchObject({ date: '2043-01-01', daysAhead: 1 });
+      expect(projectEtaPoint({ day: 10, time: '08:00' }, 60, '十二月三十一日')).toEqual({ day: 10, time: '09:00', daysAhead: 0 });
+    });
+
+    it('真机回归（第 116–122 楼）：公历日期为主锚、距今天数副注，模型不再把「第 203 日 11:00」误读为「今日 11:00」', () => {
+      const text = buildScheduleText(
+        [txn({ type: '研究', item: '基础环境工程学', total_minutes: 4320, spent_minutes: 1320, progress: 30.55 })],
+        { bases: BASES, clock: { day: 201, time: '09:00' }, calendarDate: '2043-01-03' },
+      );
+      expect(text).toContain('◆ 战区时：2043-01-03 09:00（第 201 日）');
+      expect(text).toContain('基础环境工程学——进度 31%；尚需 2天2小时；预计完工：2043-01-05 11:00（第 203 日，距今 2 天）');
+      expect(text).not.toContain('预计完工：第 203 日 11:00');
+    });
+
+    it('距今天数副注：当日「今日」、次日「明日」', () => {
+      const today = buildScheduleText([txn({ total_minutes: 60, spent_minutes: 0 })], {
+        bases: BASES,
+        clock: { day: 3, time: '08:00' },
+        calendarDate: '2042-03-14',
+      });
+      expect(today).toContain('预计完工：2042-03-14 09:00（第 3 日，今日）');
+      const tomorrow = buildScheduleText([txn({ total_minutes: 1000, spent_minutes: 0 })], {
+        bases: BASES,
+        clock: { day: 3, time: '14:05' },
+        calendarDate: '2042-03-14',
+      });
+      expect(tomorrow).toContain('预计完工：2042-03-15 06:45（第 4 日，明日）');
+    });
+
+    it('在产单台（无 meta.date）：「尚需T」后追「预计完工：第X日 HH:mm」，与 need 同口径', () => {
+      // 剩 1000 分钟、eff=1 → 14:05 + 1000min(16h40m) = 次日 06:45
+      const text = buildScheduleText([txn({ total_minutes: 1000, spent_minutes: 0 })], {
+        bases: BASES,
+        clock: { day: 3, time: '14:05' },
+      });
+      expect(text).toContain('进度 0%；尚需 16小时40分；预计完工：第 4 日 06:45');
+    });
+
+    it('eff 投影同时进入「尚需」与 ETA（两者用同一投影后时长）', () => {
+      const text = buildScheduleText([txn({ total_minutes: 600, spent_minutes: 0 })], {
+        bases: BASES,
+        clock: { day: 8, time: '10:00' },
+        effFor: () => 0.5,
+      });
+      // 600 × (1/0.5) = 1200min = 20h → 次日 06:00
+      expect(text).toContain('尚需 20小时');
+      expect(text).toContain('预计完工：第 9 日 06:00');
+    });
+
+    it('批次：「预计全批完工」取全批剩余口径', () => {
+      const text = buildScheduleText(
+        [txn({ total_minutes: 600, spent_minutes: 0, qty: 3, qty_done: 0 })],
+        { bases: BASES, clock: { day: 2, time: '20:00' } },
+      );
+      expect(text).toContain('预计全批完工：第 3 日 06:00');
+    });
+
+    it('clock 缺席 / 停摆 / 工期未核定：不出 ETA（不出时间点、不造时间）', () => {
+      const noClock = buildScheduleText([txn()], { bases: BASES });
+      expect(noClock).not.toContain('预计完工');
+
+      const stalled = buildScheduleText([txn()], { bases: BASES, clock: { day: 3, time: '08:00' }, effFor: () => 0 });
+      expect(stalled).toContain('因工况中断，进度冻结');
+      expect(stalled).not.toContain('预计完工');
+
+      const unknown = buildScheduleText([txn({ total_minutes: 0 })], {
+        bases: BASES,
+        clock: { day: 3, time: '08:00' },
+      });
+      expect(unknown).toContain('工期未核定');
+      expect(unknown).not.toContain('预计完工');
+    });
+
+    it('排队与待对账事项不出 ETA（仅 active 有进度可推）', () => {
+      const qs = [
+        txn({ item: '在产项', total_minutes: 60 }),
+        txn({ item: '排队项', status: 'queued', progress: 0 }),
+      ];
+      const text = buildScheduleText(qs, { bases: BASES, clock: { day: 3, time: '08:00' } });
+      const queuedLine = text.split('\n').find(l => l.includes('排队项')) ?? '';
+      expect(queuedLine).toContain('已立项待产');
+      expect(queuedLine).not.toContain('预计');
+    });
   });
 
   it('done/cancelled 不上日程；仅终态时落全空句', () => {

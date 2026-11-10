@@ -17,7 +17,9 @@
 
 import type { EffectiveCatalog } from '../core/catalogEffective';
 import type { TransactionItem, TransactionStatus } from './transactionEngine';
+import { advanceResearchBatch, type ResearchComputeContext } from './researchSharedCompute';
 import {
+  makeTwoStageEffFor,
   MINUTES_PER_DAY,
   applyNaniteDeduction,
   phase2Multiplier,
@@ -233,6 +235,8 @@ export interface TickContext {
    * 加速并执行双轨 minDaysLock（研究总工期地板 / 制造阶段二地板）物理硬下限钳制。
    */
   computeFor?: ComputeBudget | ((task: UnifiedTask) => ComputeBudget);
+  /** G3-04：与正式结算同源的唯一基地供给账本。 */
+  researchCompute?: ResearchComputeContext;
   /**
    * 可选：可用纳米库存查询回调或静态值（桥接 twoStageAssemblyEngine.applyNaniteDeduction）。
    * 注入后对零进度（spentMinutes === 0）的 active 任务执行一次阶段一纳米抵扣并产出 nanites_deducted 事件。
@@ -704,6 +708,8 @@ export function tickTaskOrchestration(
   };
 
   // 第一阶段执行体：容量缩水挤退（末序在编优先）＋ 空额带宽升格
+  const sharedResearch = (task: UnifiedTask) => ctx.researchCompute !== undefined && task.domain === 'research' && !isContainerTask(task);
+  const sharedPromoted = new Set<string>();
   const runStage1Bandwidth = (): Set<string> => {
     const activeByLane = new Map<string, number>();
     const activeByDomain = new Map<TaskDomain, number>();
@@ -712,7 +718,7 @@ export function tickTaskOrchestration(
 
     // 1a. 容量缩水挤退（Capacity Shrinkage）：按数组序保留前 N 个合规 active，末序超额 active 挤退回 queued
     for (const task of nextTasks) {
-      if (isContainerTask(task) || task.status !== 'active') continue;
+      if (isContainerTask(task) || task.status !== 'active' || (sharedResearch(task) && ctx.promotionTiming === 'after_integration')) continue;
       const laneCap = getEffectiveCapacity(task);
       const globalLimit = getEffectiveGlobalLimit(task);
       const laneUsed = activeByLane.get(task.laneKey) ?? 0;
@@ -736,7 +742,7 @@ export function tickTaskOrchestration(
 
     // 1b. 空额带宽升格（Bandwidth Promotion）：仅 status === 'queued' 参与（'held' 与 'draft' 绝不升格）
     for (const task of nextTasks) {
-      if (isContainerTask(task) || task.status !== 'queued') continue;
+      if (isContainerTask(task) || task.status !== 'queued' || (sharedResearch(task) && ctx.promotionTiming === 'after_integration')) continue;
       if (task.metadata?.hold === true) continue;
       if (isLaneLocked(task) || !canTransitionTaskStatus(task.status, 'active')) continue;
 
@@ -768,8 +774,58 @@ export function tickTaskOrchestration(
     const safeDelta = Number.isFinite(ctx.deltaMinutes) ? Math.max(0, ctx.deltaMinutes) : 0;
     const useTwoStageCompute = ctx.computeFor !== undefined || ctx.assemblyFor !== undefined;
 
+    if (ctx.researchCompute) {
+      const tasks = nextTasks.filter(task => sharedResearch(task) && task.status !== 'draft');
+      const byId = new Map(tasks.map(task => [task.id, task]));
+      // 仅在瞬态适配视图中用稳定任务id作句柄，同名研究不串项、不写回队列名称。
+      const view = tasks.map(task => ({ ...toTxnViewForTwoStage(task), type: '研究', item: task.id,
+        hold: task.status === 'held' || task.metadata?.hold === true }));
+      const specFor = (q: TransactionItem) => resolveTwoStageSpec(byId.get(q.item)!, ctx);
+      const result = advanceResearchBatch(view, safeDelta, {
+        compute: ctx.researchCompute,
+        now: ctx.now,
+        laneKeyFor: q => byId.get(q.item)!.laneKey,
+        parallelLimitFor: q => getEffectiveCapacity(byId.get(q.item)!),
+        globalLimitFor: () => Math.min(...tasks.map(getEffectiveGlobalLimit)),
+        specFor,
+        phaseEndFor: q => q.total_minutes * phaseSplit(specFor(q)).phase1,
+        rateFor: (q, budget) => {
+          const task = byId.get(q.item)!;
+          return makeTwoStageEffFor({
+            effFor: () => getAccelMultiplier(task) * evalPowerEfficiency(ctx, task) * evalComputeRatio(ctx, task),
+            assemblyFor: specFor,
+            computeFor: () => budget,
+          })(q);
+        },
+        promoteAfterIntegration: ctx.promotionTiming === 'after_integration',
+        onPromoted: (q, integrates) => {
+          if (!integrates) return;
+          const task = byId.get(q.item)!;
+          task.status = 'active';
+          task.workload.spentMinutes = q.spent_minutes;
+          runNaniteDeductionForTask(task, ctx, events, naniteCursor);
+          q.spent_minutes = task.workload.spentMinutes;
+        },
+      });
+      result.queues.forEach(q => {
+        const task = byId.get(q.item)!;
+        task.workload.spentMinutes = q.spent_minutes;
+        task.status = queueStatusToTaskStatus(q.status, task.status === 'held');
+        if (q.started_at) task.metadata = { ...task.metadata, startedAt: q.started_at };
+        if (task.batch) task.batch.completedQty = q.status === 'settling' ? task.batch.totalQty : q.qty_done;
+      });
+      for (const event of result.events) {
+        const task = byId.get(event.item)!;
+        if (event.type === 'promoted') { promotedTaskIds.push(task.id); sharedPromoted.add(task.id); }
+        if (event.type === 'enter_settling') settlingTaskIds.push(task.id);
+        if (event.type === 'demoted') preemptedTaskIds.push(task.id);
+        events.push({ item: task.name, base: event.base, detail: event.detail,
+          type: event.type === 'demoted' ? (ctx.evictEventType ?? 'preempted') : event.type });
+      }
+    }
+
     for (const task of nextTasks) {
-      if (isContainerTask(task) || task.status !== 'active') continue;
+      if (isContainerTask(task) || task.status !== 'active' || sharedResearch(task)) continue;
 
       if (task.workload.totalMinutes <= 0) {
         if (safeDelta > 0) {
@@ -868,7 +924,7 @@ export function tickTaskOrchestration(
     }
     const newlyPromoted = runStage1Bandwidth();
     for (const task of nextTasks) {
-      if (newlyPromoted.has(task.id)) {
+      if (newlyPromoted.has(task.id) || sharedPromoted.has(task.id)) {
         runNaniteDeductionForTask(task, ctx, events, naniteCursor);
       }
     }

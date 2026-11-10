@@ -97,7 +97,7 @@ function mkSnapshot(): Schema {
 describe('B1 接线回归 · ModalSchedule snapshot 直传（SSR 挂载）', () => {
   it('时钟行渲染且与 SCHEDULE_COPY.clockLine 逐字一致（B1 前 .stat_data 恒 undefined → 无时钟）', async () => {
     const html = await renderSchedule(mkSnapshot());
-    expect(html).toContain(SCHEDULE_COPY.clockLine(2, '23:00'));
+    expect(html).toContain(SCHEDULE_COPY.clockLine(2, '23:00', '2042-03-14'));
   });
 
   it('有在编事务时不出现全空态文案（B1 前面板恒显全空态）', async () => {

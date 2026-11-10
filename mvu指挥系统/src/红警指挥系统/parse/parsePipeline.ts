@@ -37,6 +37,7 @@ import {
   extractWarStatQueueItems,
 } from '../planning/planningParser';
 import { parseFactionUnlockPayload } from './factionUnlockParser';
+import { registerOrphanBuildingTransactions } from './baseBuildInvariant';
 import { stripThinking } from './floorSanitize';
 import {
   extractFloorSummaries,
@@ -310,7 +311,7 @@ export function parseMessageText(
       { rule: 'R18', target: 'schema_version', message: '旧变量树已迁移到 v2' },
     );
   }
-  const data: StatData = structuredClone(baseData);
+  let data: StatData = structuredClone(baseData);
   const preExistingWorldKeys = new Set<string>(
     (data.intel ?? [])
       .filter(it => it && (it as Record<string, unknown>).scope === 'world')
@@ -896,6 +897,31 @@ export function parseMessageText(
     data.pending_summaries = list;
   }
 
+  // FD-38 · D-BASE-LIFE-01 反向不变量（BASE-INV-01）：前向通道只做「建造事务入队 → 挂建造中占位」，
+  // 反向通道缺失会让 <态势> 直接申报的建造中建筑永远没有事务承接（日程面板空、永不转正）。
+  // 故在最终归一前，对「本楼新观察到的建造中」在其基地无非终态建造事务覆盖时补登 queued 建造事务；
+  // 工期统一留 0 交 settleFloor 步骤③ backfillDurations 回填，本楼 <排产计划> 已申报的同名项让位给 planningReceipt。
+  {
+    const plannedBuildNames = new Set<string>();
+    for (const intent of ctx.planningDecls) {
+      for (const action of intent.actions) {
+        if (action.op !== 'enqueue' || action.kind !== '建造') continue;
+        const name = String(action.catalog_ref ?? action.task_ref ?? '').trim();
+        if (name) plannedBuildNames.add(canon(name));
+      }
+    }
+    const inv = registerOrphanBuildingTransactions(data, {
+      prevData: isUsable(baseline) ? baseline : undefined,
+      isFirstFloor: opts.isFirstFloor,
+      skipNames: plannedBuildNames,
+    });
+    if (inv.registeredCount > 0) {
+      data = inv.data;
+      ctx.events.push(...inv.events);
+      ctx.appliedCount += inv.registeredCount;
+    }
+  }
+
   // 最终归一（保险网：若因意外毒化导致 parse 抛错，基线照落）
   let finalData: StatData;
   try {
@@ -910,6 +936,7 @@ export function parseMessageText(
     return {
       data: baseData,
       applied: false,
+      hasExplicitMoraleInput: false,
       events: ctx.events,
       issues: ctx.issues,
       quarantine: ctx.quarantine,
@@ -927,6 +954,7 @@ export function parseMessageText(
   return {
     data: finalData,
     applied: ctx.appliedCount > 0,
+    hasExplicitMoraleInput: ctx.hasExplicitMoraleInput === true,
     events: ctx.events,
     issues: ctx.issues,
     quarantine: ctx.quarantine,
@@ -1297,6 +1325,9 @@ function applyWarStat(
       if (hasAnyExpInput) ctx.appliedCount++;
     }
 
+    if (Number.isFinite(explicitMorale) || Number.isFinite(deltaMorale)) {
+      ctx.hasExplicitMoraleInput = true;
+    }
     if (hasAnyMoraleInput || data.morale) {
       data.morale = {
         value: settled.morale.value,

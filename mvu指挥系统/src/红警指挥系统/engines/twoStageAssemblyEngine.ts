@@ -30,11 +30,12 @@
  *   若套用阶段二地板会导致 86 块无算力也被强制减速、0 块能吃到加速（2026-10-09 全量盘点证据）。
  *
  * 🔴 红线：零 Pinia、零 Vue、零宿主 API；不原地修改入参；transactionEngine 的状态机
- * 白名单/结算四步/调度令四动词零改动——本模块仅经既有 options.effFor 接缝＋
- * 结算前后的纯函数处理接入（不新增引擎接缝）。
+ * 白名单/调度令四动词不改；非研究保留单项 effFor 接缝。
+ * 注入 researchCompute 时，研究经 advanceResearch 批次接缝裁决运行权并共享算力。
  *
  * 诚实边界（实现级离散化，测试与集成层须知）：
- * 1. 单楼 Δt 跨越阶段一/二边界时，整楼按「楼层起点所在阶段」的乘子积分（楼层粒度离散化）；
+ * 1. 单项效率按本次 Δt 跨阶段合成；注入 researchCompute 的研究按阶段/完成事件同步分段，
+ *    不将整楼 Δt 的平均效率套到接棒剩余墙钟；
  * 2. 升格判定＝「spent_minutes=0 且 progress=0 的 active 事务」——若升格楼库存为 0 且
  *    后续楼 Δt=0（进度仍为零），库存到货后仍会补做一次抵扣（窗口仅存在于零进度期间，
  *    一旦有任何进度即永久关闭，不会重复扣账）；
@@ -44,6 +45,7 @@
 
 import type { SettleEvent, SettleOptions, TransactionItem } from './transactionEngine';
 import { applyDispatchOrders, settleTransactions } from './transactionEngine';
+import { advanceResearchBatch, type ResearchComputeContext } from './researchSharedCompute';
 
 /* ═══════════════ 类型定义 ═══════════════ */
 
@@ -93,6 +95,8 @@ export interface TwoStageSettleOptions extends SettleOptions {
   nanitesFor?: (txn: TransactionItem) => number | null;
   /** 基地可用算力池查询（default 恒 {0,0}；集成层自 operationEngine effectiveVirtual 汇总） */
   computeFor?: (txn: TransactionItem) => ComputeBudget;
+  /** 真实基地供给唯一账本；提供时科研以共同批次策略动态共享，非研究仍用 computeFor。 */
+  researchCompute?: ResearchComputeContext;
   /**
    * 建筑加速倍率（研究槽科研建筑加速 / 产线加速模式，≥ 1；default 恒 1）。
    * 与 effFor（工况效率）分离注入：研究事务在阶段二与算力加速比合并后统一封顶 RESEARCH_TOTAL_ACCEL_CAP。
@@ -413,11 +417,32 @@ export function settleWithTwoStage<S extends { queues: TransactionItem[] }>(
       ? primedQueues.map((txn, idx) => (blockedFromPromotionIndices.has(idx) ? { ...txn, hold: true } : txn))
       : primedQueues;
 
-  // ② 主结算（组合 effFor 经既有接缝喂入，引擎语义零改动）
+  // ② 科研批次在事务引擎的调度后接缝运行；非研究仍组合原单项效率。
   const settled = settleTransactions({ ...state, queues: queuesForSettle }, deltaMinutes, {
     ...options,
     orders: [], // 已在预扣前执行，不重放调度令。
     effFor: makeTwoStageEffFor(options, deltaMinutes),
+    advanceResearch: options.researchCompute
+      ? (queues, wallDelta) => advanceResearchBatch(queues, wallDelta, {
+          ...options,
+          compute: options.researchCompute!,
+          specFor: assemblyFor,
+          phaseEndFor: txn => txn.total_minutes * phaseSplit(assemblyFor(txn)).phase1,
+          rateFor: (txn, budget) => makeTwoStageEffFor({ ...options, computeFor: () => budget })(txn),
+          onPromoted: (txn, integrates) => {
+            if (!integrates) return; // 尾部零时升格仍由原后处理抵扣，保持跨类型扣账顺序。
+            const raw = nanitesFor(txn);
+            observeInitialNanites(raw);
+            const available = typeof raw === 'number' && Number.isFinite(raw) ? Math.max(0, raw - deductedSoFar) : raw;
+            const deduction = applyNaniteDeduction(txn, assemblyFor(txn), available);
+            Object.assign(txn, deduction.txn);
+            if (deduction.event) {
+              events.push(deduction.event);
+              deductedSoFar += deduction.event.amount;
+            }
+          },
+        })
+      : options.advanceResearch,
   });
 
   // 还原因纳米不足临时阻断升格的 hold 标记（保持原始 hold: false 与 status: 'queued'）
@@ -431,8 +456,13 @@ export function settleWithTwoStage<S extends { queues: TransactionItem[] }>(
   // 修正两阶段带纳米配料批次（qty > 1 且声明 req_nanites > 0）的已完成台数 qty_done：
   // 阶段一备料期（spent_minutes <= phase1End）仅缩短备料工时，不产出已完成实车（qty_done = 0）；
   // 阶段二组装期按阶段二已推进工时占阶段二总工时比例折算下线台数（FIX-P1-01）。
-  // 同时按结算扫描顺序记录每个产生裸 qty_progress 的任务在修正后的真实下线变化（G01-04：绝不用 base+item.find 串读同名其他批次）。
+  // 研究批处理改变事件顺序；瞬态实例索引用于回填，同名批次不取首项。
   const correctedQtyProgressDetails: Array<string | null> = [];
+  const correctedQtyByIndex = new Map<number, string | null>();
+  const recordQty = (index: number, detail: string | null) => {
+    correctedQtyProgressDetails.push(detail);
+    correctedQtyByIndex.set(index, detail);
+  };
   const correctedQueues = unblockedQueues.map((txn, idx) => {
     const prevTxn = queuesForSettle[idx];
     const bareEmitted =
@@ -442,12 +472,12 @@ export function settleWithTwoStage<S extends { queues: TransactionItem[] }>(
       txn.qty > 1 &&
       txn.qty_done !== prevTxn.qty_done;
     if (txn.qty <= 1 || txn.total_minutes <= 0) {
-      if (bareEmitted) correctedQtyProgressDetails.push(`批次流水 ${txn.qty_done}/${txn.qty}`);
+      if (bareEmitted) recordQty(idx, `批次流水 ${txn.qty_done}/${txn.qty}`);
       return txn;
     }
     const spec = assemblyFor(txn);
     if (!spec || typeof spec.req_nanites !== 'number' || spec.req_nanites <= 0) {
-      if (bareEmitted) correctedQtyProgressDetails.push(`批次流水 ${txn.qty_done}/${txn.qty}`);
+      if (bareEmitted) recordQty(idx, `批次流水 ${txn.qty_done}/${txn.qty}`);
       return txn;
     }
     const { phase1, phase2 } = phaseSplit(spec);
@@ -460,7 +490,7 @@ export function settleWithTwoStage<S extends { queues: TransactionItem[] }>(
         : txn.qty;
     const finalDone = Math.max(prevTxn.qty_done, doneNow);
     if (bareEmitted) {
-      correctedQtyProgressDetails.push(finalDone !== prevTxn.qty_done ? `批次流水 ${finalDone}/${txn.qty}` : null);
+      recordQty(idx, finalDone !== prevTxn.qty_done ? `批次流水 ${finalDone}/${txn.qty}` : null);
     }
     if (finalDone === txn.qty_done) return txn;
     return { ...txn, qty_done: finalDone };
@@ -469,9 +499,11 @@ export function settleWithTwoStage<S extends { queues: TransactionItem[] }>(
   let qtyProgressCursor = 0;
   for (const ev of settled.events) {
     if (ev.type === 'qty_progress') {
-      const detail = correctedQtyProgressDetails[qtyProgressCursor++];
+      const detail = ev.queueIndex === undefined
+        ? correctedQtyProgressDetails[qtyProgressCursor++]
+        : correctedQtyByIndex.get(ev.queueIndex);
       if (detail !== null) {
-        events.push({ ...ev, detail });
+        events.push({ type: ev.type, item: ev.item, base: ev.base, detail });
       }
       continue;
     }
